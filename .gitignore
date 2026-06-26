@@ -17,6 +17,9 @@
 # VSCode
 .vscode
 
+# Metals
+.metals/
+
 # Maven
 log/
 target/
