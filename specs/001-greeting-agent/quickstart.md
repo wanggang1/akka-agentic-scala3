@@ -6,8 +6,21 @@ How to build, test, and run the Scala 3 greeting service.
 
 - JDK 21
 - Maven 3.9+
-- A model provider API key for running against a live model (e.g. `ANTHROPIC_API_KEY` or
-  `OPENAI_API_KEY`). **Not required for tests** — tests use `TestModelProvider`.
+- A Google AI Gemini API key for running against a live model. The service reads it from the
+  `GOOGLE_AI_GEMINI_API_KEY` environment variable (configured in `application.conf`).
+  **Not required for tests** — tests use `TestModelProvider`.
+
+### Configure the API key (`.env`)
+
+Copy the template and add your key:
+
+```bash
+cp .env.example .env
+# edit .env and set GOOGLE_AI_GEMINI_API_KEY=...
+```
+
+`.env` is git-ignored. The JVM does **not** read `.env` automatically — load it into the
+environment before running (see [Run locally](#run-locally)).
 
 ## Project layout (after implementation)
 
@@ -40,12 +53,15 @@ needed and results are deterministic (SC-004).
 
 ## Run locally
 
+Load the `.env` into the environment, then start the service:
+
 ```bash
-export ANTHROPIC_API_KEY=sk-...        # or OPENAI_API_KEY, matching application.conf
-mvn compile exec:java
+set -a && source .env && set +a && mvn compile exec:java
 ```
 
-Service listens on `http://localhost:9000`.
+`set -a` exports everything `source .env` assigns so the child JVM inherits
+`GOOGLE_AI_GEMINI_API_KEY`; `set +a` turns that off again. Service listens on
+`http://localhost:9000`.
 
 ## Try it
 

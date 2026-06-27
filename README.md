@@ -18,6 +18,17 @@ To start your service locally, run:
 mvn compile exec:java
 ```
 
+This service uses a Google AI Gemini model, which needs an API key at runtime. The key is read
+from the `GOOGLE_AI_GEMINI_API_KEY` environment variable (see `application.conf`). Copy
+`.env.example` to `.env` (git-ignored), set your key there, then load it into the environment
+before running — the JVM does not read `.env` automatically:
+
+```shell
+set -a && source .env && set +a && mvn compile exec:java
+```
+
+Tests do not need a key; they use `TestModelProvider`.
+
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of your service.
 
 Build container image:

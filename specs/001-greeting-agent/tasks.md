@@ -23,9 +23,9 @@ Single Akka service (Scala 3 on the Akka Java SDK). Sources under `src/main/scal
 
 **Purpose**: Make the project compile and run Scala 3 on the Akka Java SDK.
 
-- [ ] T001 Add `scala-maven-plugin` (bound to `compile`/`test-compile`) and a `scala3-library_3` dependency to `pom.xml`, and register `src/main/scala` + `src/test/scala` as source roots (keep `akka-javasdk-parent` 3.6.0 as parent) — per research.md R2
-- [ ] T002 [P] Configure the default model provider under `akka.javasdk.agent` with an env-driven API key in `src/main/resources/application.conf` — per research.md R5
-- [ ] T003 [P] Create Scala package directories `src/main/scala/com/example/{domain,application,api}` and `src/test/scala/com/example/{domain,application,api}`; remove the placeholder Java `package-info.java` files under `src/main/java/com/example` that are being replaced by Scala sources
+- [X] T001 Add `scala-maven-plugin` (bound to `compile`/`test-compile`) and a `scala3-library_3` dependency to `pom.xml`, and register `src/main/scala` + `src/test/scala` as source roots (keep `akka-javasdk-parent` 3.6.0 as parent) — per research.md R2
+- [X] T002 [P] Configure the default model provider under `akka.javasdk.agent` with an env-driven API key in `src/main/resources/application.conf` — per research.md R5
+- [X] T003 [P] Create Scala package directories `src/main/scala/com/example/{domain,application,api}` and `src/test/scala/com/example/{domain,application,api}`; remove the placeholder Java `package-info.java` files under `src/main/java/com/example` that are being replaced by Scala sources
 
 **Checkpoint**: `mvn compile` succeeds on an empty Scala source tree.
 

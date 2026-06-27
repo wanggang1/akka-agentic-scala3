@@ -11,6 +11,9 @@
 *.iml
 *.iws
 
+# Local secrets / environment
+.env
+
 # Mac
 .DS_Store
 
