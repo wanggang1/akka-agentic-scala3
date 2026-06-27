@@ -11,11 +11,17 @@
 *.iml
 *.iws
 
+# Local secrets / environment
+.env
+
 # Mac
 .DS_Store
 
 # VSCode
 .vscode
+
+# Metals
+.metals/
 
 # Maven
 log/
