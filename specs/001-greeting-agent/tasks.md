@@ -15,7 +15,7 @@
 
 ## Path Conventions
 
-Single Akka service (Scala 3 on the Akka Java SDK). Sources under `src/main/scala/com/example/{domain,application,api}`, tests under `src/test/scala/com/example/{domain,application,api}`, per plan.md.
+Single Akka service (Scala 3 on the Akka Java SDK). Sources under `src/main/scala/com/gwgs/akkaagentic/{domain,application,api}`, tests under `src/test/scala/com/gwgs/akkaagentic/{domain,application,api}`, per plan.md.
 
 ---
 
@@ -25,7 +25,7 @@ Single Akka service (Scala 3 on the Akka Java SDK). Sources under `src/main/scal
 
 - [X] T001 Add `scala-maven-plugin` (bound to `compile`/`test-compile`) and a `scala3-library_3` dependency to `pom.xml`, and register `src/main/scala` + `src/test/scala` as source roots (keep `akka-javasdk-parent` 3.6.0 as parent) — per research.md R2
 - [X] T002 [P] Configure the default model provider under `akka.javasdk.agent` with an env-driven API key in `src/main/resources/application.conf` — per research.md R5
-- [X] T003 [P] Create Scala package directories `src/main/scala/com/example/{domain,application,api}` and `src/test/scala/com/example/{domain,application,api}`; remove the placeholder Java `package-info.java` files under `src/main/java/com/example` that are being replaced by Scala sources
+- [X] T003 [P] Create Scala package directories `src/main/scala/com/gwgs/akkaagentic/{domain,application,api}` and `src/test/scala/com/gwgs/akkaagentic/{domain,application,api}`; remove the placeholder Java `package-info.java` files under `src/main/java/com/gwgs/akkaagentic` that are being replaced by Scala sources
 
 **Checkpoint**: `mvn compile` succeeds on an empty Scala source tree.
 
@@ -37,7 +37,7 @@ Single Akka service (Scala 3 on the Akka Java SDK). Sources under `src/main/scal
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T004 Create `GreetingRequest` and `GreetingResponse` case classes with an immutable `validate(): Either[String, GreetingRequest]` (rejects blank `user`/`text`) and no Akka imports in `src/main/scala/com/example/domain/Greeting.scala` — per data-model.md
+- [ ] T004 Create `GreetingRequest` and `GreetingResponse` case classes with an immutable `validate(): Either[String, GreetingRequest]` (rejects blank `user`/`text`) and no Akka imports in `src/main/scala/com/gwgs/akkaagentic/domain/Greeting.scala` — per data-model.md
 
 **Checkpoint**: Domain compiles and is unit-testable in isolation; user stories can now begin.
 
@@ -53,13 +53,13 @@ Single Akka service (Scala 3 on the Akka Java SDK). Sources under `src/main/scal
 
 > Write these first; ensure they FAIL before implementation.
 
-- [ ] T005 [P] [US1] Agent unit test in `src/test/scala/com/example/application/GreetingAgentTest.scala`: extend `TestKitSupport`, register `TestModelProvider` for `GreetingAgent`, set a `fixedResponse` greeting, invoke `componentClient.forAgent().inSession(<uuid>).method(GreetingAgent::greet).invoke(request)`, assert the mocked greeting is returned — per research.md R6
-- [ ] T006 [P] [US1] Endpoint success integration test in `src/test/scala/com/example/api/GreetingEndpointIntegrationTest.scala`: extend `TestKitSupport`, register `TestModelProvider` for `GreetingAgent`, `httpClient.POST("/greet")` with a valid body asserts `200` and a non-empty `greeting` — per contracts/greeting-api.md
+- [ ] T005 [P] [US1] Agent unit test in `src/test/scala/com/gwgs/akkaagentic/application/GreetingAgentTest.scala`: extend `TestKitSupport`, register `TestModelProvider` for `GreetingAgent`, set a `fixedResponse` greeting, invoke `componentClient.forAgent().inSession(<uuid>).method(GreetingAgent::greet).invoke(request)`, assert the mocked greeting is returned — per research.md R6
+- [ ] T006 [P] [US1] Endpoint success integration test in `src/test/scala/com/gwgs/akkaagentic/api/GreetingEndpointIntegrationTest.scala`: extend `TestKitSupport`, register `TestModelProvider` for `GreetingAgent`, `httpClient.POST("/greet")` with a valid body asserts `200` and a non-empty `greeting` — per contracts/greeting-api.md
 
 ### Implementation for User Story 1
 
-- [ ] T007 [US1] Implement `GreetingAgent` in `src/main/scala/com/example/application/GreetingAgent.scala`: `extends akka.javasdk.agent.Agent`, `@Component(id = "greeting-agent")`, inner `Request(user, text)` (Jackson-annotated), single `greet` handler returning `Effect[String]` via `effects().systemMessage(SYSTEM_MESSAGE).userMessage(...).thenReply()` — per research.md R4
-- [ ] T008 [US1] Implement `GreetingEndpoint` in `src/main/scala/com/example/api/GreetingEndpoint.scala` (depends on T007 — references `GreetingAgent::greet`): `@HttpEndpoint`, `@Acl(allow = Internet)`, inner `GreetRequest`/`GreetReply` (Jackson-annotated, `GreetRequest` set to ignore unknown properties for the in-scope edge case in spec.md → Edge Case Handling), `@Post("/greet")` that validates via domain `GreetingRequest.validate`, on success calls `GreetingAgent` through injected `ComponentClient` with a fresh session id, and wraps the reply in `GreetReply` — per contracts/greeting-api.md
+- [ ] T007 [US1] Implement `GreetingAgent` in `src/main/scala/com/gwgs/akkaagentic/application/GreetingAgent.scala`: `extends akka.javasdk.agent.Agent`, `@Component(id = "greeting-agent")`, inner `Request(user, text)` (Jackson-annotated), single `greet` handler returning `Effect[String]` via `effects().systemMessage(SYSTEM_MESSAGE).userMessage(...).thenReply()` — per research.md R4
+- [ ] T008 [US1] Implement `GreetingEndpoint` in `src/main/scala/com/gwgs/akkaagentic/api/GreetingEndpoint.scala` (depends on T007 — references `GreetingAgent::greet`): `@HttpEndpoint`, `@Acl(allow = Internet)`, inner `GreetRequest`/`GreetReply` (Jackson-annotated, `GreetRequest` set to ignore unknown properties for the in-scope edge case in spec.md → Edge Case Handling), `@Post("/greet")` that validates via domain `GreetingRequest.validate`, on success calls `GreetingAgent` through injected `ComponentClient` with a fresh session id, and wraps the reply in `GreetReply` — per contracts/greeting-api.md
 
 **Checkpoint**: MVP — a valid request returns a personalized greeting end to end. T005/T006 pass.
 
@@ -73,12 +73,12 @@ Single Akka service (Scala 3 on the Akka Java SDK). Sources under `src/main/scal
 
 ### Tests for User Story 2
 
-- [ ] T009 [P] [US2] Domain validation unit test in `src/test/scala/com/example/domain/GreetingTest.scala`: assert `GreetingRequest.validate` returns `Left` with a message for blank `user` and for blank `text`, and `Right` for valid input
-- [ ] T010 [P] [US2] Endpoint failure cases in `src/test/scala/com/example/api/GreetingEndpointIntegrationTest.scala`: empty `user` → `400`, missing/blank `text` → `400`, and a malformed-JSON body → `400` (FR-006)
+- [ ] T009 [P] [US2] Domain validation unit test in `src/test/scala/com/gwgs/akkaagentic/domain/GreetingTest.scala`: assert `GreetingRequest.validate` returns `Left` with a message for blank `user` and for blank `text`, and `Right` for valid input
+- [ ] T010 [P] [US2] Endpoint failure cases in `src/test/scala/com/gwgs/akkaagentic/api/GreetingEndpointIntegrationTest.scala`: empty `user` → `400`, missing/blank `text` → `400`, and a malformed-JSON body → `400` (FR-006)
 
 ### Implementation for User Story 2
 
-- [ ] T011 [US2] Harden `src/main/scala/com/example/api/GreetingEndpoint.scala` so validation failures return `HttpResponses.badRequest(<message>)` without calling the agent. Verify the status the SDK returns for a body that fails `GreetRequest` deserialization; if it is not 4xx, add explicit handling so malformed payloads yield `400` (FR-006). Record the observed default in contracts/greeting-api.md — per contracts/greeting-api.md
+- [ ] T011 [US2] Harden `src/main/scala/com/gwgs/akkaagentic/api/GreetingEndpoint.scala` so validation failures return `HttpResponses.badRequest(<message>)` without calling the agent. Verify the status the SDK returns for a body that fails `GreetRequest` deserialization; if it is not 4xx, add explicit handling so malformed payloads yield `400` (FR-006). Record the observed default in contracts/greeting-api.md — per contracts/greeting-api.md
 
 **Checkpoint**: US1 and US2 both pass independently; no model call on invalid input.
 
@@ -92,11 +92,11 @@ Single Akka service (Scala 3 on the Akka Java SDK). Sources under `src/main/scal
 
 ### Tests for User Story 3
 
-- [ ] T012 [P] [US3] Intent-adaptation test in `src/test/scala/com/example/application/GreetingAgentTest.scala`: use `TestModelProvider` `.whenMessage(predicate).reply(...)` to return distinct greetings for a question-style vs. casual message and assert they differ (SC-005, US3)
+- [ ] T012 [P] [US3] Intent-adaptation test in `src/test/scala/com/gwgs/akkaagentic/application/GreetingAgentTest.scala`: use `TestModelProvider` `.whenMessage(predicate).reply(...)` to return distinct greetings for a question-style vs. casual message and assert they differ (SC-005, US3)
 
 ### Implementation for User Story 3
 
-- [ ] T013 [US3] Refine `SYSTEM_MESSAGE` in `src/main/scala/com/example/application/GreetingAgent.scala` to instruct the model to detect the message's intent/tone and match it in the greeting
+- [ ] T013 [US3] Refine `SYSTEM_MESSAGE` in `src/main/scala/com/gwgs/akkaagentic/application/GreetingAgent.scala` to instruct the model to detect the message's intent/tone and match it in the greeting
 
 **Checkpoint**: All three user stories pass independently.
 
@@ -144,12 +144,12 @@ Single Akka service (Scala 3 on the Akka Java SDK). Sources under `src/main/scal
 
 ```bash
 # Tests first (different files):
-Task: "Agent unit test in src/test/scala/com/example/application/GreetingAgentTest.scala"
-Task: "Endpoint success integration test in src/test/scala/com/example/api/GreetingEndpointIntegrationTest.scala"
+Task: "Agent unit test in src/test/scala/com/gwgs/akkaagentic/application/GreetingAgentTest.scala"
+Task: "Endpoint success integration test in src/test/scala/com/gwgs/akkaagentic/api/GreetingEndpointIntegrationTest.scala"
 
 # Then implementation (sequential — endpoint depends on the agent type):
-# 1) Implement GreetingAgent in src/main/scala/com/example/application/GreetingAgent.scala
-# 2) Implement GreetingEndpoint in src/main/scala/com/example/api/GreetingEndpoint.scala
+# 1) Implement GreetingAgent in src/main/scala/com/gwgs/akkaagentic/application/GreetingAgent.scala
+# 2) Implement GreetingEndpoint in src/main/scala/com/gwgs/akkaagentic/api/GreetingEndpoint.scala
 ```
 
 ---

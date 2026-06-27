@@ -1,6 +1,6 @@
 # HTTP Contract: Greeting API
 
-Single endpoint exposed by `GreetingEndpoint` (`com.example.api`). Transport: HTTP/JSON
+Single endpoint exposed by `GreetingEndpoint` (`com.gwgs.akkaagentic.api`). Transport: HTTP/JSON
 (clarified). Access: annotated with `@Acl` allowing the Internet principal for the baseline.
 
 ## POST /greet

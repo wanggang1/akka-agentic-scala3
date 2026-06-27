@@ -16,7 +16,7 @@ case classes across the three layers.
 > endpoint converts `GreetRequest` → domain `GreetingRequest` (validating) → `GreetingAgent.Request`,
 > and converts the agent's `String` reply → `GreetReply`.
 
-## Domain types (`com.example.domain`)
+## Domain types (`com.gwgs.akkaagentic.domain`)
 
 ### `GreetingRequest`
 
@@ -41,7 +41,7 @@ case classes across the three layers.
   plain `String`), but defined so the domain has an explicit result type the endpoint can map
   from.
 
-## API wire types (`com.example.api`, inner to `GreetingEndpoint`)
+## API wire types (`com.gwgs.akkaagentic.api`, inner to `GreetingEndpoint`)
 
 ### `GreetRequest` (HTTP request body)
 
@@ -68,7 +68,7 @@ case classes across the three layers.
 
 - Scala 3 `case class GreetReply(@JsonProperty("greeting") greeting: String)` with `@JsonCreator`.
 
-## Agent parameter (`com.example.application`, inner to `GreetingAgent`)
+## Agent parameter (`com.gwgs.akkaagentic.application`, inner to `GreetingAgent`)
 
 ### `GreetingAgent.Request`
 

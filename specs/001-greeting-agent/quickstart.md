@@ -25,12 +25,12 @@ environment before running (see [Run locally](#run-locally)).
 ## Project layout (after implementation)
 
 ```text
-src/main/scala/com/example/domain/Greeting.scala        # GreetingRequest / GreetingResponse (+ validation)
-src/main/scala/com/example/application/GreetingAgent.scala
-src/main/scala/com/example/api/GreetingEndpoint.scala
+src/main/scala/com/gwgs/akkaagentic/domain/Greeting.scala        # GreetingRequest / GreetingResponse (+ validation)
+src/main/scala/com/gwgs/akkaagentic/application/GreetingAgent.scala
+src/main/scala/com/gwgs/akkaagentic/api/GreetingEndpoint.scala
 src/main/resources/application.conf                      # default model-provider config
-src/test/scala/com/example/application/GreetingAgentTest.scala
-src/test/scala/com/example/api/GreetingEndpointIntegrationTest.scala
+src/test/scala/com/gwgs/akkaagentic/application/GreetingAgentTest.scala
+src/test/scala/com/gwgs/akkaagentic/api/GreetingEndpointIntegrationTest.scala
 ```
 
 ## Build

@@ -66,7 +66,7 @@ specs/001-greeting-agent/
 pom.xml                         # Add scala-maven-plugin + scala3-library; src/main/scala source root
 src/
 ├── main/
-│   ├── scala/com/example/
+│   ├── scala/com/gwgs/akkaagentic/
 │   │   ├── domain/
 │   │   │   └── Greeting.scala          # GreetingRequest, GreetingResponse case classes (+ validation), no Akka deps
 │   │   ├── application/
@@ -76,7 +76,7 @@ src/
 │   └── resources/
 │       └── application.conf            # akka.javasdk.agent.model-provider config (env-driven API key)
 └── test/
-    └── scala/com/example/
+    └── scala/com/gwgs/akkaagentic/
         ├── application/
         │   └── GreetingAgentTest.scala         # TestKitSupport + TestModelProvider
         └── api/
@@ -84,7 +84,7 @@ src/
 ```
 
 **Structure Decision**: Single Akka service using the mandated three-layer package structure
-(`com.example.domain`, `com.example.application`, `com.example.api`) with **no dependency from
+(`com.gwgs.akkaagentic.domain`, `com.gwgs.akkaagentic.application`, `com.gwgs.akkaagentic.api`) with **no dependency from
 `domain` → `application` and none from `application` → `api`**. Scala sources live under
 `src/main/scala` / `src/test/scala` (added as Maven source roots by `scala-maven-plugin`). The
 existing Java `package-info.java` scaffolding under `src/main/java` is retained or removed during
