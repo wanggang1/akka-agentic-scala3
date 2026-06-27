@@ -37,7 +37,7 @@ Single Akka service (Scala 3 on the Akka Java SDK). Sources under `src/main/scal
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T004 Create `GreetingRequest` and `GreetingResponse` case classes with an immutable `validate(): Either[String, GreetingRequest]` (rejects blank `user`/`text`) and no Akka imports in `src/main/scala/com/gwgs/akkaagentic/domain/Greeting.scala` — per data-model.md
+- [X] T004 Create `GreetingRequest` and `GreetingResponse` case classes with an immutable `validate(): Either[String, GreetingRequest]` (rejects blank `user`/`text`) and no Akka imports in `src/main/scala/com/gwgs/akkaagentic/domain/Greeting.scala` — per data-model.md
 
 **Checkpoint**: Domain compiles and is unit-testable in isolation; user stories can now begin.
 
@@ -73,7 +73,7 @@ Single Akka service (Scala 3 on the Akka Java SDK). Sources under `src/main/scal
 
 ### Tests for User Story 2
 
-- [ ] T009 [P] [US2] Domain validation unit test in `src/test/scala/com/gwgs/akkaagentic/domain/GreetingTest.scala`: assert `GreetingRequest.validate` returns `Left` with a message for blank `user` and for blank `text`, and `Right` for valid input
+- [X] T009 [P] [US2] Domain validation unit test in `src/test/scala/com/gwgs/akkaagentic/domain/GreetingTest.scala`: assert `GreetingRequest.validate` returns `Left` with a message for blank `user` and for blank `text`, and `Right` for valid input
 - [ ] T010 [P] [US2] Endpoint failure cases in `src/test/scala/com/gwgs/akkaagentic/api/GreetingEndpointIntegrationTest.scala`: empty `user` → `400`, missing/blank `text` → `400`, and a malformed-JSON body → `400` (FR-006)
 
 ### Implementation for User Story 2
