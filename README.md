@@ -86,6 +86,10 @@ cp .env.example .env          # then edit .env and set your key
 set -a && source .env && set +a && mvn compile exec:java
 ```
 
+This repo has no `main` of its own: `exec:java` launches the Akka runtime entry point
+(`kalix.runtime.AkkaRuntimeMain`, configured by the `akka-javasdk-parent` POM), which loads the
+component descriptor and serves every component listed in it.
+
 The service listens on `http://localhost:9000`.
 
 **Valid request** — returns a personalized greeting that names the user and adapts to the
