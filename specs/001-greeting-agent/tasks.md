@@ -74,11 +74,11 @@ Single Akka service (Scala 3 on the Akka Java SDK). Sources under `src/main/scal
 ### Tests for User Story 2
 
 - [X] T009 [P] [US2] Domain validation unit test in `src/test/scala/com/gwgs/akkaagentic/domain/GreetingTest.scala`: assert `GreetingRequest.validate` returns `Left` with a message for blank `user` and for blank `text`, and `Right` for valid input
-- [ ] T010 [P] [US2] Endpoint failure cases in `src/test/scala/com/gwgs/akkaagentic/api/GreetingEndpointIntegrationTest.scala`: empty `user` → `400`, missing/blank `text` → `400`, and a malformed-JSON body → `400` (FR-006)
+- [X] T010 [P] [US2] Endpoint failure cases in `src/test/scala/com/gwgs/akkaagentic/api/GreetingEndpointIntegrationTest.scala`: empty `user` → `400`, missing/blank `text` → `400`, and a malformed-JSON body → `400` (FR-006)
 
 ### Implementation for User Story 2
 
-- [ ] T011 [US2] Harden `src/main/scala/com/gwgs/akkaagentic/api/GreetingEndpoint.scala` so validation failures return `HttpResponses.badRequest(<message>)` without calling the agent. Verify the status the SDK returns for a body that fails `GreetRequest` deserialization; if it is not 4xx, add explicit handling so malformed payloads yield `400` (FR-006). Record the observed default in contracts/greeting-api.md — per contracts/greeting-api.md
+- [X] T011 [US2] Harden `src/main/scala/com/gwgs/akkaagentic/api/GreetingEndpoint.scala` so validation failures return `HttpResponses.badRequest(<message>)` without calling the agent. Verify the status the SDK returns for a body that fails `GreetRequest` deserialization; if it is not 4xx, add explicit handling so malformed payloads yield `400` (FR-006). Record the observed default in contracts/greeting-api.md — per contracts/greeting-api.md
 
 **Checkpoint**: US1 and US2 both pass independently; no model call on invalid input.
 

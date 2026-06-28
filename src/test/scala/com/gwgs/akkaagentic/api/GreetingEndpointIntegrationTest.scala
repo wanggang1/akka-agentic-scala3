@@ -1,6 +1,6 @@
 package com.gwgs.akkaagentic.api
 
-import akka.http.javadsl.model.StatusCodes
+import akka.http.javadsl.model.{ContentTypes, StatusCodes}
 import akka.javasdk.testkit.{TestKit, TestKitSupport, TestModelProvider}
 import com.gwgs.akkaagentic.application.GreetingAgent
 import org.assertj.core.api.Assertions.assertThat
@@ -29,3 +29,31 @@ class GreetingEndpointIntegrationTest extends TestKitSupport:
 
     assertThat(response.status()).isEqualTo(StatusCodes.OK)
     assertThat(response.body().greeting).isEqualTo(mocked)
+
+  @Test
+  def emptyUserIsRejected(): Unit =
+    // No fixedResponse: the model must never be called for invalid input.
+    val response = httpClient
+      .POST("/greet")
+      .withRequestBody(GreetingEndpoint.GreetRequest("", "hello there"))
+      .invoke()
+
+    assertThat(response.status()).isEqualTo(StatusCodes.BAD_REQUEST)
+
+  @Test
+  def blankTextIsRejected(): Unit =
+    val response = httpClient
+      .POST("/greet")
+      .withRequestBody(GreetingEndpoint.GreetRequest("Ada", "   "))
+      .invoke()
+
+    assertThat(response.status()).isEqualTo(StatusCodes.BAD_REQUEST)
+
+  @Test
+  def malformedJsonIsRejected(): Unit =
+    val response = httpClient
+      .POST("/greet")
+      .withRequestBody(ContentTypes.APPLICATION_JSON, "{ \"user\": ".getBytes)
+      .invoke()
+
+    assertThat(response.status()).isEqualTo(StatusCodes.BAD_REQUEST)
