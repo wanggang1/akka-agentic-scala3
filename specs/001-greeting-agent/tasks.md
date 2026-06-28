@@ -104,9 +104,9 @@ Single Akka service (Scala 3 on the Akka Java SDK). Sources under `src/main/scal
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T014 [P] Update `README.md` with Scala 3 build/run notes and the `POST /greet` curl examples from quickstart.md
-- [ ] T015 [P] Verify `application.conf` ACL/model config and that no secrets are committed (env-driven key only)
-- [ ] T016 Run `mvn verify` from a clean checkout and confirm the full suite passes (SC-003, SC-004); validate quickstart.md steps
+- [X] T014 [P] Update `README.md` with Scala 3 build/run notes and the `POST /greet` curl examples from quickstart.md
+- [X] T015 [P] Verify `application.conf` ACL/model config and that no secrets are committed (env-driven key only)
+- [X] T016 Run `mvn verify` from a clean checkout and confirm the full suite passes (SC-003, SC-004); validate quickstart.md steps
 
 ---
 

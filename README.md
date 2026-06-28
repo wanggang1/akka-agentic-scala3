@@ -86,12 +86,38 @@ cp .env.example .env          # then edit .env and set your key
 set -a && source .env && set +a && mvn compile exec:java
 ```
 
-The service listens on `http://localhost:9000`. Example request:
+The service listens on `http://localhost:9000`.
+
+**Valid request** — returns a personalized greeting that names the user and adapts to the
+message's intent:
 
 ```shell
 curl -i -X POST http://localhost:9000/greet \
   -H "Content-Type: application/json" \
   -d '{"user":"Ada","text":"hello there"}'
+# 200 OK
+# {"greeting":"Hello Ada! Lovely to hear from you."}
+```
+
+The greeting reflects the message's intent rather than a fixed template — a question or
+help request is acknowledged warmly, a casual hello gets a casual reply:
+
+```shell
+curl -i -X POST http://localhost:9000/greet \
+  -H "Content-Type: application/json" \
+  -d '{"user":"Ada","text":"How do I reset my password?"}'
+# 200 OK — greeting signals readiness to help
+```
+
+**Invalid request** — blank `user`/`text` or a malformed JSON body is rejected with `400`
+and the model is never called:
+
+```shell
+curl -i -X POST http://localhost:9000/greet \
+  -H "Content-Type: application/json" \
+  -d '{"user":"","text":"hi"}'
+# 400 Bad Request
+# user must not be blank
 ```
 
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
