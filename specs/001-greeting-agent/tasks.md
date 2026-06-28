@@ -92,11 +92,11 @@ Single Akka service (Scala 3 on the Akka Java SDK). Sources under `src/main/scal
 
 ### Tests for User Story 3
 
-- [ ] T012 [P] [US3] Intent-adaptation test in `src/test/scala/com/gwgs/akkaagentic/application/GreetingAgentTest.scala`: use `TestModelProvider` `.whenMessage(predicate).reply(...)` to return distinct greetings for a question-style vs. casual message and assert they differ (SC-005, US3)
+- [X] T012 [P] [US3] Intent-adaptation test in `src/test/scala/com/gwgs/akkaagentic/application/GreetingAgentTest.scala`: use `TestModelProvider` `.whenMessage(predicate).reply(...)` to return distinct greetings for a question-style vs. casual message and assert they differ (SC-005, US3)
 
 ### Implementation for User Story 3
 
-- [ ] T013 [US3] Refine `SYSTEM_MESSAGE` in `src/main/scala/com/gwgs/akkaagentic/application/GreetingAgent.scala` to instruct the model to detect the message's intent/tone and match it in the greeting
+- [X] T013 [US3] Refine `SYSTEM_MESSAGE` in `src/main/scala/com/gwgs/akkaagentic/application/GreetingAgent.scala` to instruct the model to detect the message's intent/tone and match it in the greeting
 
 **Checkpoint**: All three user stories pass independently.
 
