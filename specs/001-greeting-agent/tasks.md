@@ -37,7 +37,7 @@ Single Akka service (Scala 3 on the Akka Java SDK). Sources under `src/main/scal
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T004 Create `GreetingRequest` and `GreetingResponse` case classes with an immutable `validate(): Either[String, GreetingRequest]` (rejects blank `user`/`text`) and no Akka imports in `src/main/scala/com/gwgs/akkaagentic/domain/Greeting.scala` — per data-model.md
+- [X] T004 Create `GreetingRequest` and `GreetingResponse` case classes with an immutable `validate(): Either[String, GreetingRequest]` (rejects blank `user`/`text`) and no Akka imports in `src/main/scala/com/gwgs/akkaagentic/domain/Greeting.scala` — per data-model.md
 
 **Checkpoint**: Domain compiles and is unit-testable in isolation; user stories can now begin.
 
@@ -53,13 +53,13 @@ Single Akka service (Scala 3 on the Akka Java SDK). Sources under `src/main/scal
 
 > Write these first; ensure they FAIL before implementation.
 
-- [ ] T005 [P] [US1] Agent unit test in `src/test/scala/com/gwgs/akkaagentic/application/GreetingAgentTest.scala`: extend `TestKitSupport`, register `TestModelProvider` for `GreetingAgent`, set a `fixedResponse` greeting, invoke `componentClient.forAgent().inSession(<uuid>).method(GreetingAgent::greet).invoke(request)`, assert the mocked greeting is returned — per research.md R6
-- [ ] T006 [P] [US1] Endpoint success integration test in `src/test/scala/com/gwgs/akkaagentic/api/GreetingEndpointIntegrationTest.scala`: extend `TestKitSupport`, register `TestModelProvider` for `GreetingAgent`, `httpClient.POST("/greet")` with a valid body asserts `200` and a non-empty `greeting` — per contracts/greeting-api.md
+- [X] T005 [P] [US1] Agent unit test in `src/test/scala/com/gwgs/akkaagentic/application/GreetingAgentTest.scala`: extend `TestKitSupport`, register `TestModelProvider` for `GreetingAgent`, set a `fixedResponse` greeting, invoke `componentClient.forAgent().inSession(<uuid>).method(GreetingAgent::greet).invoke(request)`, assert the mocked greeting is returned — per research.md R6
+- [X] T006 [P] [US1] Endpoint success integration test in `src/test/scala/com/gwgs/akkaagentic/api/GreetingEndpointIntegrationTest.scala`: extend `TestKitSupport`, register `TestModelProvider` for `GreetingAgent`, `httpClient.POST("/greet")` with a valid body asserts `200` and a non-empty `greeting` — per contracts/greeting-api.md
 
 ### Implementation for User Story 1
 
-- [ ] T007 [US1] Implement `GreetingAgent` in `src/main/scala/com/gwgs/akkaagentic/application/GreetingAgent.scala`: `extends akka.javasdk.agent.Agent`, `@Component(id = "greeting-agent")`, inner `Request(user, text)` (Jackson-annotated), single `greet` handler returning `Effect[String]` via `effects().systemMessage(SYSTEM_MESSAGE).userMessage(...).thenReply()` — per research.md R4
-- [ ] T008 [US1] Implement `GreetingEndpoint` in `src/main/scala/com/gwgs/akkaagentic/api/GreetingEndpoint.scala` (depends on T007 — references `GreetingAgent::greet`): `@HttpEndpoint`, `@Acl(allow = Internet)`, inner `GreetRequest`/`GreetReply` (Jackson-annotated, `GreetRequest` set to ignore unknown properties for the in-scope edge case in spec.md → Edge Case Handling), `@Post("/greet")` that validates via domain `GreetingRequest.validate`, on success calls `GreetingAgent` through injected `ComponentClient` with a fresh session id, and wraps the reply in `GreetReply` — per contracts/greeting-api.md
+- [X] T007 [US1] Implement `GreetingAgent` in `src/main/scala/com/gwgs/akkaagentic/application/GreetingAgent.scala`: `extends akka.javasdk.agent.Agent`, `@Component(id = "greeting-agent")`, inner `Request(user, text)` (Jackson-annotated), single `greet` handler returning `Effect[String]` via `effects().systemMessage(SYSTEM_MESSAGE).userMessage(...).thenReply()` — per research.md R4
+- [X] T008 [US1] Implement `GreetingEndpoint` in `src/main/scala/com/gwgs/akkaagentic/api/GreetingEndpoint.scala` (depends on T007 — references `GreetingAgent::greet`): `@HttpEndpoint`, `@Acl(allow = Internet)`, inner `GreetRequest`/`GreetReply` (Jackson-annotated, `GreetRequest` set to ignore unknown properties for the in-scope edge case in spec.md → Edge Case Handling), `@Post("/greet")` that validates via domain `GreetingRequest.validate`, on success calls `GreetingAgent` through injected `ComponentClient` with a fresh session id, and wraps the reply in `GreetReply` — per contracts/greeting-api.md
 
 **Checkpoint**: MVP — a valid request returns a personalized greeting end to end. T005/T006 pass.
 
@@ -73,7 +73,7 @@ Single Akka service (Scala 3 on the Akka Java SDK). Sources under `src/main/scal
 
 ### Tests for User Story 2
 
-- [ ] T009 [P] [US2] Domain validation unit test in `src/test/scala/com/gwgs/akkaagentic/domain/GreetingTest.scala`: assert `GreetingRequest.validate` returns `Left` with a message for blank `user` and for blank `text`, and `Right` for valid input
+- [X] T009 [P] [US2] Domain validation unit test in `src/test/scala/com/gwgs/akkaagentic/domain/GreetingTest.scala`: assert `GreetingRequest.validate` returns `Left` with a message for blank `user` and for blank `text`, and `Right` for valid input
 - [ ] T010 [P] [US2] Endpoint failure cases in `src/test/scala/com/gwgs/akkaagentic/api/GreetingEndpointIntegrationTest.scala`: empty `user` → `400`, missing/blank `text` → `400`, and a malformed-JSON body → `400` (FR-006)
 
 ### Implementation for User Story 2
