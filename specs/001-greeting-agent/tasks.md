@@ -74,11 +74,11 @@ Single Akka service (Scala 3 on the Akka Java SDK). Sources under `src/main/scal
 ### Tests for User Story 2
 
 - [X] T009 [P] [US2] Domain validation unit test in `src/test/scala/com/gwgs/akkaagentic/domain/GreetingTest.scala`: assert `GreetingRequest.validate` returns `Left` with a message for blank `user` and for blank `text`, and `Right` for valid input
-- [ ] T010 [P] [US2] Endpoint failure cases in `src/test/scala/com/gwgs/akkaagentic/api/GreetingEndpointIntegrationTest.scala`: empty `user` → `400`, missing/blank `text` → `400`, and a malformed-JSON body → `400` (FR-006)
+- [X] T010 [P] [US2] Endpoint failure cases in `src/test/scala/com/gwgs/akkaagentic/api/GreetingEndpointIntegrationTest.scala`: empty `user` → `400`, missing/blank `text` → `400`, and a malformed-JSON body → `400` (FR-006)
 
 ### Implementation for User Story 2
 
-- [ ] T011 [US2] Harden `src/main/scala/com/gwgs/akkaagentic/api/GreetingEndpoint.scala` so validation failures return `HttpResponses.badRequest(<message>)` without calling the agent. Verify the status the SDK returns for a body that fails `GreetRequest` deserialization; if it is not 4xx, add explicit handling so malformed payloads yield `400` (FR-006). Record the observed default in contracts/greeting-api.md — per contracts/greeting-api.md
+- [X] T011 [US2] Harden `src/main/scala/com/gwgs/akkaagentic/api/GreetingEndpoint.scala` so validation failures return `HttpResponses.badRequest(<message>)` without calling the agent. Verify the status the SDK returns for a body that fails `GreetRequest` deserialization; if it is not 4xx, add explicit handling so malformed payloads yield `400` (FR-006). Record the observed default in contracts/greeting-api.md — per contracts/greeting-api.md
 
 **Checkpoint**: US1 and US2 both pass independently; no model call on invalid input.
 
@@ -92,11 +92,11 @@ Single Akka service (Scala 3 on the Akka Java SDK). Sources under `src/main/scal
 
 ### Tests for User Story 3
 
-- [ ] T012 [P] [US3] Intent-adaptation test in `src/test/scala/com/gwgs/akkaagentic/application/GreetingAgentTest.scala`: use `TestModelProvider` `.whenMessage(predicate).reply(...)` to return distinct greetings for a question-style vs. casual message and assert they differ (SC-005, US3)
+- [X] T012 [P] [US3] Intent-adaptation test in `src/test/scala/com/gwgs/akkaagentic/application/GreetingAgentTest.scala`: use `TestModelProvider` `.whenMessage(predicate).reply(...)` to return distinct greetings for a question-style vs. casual message and assert they differ (SC-005, US3)
 
 ### Implementation for User Story 3
 
-- [ ] T013 [US3] Refine `SYSTEM_MESSAGE` in `src/main/scala/com/gwgs/akkaagentic/application/GreetingAgent.scala` to instruct the model to detect the message's intent/tone and match it in the greeting
+- [X] T013 [US3] Refine `SYSTEM_MESSAGE` in `src/main/scala/com/gwgs/akkaagentic/application/GreetingAgent.scala` to instruct the model to detect the message's intent/tone and match it in the greeting
 
 **Checkpoint**: All three user stories pass independently.
 
@@ -104,9 +104,9 @@ Single Akka service (Scala 3 on the Akka Java SDK). Sources under `src/main/scal
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T014 [P] Update `README.md` with Scala 3 build/run notes and the `POST /greet` curl examples from quickstart.md
-- [ ] T015 [P] Verify `application.conf` ACL/model config and that no secrets are committed (env-driven key only)
-- [ ] T016 Run `mvn verify` from a clean checkout and confirm the full suite passes (SC-003, SC-004); validate quickstart.md steps
+- [X] T014 [P] Update `README.md` with Scala 3 build/run notes and the `POST /greet` curl examples from quickstart.md
+- [X] T015 [P] Verify `application.conf` ACL/model config and that no secrets are committed (env-driven key only)
+- [X] T016 Run `mvn verify` from a clean checkout and confirm the full suite passes (SC-003, SC-004); validate quickstart.md steps
 
 ---
 

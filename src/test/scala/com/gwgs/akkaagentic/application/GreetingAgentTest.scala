@@ -35,3 +35,31 @@ class GreetingAgentTest extends TestKitSupport:
       .invoke(GreetingAgent.Request("Ada", "hello there"))
 
     assertThat(reply).isEqualTo(mocked)
+
+  /** US3: the greeting adapts to the message's intent rather than using a fixed template.
+    * The mocked model keys on the user message text, so a question-style message and a casual
+    * one yield distinct greetings — proving the agent forwards the message through to the model.
+    */
+  @Test
+  def greetingAdaptsToMessageIntent(): Unit =
+    val questionGreeting = "Hi Ada — happy to help you reset your password!"
+    val casualGreeting = "Hey Ada! Great to see you. 👋"
+
+    greetingModel.whenMessage((m: String) => m.contains("reset my password")).reply(questionGreeting)
+    greetingModel.whenMessage((m: String) => m.contains("just saying hi")).reply(casualGreeting)
+
+    val question = componentClient
+      .forAgent()
+      .inSession(UUID.randomUUID().toString)
+      .dynamicCall[GreetingAgent.Request, String]("greeting-agent")
+      .invoke(GreetingAgent.Request("Ada", "How do I reset my password?"))
+
+    val casual = componentClient
+      .forAgent()
+      .inSession(UUID.randomUUID().toString)
+      .dynamicCall[GreetingAgent.Request, String]("greeting-agent")
+      .invoke(GreetingAgent.Request("Ada", "just saying hi"))
+
+    assertThat(question).isEqualTo(questionGreeting)
+    assertThat(casual).isEqualTo(casualGreeting)
+    assertThat(question).isNotEqualTo(casual)

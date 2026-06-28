@@ -56,9 +56,10 @@ user must not be blank
   (`forAgent().inSession(<uuid>).method(GreetingAgent::greet).invoke(...)`) using a fresh session
   id per request (stateless, FR-007), and wraps the returned greeting string in `GreetReply`.
 - The endpoint never returns domain types directly (Constitution II — API isolation).
-- Malformed JSON / wrong shape: the `400` for a body that fails `GreetRequest` deserialization is
-  **assumed** to be produced by the SDK's request decoding. This must be verified during T011; if
-  the SDK returns a different status, the endpoint adds explicit handling to return `400`.
+- Malformed JSON / wrong shape: **verified (T011)** — a body that fails `GreetRequest`
+  deserialization is rejected with `400 Bad Request` by the SDK's request decoding layer, before
+  the handler runs. No explicit handling is required in `GreetingEndpoint`; the framework default
+  is correct. Confirmed by `malformedJsonIsRejected` in `GreetingEndpointIntegrationTest`.
 - `GreetRequest` is configured to ignore unknown JSON properties, so extra/unexpected fields are
   accepted and ignored (spec.md → Edge Case Handling).
 
@@ -74,6 +75,7 @@ curl -i -X POST http://localhost:9000/greet \
 
 | Scenario (spec) | Contract assertion | Test |
 |-----------------|--------------------|------|
-| US1 success | `200` + non-empty `greeting` naming the user | `GreetingEndpointIntegrationTest` (success) |
-| US2 empty user | `400` + validation message, no greeting | `GreetingEndpointIntegrationTest` (failure) |
-| FR-006 malformed body | `400` | `GreetingEndpointIntegrationTest` (optional malformed case) |
+| US1 success | `200` + non-empty `greeting` naming the user | `GreetingEndpointIntegrationTest.validRequestReturnsGreeting` |
+| US2 empty user | `400`, no model call | `GreetingEndpointIntegrationTest.emptyUserIsRejected` |
+| US2 blank text | `400`, no model call | `GreetingEndpointIntegrationTest.blankTextIsRejected` |
+| FR-006 malformed body | `400` (SDK decode default) | `GreetingEndpointIntegrationTest.malformedJsonIsRejected` |

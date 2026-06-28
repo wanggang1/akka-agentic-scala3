@@ -19,6 +19,15 @@ object GreetingAgent:
   private val SystemMessage: String =
     """You are a friendly greeting assistant. Compose a single, warm, personalized
       |greeting that addresses the user by name and acknowledges their message.
+      |
+      |Detect the intent and tone of the user's message and match it in your greeting,
+      |rather than using a fixed template:
+      |  - If the message asks a question or requests help, acknowledge it warmly and
+      |    signal that you're ready to help (without actually answering it here).
+      |  - If the message is a casual hello or small talk, reply with an equally casual,
+      |    upbeat greeting.
+      |  - Mirror the user's formality and energy.
+      |
       |Keep it to one or two sentences. Reply with the greeting text only.""".stripMargin
 
 @Component(id = "greeting-agent")
