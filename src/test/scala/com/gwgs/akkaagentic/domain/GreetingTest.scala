@@ -8,29 +8,31 @@ class GreetingTest:
 
   @Test
   def validRequestReturnsRight(): Unit =
-    val request = GreetingRequest("Ada", "hello there")
-    assertThat(request.validate).isEqualTo(Right(request))
+    val request = GreetingRequest(Some("Ada"), Some("hello there"))
+    assertThat(request.validate).isEqualTo(Right(ValidGreeting("Ada", "hello there")))
 
   @Test
   def blankUserReturnsLeft(): Unit =
-    assertThat(GreetingRequest("", "hi").validate)
+    assertThat(GreetingRequest(Some(""), Some("hi")).validate)
       .isEqualTo(Left("user must not be blank"))
-    assertThat(GreetingRequest("   ", "hi").validate)
+    assertThat(GreetingRequest(Some("   "), Some("hi")).validate)
       .isEqualTo(Left("user must not be blank"))
 
+  // `None` is what an absent `user` JSON property becomes after the boundary
+  // converts Jackson's `null` to `None` (see GreetingEndpoint).
   @Test
-  def nullUserReturnsLeft(): Unit =
-    assertThat(GreetingRequest(null, "hi").validate)
+  def absentUserReturnsLeft(): Unit =
+    assertThat(GreetingRequest(None, Some("hi")).validate)
       .isEqualTo(Left("user must not be blank"))
 
   @Test
   def blankTextReturnsLeft(): Unit =
-    assertThat(GreetingRequest("Ada", "").validate)
+    assertThat(GreetingRequest(Some("Ada"), Some("")).validate)
       .isEqualTo(Left("text must not be blank"))
-    assertThat(GreetingRequest("Ada", "   ").validate)
+    assertThat(GreetingRequest(Some("Ada"), Some("   ")).validate)
       .isEqualTo(Left("text must not be blank"))
 
   @Test
-  def nullTextReturnsLeft(): Unit =
-    assertThat(GreetingRequest("Ada", null).validate)
+  def absentTextReturnsLeft(): Unit =
+    assertThat(GreetingRequest(Some("Ada"), None).validate)
       .isEqualTo(Left("text must not be blank"))

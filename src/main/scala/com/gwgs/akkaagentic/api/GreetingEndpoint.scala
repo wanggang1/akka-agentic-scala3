@@ -41,7 +41,12 @@ class GreetingEndpoint(componentClient: ComponentClient):
     */
   @Post("/greet")
   def greet(request: GreetRequest): HttpResponse =
-    GreetingRequest(request.user, request.text).validate match
+    // Boundary: Jackson fills absent JSON properties with `null` (Java semantics,
+    // since the wire types use plain Java-style annotations). `Option(...)` maps
+    // `null -> None` here so the domain only ever deals with `Option`, never `null`.
+    // (A future move to a Scala-native JSON library would remove `null` at the source
+    // and let the wire types carry `Option` directly, making this conversion redundant.)
+    GreetingRequest(Option(request.user), Option(request.text)).validate match
       case Left(message) =>
         HttpResponses.badRequest(message)
       case Right(valid) =>
