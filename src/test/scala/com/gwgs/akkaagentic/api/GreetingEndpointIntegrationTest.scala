@@ -17,20 +17,6 @@ class GreetingEndpointIntegrationTest extends TestKitSupport:
       .withAdditionalConfig("akka.javasdk.agent.googleai-gemini.api-key = n/a")
       .withModelProvider(classOf[GreetingAgent], greetingModel)
 
-  @Test
-  def validRequestReturnsGreeting(): Unit =
-    val mocked = "Hello Ada! Lovely to hear from you."
-    greetingModel.fixedResponse(mocked)
-
-    val response = httpClient
-      .POST("/greet")
-      .withRequestBody(GreetingEndpoint.GreetRequest("Ada", "hello there"))
-      .responseBodyAs(classOf[GreetingEndpoint.GreetReply])
-      .invoke()
-
-    assertThat(response.status()).isEqualTo(StatusCodes.OK)
-    assertThat(response.body().greeting).isEqualTo(mocked)
-
   /** US1: a valid request returns 200 with a structured body carrying all three
     * fields. The mocked model returns a JSON `Result`; the endpoint maps it to
     * `GreetReply`, so this asserts the structured contract over HTTP end to end.

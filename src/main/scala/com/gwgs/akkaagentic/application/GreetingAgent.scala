@@ -1,8 +1,9 @@
 package com.gwgs.akkaagentic.application
 
 import akka.javasdk.agent.Agent
-import akka.javasdk.annotations.Component
+import akka.javasdk.annotations.{Component, Description, FunctionTool}
 import com.fasterxml.jackson.annotation.{JsonCreator, JsonProperty}
+import com.gwgs.akkaagentic.domain.TimeOfDay
 
 object GreetingAgent:
 
@@ -14,6 +15,24 @@ object GreetingAgent:
   final case class Request @JsonCreator() (
       @JsonProperty("user") user: String,
       @JsonProperty("text") text: String
+  )
+
+  /** The agent's structured reply.
+    *
+    * `@Description` on each field feeds the JSON schema that `responseConformsTo`
+    * derives, so the model knows what to produce; `@JsonProperty` keeps
+    * (de)serialization deterministic (research R1/R3).
+    */
+  final case class Result @JsonCreator() (
+      @JsonProperty("greeting")
+      @Description("The personalized greeting text addressed to the user, one or two sentences.")
+      greeting: String,
+      @JsonProperty("tone")
+      @Description("A short label for the tone/intent detected in the user's message, e.g. casual, question, formal.")
+      tone: String,
+      @JsonProperty("timeOfDay")
+      @Description("The current time of day: morning, afternoon, evening, or night.")
+      timeOfDay: String
   )
 
   private val SystemMessage: String =
@@ -28,14 +47,17 @@ object GreetingAgent:
       |    upbeat greeting.
       |  - Mirror the user's formality and energy.
       |
-      |Keep it to one or two sentences. Reply with the greeting text only.""".stripMargin
+      |Produce three fields:
+      |  - greeting: the greeting text (one or two sentences),
+      |  - tone: a short label for the tone/intent you detected,
+      |  - timeOfDay: the current time of day (morning, afternoon, evening, or night).""".stripMargin
 
 @Component(id = "greeting-agent")
 class GreetingAgent extends Agent:
   import GreetingAgent.*
 
-  /** Compose a personalized greeting for an already-validated request. */
-  def greet(request: Request): Agent.Effect[String] =
+  /** Compose a personalized, structured greeting for an already-validated request. */
+  def greet(request: Request): Agent.Effect[Result] =
     effects()
       .systemMessage(SystemMessage)
       .userMessage(
@@ -43,4 +65,23 @@ class GreetingAgent extends Agent:
            |They sent this message: "${request.text}".
            |Greet them.""".stripMargin
       )
+      .responseConformsTo(classOf[Result])
       .thenReply()
+
+  /** Reports the current time of day for an optional IANA timezone.
+    *
+    * Public (not private) on purpose: `@FunctionTool` methods are discovered by
+    * reflection, and a Scala `private def` name-mangles in a way the scanner may not
+    * find (research R3). Delegates to the pure [[TimeOfDay]] domain function; the
+    * model-supplied timezone `String` is converted `null/"" -> None` at this boundary.
+    */
+  @FunctionTool(
+    description =
+      "Returns the current time of day (morning, afternoon, evening, or night) for an " +
+        "optional IANA timezone id; falls back to UTC when the timezone is empty or unrecognized."
+  )
+  def currentTimeOfDay(
+      @Description("IANA timezone id, e.g. \"America/New_York\". May be empty to use UTC.")
+      timezone: String
+  ): String =
+    TimeOfDay.now(Option(timezone))

@@ -23,10 +23,19 @@ object GreetingEndpoint:
       @JsonProperty("text") text: String
   )
 
-  /** Outbound wire type — never expose domain/application types (Constitution II). */
+  /** Outbound wire type — never expose domain/application types (Constitution II).
+    * Mirrors the agent's structured [[GreetingAgent.Result]] shape, but stays an
+    * API-owned type so the wire contract is independent of the application layer.
+    */
   final case class GreetReply @JsonCreator() (
-      @JsonProperty("greeting") greeting: String
+      @JsonProperty("greeting") greeting: String,
+      @JsonProperty("tone") tone: String,
+      @JsonProperty("timeOfDay") timeOfDay: String
   )
+
+  /** Map the application result to the API wire type (API isolation). */
+  private def toApi(result: GreetingAgent.Result): GreetReply =
+    GreetReply(result.greeting, result.tone, result.timeOfDay)
 
 @HttpEndpoint
 @Acl(allow = Array(new Acl.Matcher(principal = Acl.Principal.INTERNET)))
@@ -50,9 +59,9 @@ class GreetingEndpoint(componentClient: ComponentClient):
       case Left(message) =>
         HttpResponses.badRequest(message)
       case Right(valid) =>
-        val greeting = componentClient
+        val result = componentClient
           .forAgent()
           .inSession(UUID.randomUUID().toString)
-          .dynamicCall[GreetingAgent.Request, String]("greeting-agent")
+          .dynamicCall[GreetingAgent.Request, GreetingAgent.Result]("greeting-agent")
           .invoke(GreetingAgent.Request(valid.user, valid.text))
-        HttpResponses.ok(GreetReply(greeting))
+        HttpResponses.ok(toApi(result))
