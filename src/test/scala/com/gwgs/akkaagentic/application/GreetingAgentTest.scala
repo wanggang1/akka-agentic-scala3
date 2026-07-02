@@ -1,5 +1,6 @@
 package com.gwgs.akkaagentic.application
 
+import akka.javasdk.JsonSupport
 import akka.javasdk.testkit.{TestKit, TestKitSupport, TestModelProvider}
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -35,6 +36,27 @@ class GreetingAgentTest extends TestKitSupport:
       .invoke(GreetingAgent.Request("Ada", "hello there"))
 
     assertThat(reply).isEqualTo(mocked)
+
+  /** US1: a valid request yields a structured [[GreetingAgent.Result]] with all three
+    * fields present. The mocked model returns a fixed JSON `Result`, which the agent
+    * deserializes via `responseConformsTo`, so this asserts the structured shape end
+    * to end — the greeting text plus the `tone` and `timeOfDay` context fields.
+    */
+  @Test
+  def structuredResponseHasAllFields(): Unit =
+    val mocked = GreetingAgent.Result("Hello Ada! Lovely to hear from you.", "casual", "morning")
+    greetingModel.fixedResponse(JsonSupport.encodeToString(mocked))
+
+    val result = componentClient
+      .forAgent()
+      .inSession(UUID.randomUUID().toString)
+      .dynamicCall[GreetingAgent.Request, GreetingAgent.Result]("greeting-agent")
+      .invoke(GreetingAgent.Request("Ada", "hello there"))
+
+    assertThat(result).isEqualTo(mocked)
+    assertThat(result.greeting).isEqualTo("Hello Ada! Lovely to hear from you.")
+    assertThat(result.tone).isEqualTo("casual")
+    assertThat(result.timeOfDay).isEqualTo("morning")
 
   /** US3: the greeting adapts to the message's intent rather than using a fixed template.
     * The mocked model keys on the user message text, so a question-style message and a casual
