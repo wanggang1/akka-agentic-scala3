@@ -26,8 +26,8 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 Not on the four-capability path, captured so they're not forgotten:
 
-- **Make Jackson Scala-aware** — ✅ *done as [`specs/003-scala-native-json`](specs/003-scala-native-json/)
-  (branch, pending merge).* Registered `DefaultScalaModule` via an `@Setup` `Bootstrap`
+- **Make Jackson Scala-aware** — ✅ *done and merged (PR #7), [`specs/003-scala-native-json`](specs/003-scala-native-json/).*
+  Registered `DefaultScalaModule` via an `@Setup` `Bootstrap`
   (discovered through a top-level `akka.javasdk.service-setup` descriptor entry). **Finding:** the
   SDK uses *two* Jackson mappers — the public one (`JsonSupport`) covers **HTTP endpoint bodies**
   only; **component payloads** (agent `Request`/`Result`, and by extension workflow state, entity
