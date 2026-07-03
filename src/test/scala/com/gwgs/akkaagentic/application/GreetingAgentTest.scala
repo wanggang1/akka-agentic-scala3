@@ -45,15 +45,19 @@ class GreetingAgentTest extends TestKitSupport:
     assertThat(result.tone).isEqualTo("casual")
     assertThat(result.timeOfDay).isEqualTo("morning")
 
-  /** The greeting adapts to the message's intent rather than using a fixed template.
-    * The mocked model keys on the user message text, so a question-style message and a casual
-    * one yield distinct structured results — proving the agent forwards the message through to
-    * the model. (T008 expands this into the US2 tone/timeOfDay assertions.)
+  /** US2 (SC-002, SC-005): the structured result reflects the message's intent, and the
+    * time-of-day context is carried through on every response.
+    *
+    * The mocked model keys on the user message text, returning results with *distinct*
+    * `tone` labels for a question-style vs. a casual message. This proves the agent forwards
+    * the message to the model and surfaces the model's structured `tone`/`timeOfDay` fields
+    * — the real model would derive tone from intent and `timeOfDay` from the time tool; here
+    * we assert the plumbing that carries both through.
     */
   @Test
-  def greetingAdaptsToMessageIntent(): Unit =
-    val questionResult = GreetingAgent.Result("Hi Ada — happy to help you reset your password!", "question", "morning")
-    val casualResult = GreetingAgent.Result("Hey Ada! Great to see you. 👋", "casual", "morning")
+  def intentDrivesToneAndTimeOfDayIsCarried(): Unit =
+    val questionResult = GreetingAgent.Result("Hi Ada — happy to help you reset your password!", "question", "afternoon")
+    val casualResult = GreetingAgent.Result("Hey Ada! Great to see you. 👋", "casual", "afternoon")
 
     greetingModel
       .whenMessage((m: String) => m.contains("reset my password"))
@@ -74,6 +78,47 @@ class GreetingAgentTest extends TestKitSupport:
       .dynamicCall[GreetingAgent.Request, GreetingAgent.Result]("greeting-agent")
       .invoke(GreetingAgent.Request("Ada", "just saying hi"))
 
-    assertThat(question).isEqualTo(questionResult)
-    assertThat(casual).isEqualTo(casualResult)
-    assertThat(question).isNotEqualTo(casual)
+    // Intent drives distinct tones.
+    assertThat(question.tone).isEqualTo("question")
+    assertThat(casual.tone).isEqualTo("casual")
+    assertThat(question.tone).isNotEqualTo(casual.tone)
+
+    // Time-of-day context is carried on every structured response.
+    assertThat(question.timeOfDay).isEqualTo("afternoon")
+    assertThat(casual.timeOfDay).isEqualTo("afternoon")
+
+  /** US2 (T009): the caller's optional timezone actually reaches the model prompt.
+    *
+    * `whenMessage` matches on the *user message*, which is where `greet` writes the
+    * timezone (via `timezoneLine`). Probing on that text proves the plumbing carries a
+    * supplied timezone through, and that an absent timezone becomes the UTC-fallback
+    * instruction instead of leaking `null`. (This is deterministic; whether the *model*
+    * then obeys the instruction is a live-model concern, not unit-testable.)
+    */
+  @Test
+  def timezoneReachesThePrompt(): Unit =
+    val zonedResult = GreetingAgent.Result("Good evening, Ada!", "casual", "evening")
+    val utcResult = GreetingAgent.Result("Hello Ada!", "casual", "morning")
+
+    greetingModel
+      .whenMessage((m: String) => m.contains("America/New_York"))
+      .reply(JsonSupport.encodeToString(zonedResult))
+    greetingModel
+      .whenMessage((m: String) => m.contains("use UTC"))
+      .reply(JsonSupport.encodeToString(utcResult))
+
+    val zoned = componentClient
+      .forAgent()
+      .inSession(UUID.randomUUID().toString)
+      .dynamicCall[GreetingAgent.Request, GreetingAgent.Result]("greeting-agent")
+      .invoke(GreetingAgent.Request("Ada", "hello there", "America/New_York"))
+
+    // No timezone -> the prompt carries the UTC-fallback instruction, not `null`.
+    val fallback = componentClient
+      .forAgent()
+      .inSession(UUID.randomUUID().toString)
+      .dynamicCall[GreetingAgent.Request, GreetingAgent.Result]("greeting-agent")
+      .invoke(GreetingAgent.Request("Ada", "hello there"))
+
+    assertThat(zoned).isEqualTo(zonedResult)
+    assertThat(fallback).isEqualTo(utcResult)

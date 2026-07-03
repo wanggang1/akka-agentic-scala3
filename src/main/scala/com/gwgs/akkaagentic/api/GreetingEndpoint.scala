@@ -20,7 +20,11 @@ object GreetingEndpoint:
   @JsonIgnoreProperties(ignoreUnknown = true)
   final case class GreetRequest @JsonCreator() (
       @JsonProperty("user") user: String,
-      @JsonProperty("text") text: String
+      @JsonProperty("text") text: String,
+      // Optional caller timezone (IANA id, e.g. "America/New_York"). Absent JSON -> null;
+      // defaulted so existing 2-arg callers/tests compile unchanged. Not validated: an
+      // absent/blank/invalid zone safely falls back to UTC in the domain (TimeOfDay).
+      @JsonProperty("timezone") timezone: String = null
   )
 
   /** Outbound wire type — never expose domain/application types (Constitution II).
@@ -63,5 +67,5 @@ class GreetingEndpoint(componentClient: ComponentClient):
           .forAgent()
           .inSession(UUID.randomUUID().toString)
           .dynamicCall[GreetingAgent.Request, GreetingAgent.Result]("greeting-agent")
-          .invoke(GreetingAgent.Request(valid.user, valid.text))
+          .invoke(GreetingAgent.Request(valid.user, valid.text, request.timezone))
         HttpResponses.ok(toApi(result))

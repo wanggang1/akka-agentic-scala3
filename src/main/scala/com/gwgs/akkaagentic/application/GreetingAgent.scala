@@ -14,7 +14,10 @@ object GreetingAgent:
     */
   final case class Request @JsonCreator() (
       @JsonProperty("user") user: String,
-      @JsonProperty("text") text: String
+      @JsonProperty("text") text: String,
+      // Optional caller timezone (IANA id). Java-shaped wire field: absent JSON -> null.
+      // Defaulted so existing 2-arg Scala callers/tests compile unchanged.
+      @JsonProperty("timezone") timezone: String = null
   )
 
   /** The agent's structured reply.
@@ -47,10 +50,16 @@ object GreetingAgent:
       |    upbeat greeting.
       |  - Mirror the user's formality and energy.
       |
+      |Always call the time-of-day tool to find out the current time of day. Pass the
+      |user's timezone to it when one is given; otherwise call it with an empty timezone
+      |so it falls back to UTC. Never guess the time of day yourself. You may weave a
+      |time-appropriate touch into the greeting (e.g. "Good morning").
+      |
       |Produce three fields:
       |  - greeting: the greeting text (one or two sentences),
       |  - tone: a short label for the tone/intent you detected,
-      |  - timeOfDay: the current time of day (morning, afternoon, evening, or night).""".stripMargin
+      |  - timeOfDay: exactly the value returned by the time-of-day tool
+      |    (morning, afternoon, evening, or night).""".stripMargin
 
 @Component(id = "greeting-agent")
 class GreetingAgent extends Agent:
@@ -63,10 +72,20 @@ class GreetingAgent extends Agent:
       .userMessage(
         s"""The user's name is "${request.user}".
            |They sent this message: "${request.text}".
+           |${timezoneLine(request)}
            |Greet them.""".stripMargin
       )
       .responseConformsTo(classOf[Result])
       .thenReply()
+
+  /** A line telling the model which timezone to use for the time-of-day tool.
+    * `null/""` (absent) -> None, converted at this boundary, so an absent timezone
+    * yields a UTC instruction instead of leaking `null` into the prompt.
+    */
+  private def timezoneLine(request: Request): String =
+    Option(request.timezone).map(_.trim).filter(_.nonEmpty) match
+      case Some(tz) => s"""Their timezone is "$tz"; use it for the time of day."""
+      case None     => "Their timezone is unknown; use UTC for the time of day."
 
   /** Reports the current time of day for an optional IANA timezone.
     *
