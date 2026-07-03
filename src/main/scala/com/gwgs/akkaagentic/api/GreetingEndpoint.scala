@@ -20,13 +20,26 @@ object GreetingEndpoint:
   @JsonIgnoreProperties(ignoreUnknown = true)
   final case class GreetRequest @JsonCreator() (
       @JsonProperty("user") user: String,
-      @JsonProperty("text") text: String
+      @JsonProperty("text") text: String,
+      // Optional caller timezone (IANA id, e.g. "America/New_York"). Absent JSON -> null;
+      // defaulted so existing 2-arg callers/tests compile unchanged. Not validated: an
+      // absent/blank/invalid zone safely falls back to UTC in the domain (TimeOfDay).
+      @JsonProperty("timezone") timezone: String = null
   )
 
-  /** Outbound wire type — never expose domain/application types (Constitution II). */
+  /** Outbound wire type — never expose domain/application types (Constitution II).
+    * Mirrors the agent's structured [[GreetingAgent.Result]] shape, but stays an
+    * API-owned type so the wire contract is independent of the application layer.
+    */
   final case class GreetReply @JsonCreator() (
-      @JsonProperty("greeting") greeting: String
+      @JsonProperty("greeting") greeting: String,
+      @JsonProperty("tone") tone: String,
+      @JsonProperty("timeOfDay") timeOfDay: String
   )
+
+  /** Map the application result to the API wire type (API isolation). */
+  private def toApi(result: GreetingAgent.Result): GreetReply =
+    GreetReply(result.greeting, result.tone, result.timeOfDay)
 
 @HttpEndpoint
 @Acl(allow = Array(new Acl.Matcher(principal = Acl.Principal.INTERNET)))
@@ -41,13 +54,18 @@ class GreetingEndpoint(componentClient: ComponentClient):
     */
   @Post("/greet")
   def greet(request: GreetRequest): HttpResponse =
-    GreetingRequest(request.user, request.text).validate match
+    // Boundary: Jackson fills absent JSON properties with `null` (Java semantics,
+    // since the wire types use plain Java-style annotations). `Option(...)` maps
+    // `null -> None` here so the domain only ever deals with `Option`, never `null`.
+    // (A future move to a Scala-native JSON library would remove `null` at the source
+    // and let the wire types carry `Option` directly, making this conversion redundant.)
+    GreetingRequest(Option(request.user), Option(request.text)).validate match
       case Left(message) =>
         HttpResponses.badRequest(message)
       case Right(valid) =>
-        val greeting = componentClient
+        val result = componentClient
           .forAgent()
           .inSession(UUID.randomUUID().toString)
-          .dynamicCall[GreetingAgent.Request, String]("greeting-agent")
-          .invoke(GreetingAgent.Request(valid.user, valid.text))
-        HttpResponses.ok(GreetReply(greeting))
+          .dynamicCall[GreetingAgent.Request, GreetingAgent.Result]("greeting-agent")
+          .invoke(GreetingAgent.Request(valid.user, valid.text, request.timezone))
+        HttpResponses.ok(toApi(result))

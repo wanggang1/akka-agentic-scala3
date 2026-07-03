@@ -12,6 +12,28 @@ Use the detailed instructions in @AGENTS.md when writing Akka code.
 
 Use the guidelines in @akka-context/sdk/ai-coding-assistant-guidelines.html.md when writing code in this project.
 
+### Scala idioms
+
+This is a **Scala 3** project on the Java-first Akka SDK. `AGENTS.md` and the guidelines
+doc are worded for Java — translate their intent into **idiomatic Scala 3**, and prefer
+Scala idioms over Java-isms:
+
+- **No `null` in the domain.** Model absence with `Option`, not nullable `String`. `null`
+  only appears where Jackson deserializes JSON on the wire types; convert it to `None` at
+  the boundary (e.g. `Option(request.field)` in an endpoint / agent tool), so the domain
+  and application layers never see `null`. See `GreetingEndpoint` / `TimeOfDay`.
+- **Turn throwing calls into `Option`/`Either` with `scala.util.Try`**, e.g.
+  `Try(ZoneId.of(id)).toOption` — not a manual `try/catch`.
+- **Parse, don't validate.** Return a type whose fields are proven present (e.g.
+  `GreetingRequest.validate: Either[String, ValidGreeting]`) so downstream code never
+  re-checks or calls `.get`.
+- **Favor combinators and for-comprehensions** over imperative loops and mutable state;
+  keep domain values immutable (`case class`, `with*` copies).
+- **Exception — wire types are Java-shaped on purpose.** Types (de)serialized by the SDK's
+  Jackson keep plain fields with explicit `@JsonCreator`/`@JsonProperty` (and stay
+  nullable), because the SDK has no Scala Jackson module. Idiomatic Scala applies to the
+  domain/application layers; the null→Option conversion bridges the two.
+
 ## Akka documentation
 
 You find the reference documentation of Akka in the akka-context directory and sub-directories.

@@ -1,8 +1,9 @@
 package com.gwgs.akkaagentic.application
 
 import akka.javasdk.agent.Agent
-import akka.javasdk.annotations.Component
+import akka.javasdk.annotations.{Component, Description, FunctionTool}
 import com.fasterxml.jackson.annotation.{JsonCreator, JsonProperty}
+import com.gwgs.akkaagentic.domain.TimeOfDay
 
 object GreetingAgent:
 
@@ -13,7 +14,28 @@ object GreetingAgent:
     */
   final case class Request @JsonCreator() (
       @JsonProperty("user") user: String,
-      @JsonProperty("text") text: String
+      @JsonProperty("text") text: String,
+      // Optional caller timezone (IANA id). Java-shaped wire field: absent JSON -> null.
+      // Defaulted so existing 2-arg Scala callers/tests compile unchanged.
+      @JsonProperty("timezone") timezone: String = null
+  )
+
+  /** The agent's structured reply.
+    *
+    * `@Description` on each field feeds the JSON schema that `responseConformsTo`
+    * derives, so the model knows what to produce; `@JsonProperty` keeps
+    * (de)serialization deterministic (research R1/R3).
+    */
+  final case class Result @JsonCreator() (
+      @JsonProperty("greeting")
+      @Description("The personalized greeting text addressed to the user, one or two sentences.")
+      greeting: String,
+      @JsonProperty("tone")
+      @Description("A short label for the tone/intent detected in the user's message, e.g. casual, question, formal.")
+      tone: String,
+      @JsonProperty("timeOfDay")
+      @Description("The current time of day: morning, afternoon, evening, or night.")
+      timeOfDay: String
   )
 
   private val SystemMessage: String =
@@ -28,19 +50,71 @@ object GreetingAgent:
       |    upbeat greeting.
       |  - Mirror the user's formality and energy.
       |
-      |Keep it to one or two sentences. Reply with the greeting text only.""".stripMargin
+      |Always call the time-of-day tool to find out the current time of day. Pass the
+      |user's timezone to it when one is given; otherwise call it with an empty timezone
+      |so it falls back to UTC. Never guess the time of day yourself. You may weave a
+      |time-appropriate touch into the greeting (e.g. "Good morning").
+      |
+      |Reply with ONLY a JSON object of exactly this shape — no prose, no markdown code
+      |fences, nothing before or after it:
+      |{
+      |  "greeting": "<the greeting text, one or two sentences>",
+      |  "tone": "<a short label for the tone/intent you detected, e.g. casual, question, formal>",
+      |  "timeOfDay": "<exactly the value the time-of-day tool returned: morning, afternoon, evening, or night>"
+      |}""".stripMargin
 
 @Component(id = "greeting-agent")
 class GreetingAgent extends Agent:
   import GreetingAgent.*
 
-  /** Compose a personalized greeting for an already-validated request. */
-  def greet(request: Request): Agent.Effect[String] =
+  /** Compose a personalized, structured greeting for an already-validated request. */
+  def greet(request: Request): Agent.Effect[Result] =
     effects()
       .systemMessage(SystemMessage)
       .userMessage(
         s"""The user's name is "${request.user}".
            |They sent this message: "${request.text}".
+           |${timezoneLine(request)}
            |Greet them.""".stripMargin
       )
+      // GEMINI CONSTRAINT: we deliberately use `responseAs` (parse JSON from the reply
+      // text, per the JSON-shape instructions in SystemMessage) rather than
+      // `responseConformsTo` (native JSON-schema mode). Google Gemini rejects combining
+      // function calling with a JSON response mime type — a live call fails with
+      // INVALID_ARGUMENT: "Function calling with a response mime type: 'application/json'
+      // is unsupported". Because this agent both exposes a @FunctionTool (currentTimeOfDay)
+      // and returns a structured Result, `responseConformsTo` is not usable here on Gemini.
+      // (OpenAI supports both together; if we ever switch providers we could revisit this.)
+      .responseAs(classOf[Result])
+      // `responseAs` parses free-form model text, which is occasionally not valid JSON
+      // (JsonParsingException). Degrade to a safe, model-free greeting rather than a 500:
+      // name the user, use a neutral tone, and compute timeOfDay directly from the domain.
+      .onFailure(_ => Result(s"Hello ${request.user}!", "neutral", TimeOfDay.now(Option(request.timezone))))
       .thenReply()
+
+  /** A line telling the model which timezone to use for the time-of-day tool.
+    * `null/""` (absent) -> None, converted at this boundary, so an absent timezone
+    * yields a UTC instruction instead of leaking `null` into the prompt.
+    */
+  private def timezoneLine(request: Request): String =
+    Option(request.timezone).map(_.trim).filter(_.nonEmpty) match
+      case Some(tz) => s"""Their timezone is "$tz"; use it for the time of day."""
+      case None     => "Their timezone is unknown; use UTC for the time of day."
+
+  /** Reports the current time of day for an optional IANA timezone.
+    *
+    * Public (not private) on purpose: `@FunctionTool` methods are discovered by
+    * reflection, and a Scala `private def` name-mangles in a way the scanner may not
+    * find (research R3). Delegates to the pure [[TimeOfDay]] domain function; the
+    * model-supplied timezone `String` is converted `null/"" -> None` at this boundary.
+    */
+  @FunctionTool(
+    description =
+      "Returns the current time of day (morning, afternoon, evening, or night) for an " +
+        "optional IANA timezone id; falls back to UTC when the timezone is empty or unrecognized."
+  )
+  def currentTimeOfDay(
+      @Description("IANA timezone id, e.g. \"America/New_York\". May be empty to use UTC.")
+      timezone: String
+  ): String =
+    TimeOfDay.now(Option(timezone))
