@@ -59,6 +59,29 @@ writing components in Scala needs explicit workarounds:
 
    This works the same from tests and from an endpoint's injected `ComponentClient`.
 
+3. **Idiomatic wire types — only for HTTP endpoint bodies.** By default the SDK's Jackson
+   `ObjectMapper` doesn't understand Scala, forcing wire types to be Java-shaped
+   (`@JsonCreator`/`@JsonProperty`, nullable `String`). We register `DefaultScalaModule` at
+   startup via an `@Setup` `ServiceSetup` (see [`Bootstrap`](src/main/scala/com/gwgs/akkaagentic/application/Bootstrap.scala)),
+   discovered through a **top-level** descriptor entry (a single FQCN, not under `components`):
+
+   ```hocon
+   akka.javasdk.service-setup = "com.gwgs.akkaagentic.application.Bootstrap"
+   ```
+
+   This lets **HTTP endpoint request/response bodies** be plain, annotation-free Scala case
+   classes with `Option` fields — see `GreetingEndpoint.GreetRequest` / `GreetReply`.
+
+   **Boundary (important):** the SDK uses *two* Jackson mappers. `JsonSupport.getObjectMapper()`
+   — the one the module registers on, and the only one the public API exposes — governs **HTTP
+   endpoint bodies**. But **component-to-component payloads** (agent `Request`/`Result` over
+   `componentClient`, and by extension entity events/state, workflow state, view rows) are
+   serialized by a *separate internal* mapper (`impl.serialization.JsonSerializer`) that the
+   public hook does **not** reach. Those types must stay **Java-shaped** — hence
+   `GreetingAgent.Request`/`Result` keep their Jackson annotations while the endpoint DTOs are
+   idiomatic. Trying to make a component payload an annotation-free `Option` type fails at
+   runtime with *"Cannot construct instance of `scala.Option`"*.
+
 ## Build
 
 ```shell

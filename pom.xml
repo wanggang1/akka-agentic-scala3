@@ -13,7 +13,7 @@
     <name>akka-agentic-scala3</name>
 
     <properties>
-        <scala.version>3.3.4</scala.version>
+        <scala.version>3.3.8</scala.version>
         <scala-maven-plugin.version>4.9.2</scala-maven-plugin.version>
     </properties>
 

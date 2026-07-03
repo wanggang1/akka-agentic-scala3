@@ -26,12 +26,15 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 Not on the four-capability path, captured so they're not forgotten:
 
-- **Make Jackson Scala-aware** — register `DefaultScalaModule` on the SDK's `ObjectMapper`
-  (via a `@Setup` Bootstrap) so wire types can use `case class` + `Option` natively and drop
-  the Java-ish `@JsonCreator`/`@JsonProperty` + `null → None` boundary conversion. Risk: the
-  agent's `responseConformsTo` schema-derivation is a separate, Java-oriented path — convert
-  plain endpoint DTOs first, keep the agent types Java-shaped if the schema path chokes. Its
-  own small feature, ready to pick up now that 002 has merged.
+- **Make Jackson Scala-aware** — ✅ *done as [`specs/003-scala-native-json`](specs/003-scala-native-json/)
+  (branch, pending merge).* Registered `DefaultScalaModule` via an `@Setup` `Bootstrap`
+  (discovered through a top-level `akka.javasdk.service-setup` descriptor entry). **Finding:** the
+  SDK uses *two* Jackson mappers — the public one (`JsonSupport`) covers **HTTP endpoint bodies**
+  only; **component payloads** (agent `Request`/`Result`, and by extension workflow state, entity
+  events, view rows, task results) go through a *separate internal* mapper the public hook can't
+  reach. So only HTTP DTOs (`GreetRequest`/`GreetReply`) went idiomatic-`Option`; everything
+  component-serialized **stays Java-shaped**. Consequence: capabilities 2–4 below can't use
+  idiomatic `Option` wire types either — keep them Java-shaped. See README "Scala interop notes" §3.
 
 ## Also merged along the way
 

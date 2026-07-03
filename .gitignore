@@ -20,8 +20,10 @@
 # VSCode
 .vscode
 
-# Metals
+# Metals / Bloop (VS Code Scala)
 .metals/
+.bloop/
+.bsp/
 
 # Maven
 log/
