@@ -1,8 +1,10 @@
 # Akka Agentic Scala3
 
 A baseline **Scala 3** agentic service built on the **Akka Java SDK**. It exposes a greeting
-agent that accepts a typed JSON payload (`user`, `text`) over HTTP and returns a personalized,
-LLM-composed greeting using the Akka Agentic Platform Effects API.
+agent that accepts a typed JSON payload (`user`, `text`, and an optional `timezone`) over HTTP
+and returns a personalized, **structured** greeting `{greeting, tone, timeOfDay}` using the
+Akka Agentic Platform Effects API. The agent detects the message's tone/intent and calls a
+`@FunctionTool` to report the caller's current time of day.
 
 The Scala 3 sources subclass the Java SDK component types directly (`Agent`, HTTP endpoints) and
 are compiled alongside the SDK via the `scala-maven-plugin`. See
@@ -12,8 +14,8 @@ are compiled alongside the SDK via the `scala-maven-plugin`. See
 ## Project layout
 
 ```text
-src/main/scala/com/gwgs/akkaagentic/domain/        # GreetingRequest / GreetingResponse (+ validation)
-src/main/scala/com/gwgs/akkaagentic/application/    # GreetingAgent
+src/main/scala/com/gwgs/akkaagentic/domain/        # GreetingRequest (+ validation), TimeOfDay
+src/main/scala/com/gwgs/akkaagentic/application/    # GreetingAgent (structured Result + @FunctionTool)
 src/main/scala/com/gwgs/akkaagentic/api/            # GreetingEndpoint (POST /greet)
 src/main/resources/application.conf                 # default model-provider config
 src/test/scala/com/gwgs/akkaagentic/...             # tests (TestModelProvider, no live model)
@@ -51,8 +53,8 @@ writing components in Scala needs explicit workarounds:
    ```scala
    componentClient.forAgent()
      .inSession(UUID.randomUUID().toString)
-     .dynamicCall[GreetingAgent.Request, String]("greeting-agent") // arg = @Component id
-     .invoke(GreetingAgent.Request("Ada", "hello there"))
+     .dynamicCall[GreetingAgent.Request, GreetingAgent.Result]("greeting-agent") // arg = @Component id
+     .invoke(GreetingAgent.Request("Ada", "hello there")) // optional timezone omitted -> UTC
    ```
 
    This works the same from tests and from an endpoint's injected `ComponentClient`.
@@ -92,25 +94,28 @@ component descriptor and serves every component listed in it.
 
 The service listens on `http://localhost:9000`.
 
-**Valid request** — returns a personalized greeting that names the user and adapts to the
-message's intent:
+**Valid request** — returns a **structured** greeting `{greeting, tone, timeOfDay}` that names
+the user, adapts to the message's intent, and reflects the caller's time of day. The optional
+`timezone` (an IANA id) drives `timeOfDay`; a question or help request is acknowledged warmly,
+a casual hello gets a casual reply:
 
 ```shell
+# Structured success — note tone + timeOfDay in the response
 curl -i -X POST http://localhost:9000/greet \
   -H "Content-Type: application/json" \
-  -d '{"user":"Ada","text":"hello there"}'
+  -d '{"user":"Ada","text":"How do I reset my password?","timezone":"America/New_York"}'
 # 200 OK
-# {"greeting":"Hello Ada! Lovely to hear from you."}
+# {"greeting":"Good evening, Ada — happy to help...","tone":"question","timeOfDay":"evening"}
 ```
 
-The greeting reflects the message's intent rather than a fixed template — a question or
-help request is acknowledged warmly, a casual hello gets a casual reply:
+The `timezone` is optional — a blank, invalid, or absent zone falls back to UTC (it is never a
+validation error):
 
 ```shell
 curl -i -X POST http://localhost:9000/greet \
   -H "Content-Type: application/json" \
-  -d '{"user":"Ada","text":"How do I reset my password?"}'
-# 200 OK — greeting signals readiness to help
+  -d '{"user":"Ada","text":"hey there"}'
+# 200 OK — {"greeting":"...","tone":"casual","timeOfDay":"..."}
 ```
 
 **Invalid request** — blank `user`/`text` or a malformed JSON body is rejected with `400`
