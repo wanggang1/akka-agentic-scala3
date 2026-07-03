@@ -103,3 +103,36 @@ live smoke test covers what mocks cannot (provider-specific serialization).
 
 **Alternatives considered**: changing to `responseConformsTo` — explicitly out of scope (would
 reintroduce the Gemini INVALID_ARGUMENT failure).
+
+## R6 — TWO MAPPERS: the module only reaches HTTP endpoint bodies (discovered during implementation)
+
+**Decision**: Convert only **HTTP endpoint DTOs** (`GreetRequest`/`GreetReply`) to annotation-free
+`Option` case classes. Keep **component-to-component payloads** (`GreetingAgent.Request`/`Result`)
+**Java-shaped**. This narrows FR-004 (which had assumed all four types could convert).
+
+**Rationale (found by the US2 test failing, exactly what tests are for)**: registering
+`DefaultScalaModule` on `JsonSupport.getObjectMapper()` makes HTTP bodies Scala-aware — those
+worked. But invoking the agent over `componentClient` with an annotation-free `Option` `Request`
+failed at runtime:
+
+    IllegalArgumentException: Could not deserialize … GreetingAgent$Request …:
+    Cannot construct instance of `scala.Option` (no Creators…)
+    at akka.javasdk.impl.serialization.JsonSerializer …
+
+The SDK uses **two** Jackson mappers: `JsonSupport.getObjectMapper()` (public; HTTP bodies; the one
+the module registers on) and `impl.serialization.JsonSerializer`'s **own internal** mapper
+(`newObjectMapperWithDefaults`), which serializes component commands/replies (and, by extension,
+entity events/state, workflow state, view rows). The public hook does **not** reach the internal
+mapper, so component payloads can't be idiomatic `Option` types.
+
+**Alternatives considered**:
+- *Register the module on `JsonSerializer.internalObjectMapper()` too* (Option B) — rejected:
+  it's a public static in the `akka.javasdk.impl.*` **internal** package; relying on it violates
+  Constitution I (SDK-First / no unstable internal API) and may not even apply (per-instance
+  mappers). Not worth the fragility for this learning project.
+- *Keep everything Java-shaped* — rejected: the HTTP DTOs convert cleanly and demonstrate the win;
+  the finding is precisely *where* the win stops.
+
+**Consequence for the roadmap**: capabilities 2–4 (Workflow state, Autonomous-agent Task results,
+entity events) are all component-serialized, so they must stay Java-shaped too. The original
+"pay down wire-type debt before 2–4" premise mostly doesn't hold; the finding itself is the value.

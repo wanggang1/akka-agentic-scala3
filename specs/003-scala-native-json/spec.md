@@ -133,9 +133,12 @@ module, and confirm that type still round-trips and its endpoint still behaves i
 - **FR-003**: After registration, an annotation-free Scala case class with `Option` fields MUST
   round-trip through JSON: present → `Some`, absent-or-null → `None`, with no per-type Jackson
   annotations.
-- **FR-004**: The greeting endpoint's request and reply, and the greeting agent's request and
-  reply, MUST be expressed as annotation-free Scala case classes using `Option` for optional
-  fields (at least one such type end to end for the MVP; the full set for US2).
+- **FR-004**: The greeting **endpoint's** request and reply (`GreetRequest`/`GreetReply`) MUST be
+  expressed as annotation-free Scala case classes using `Option` for optional fields.
+  *(Amended during implementation — see research R6:* the greeting **agent's** `Request`/`Result`
+  travel the component-to-component serializer, which uses a separate internal mapper the public
+  hook cannot reach, so they MUST remain Java-shaped. The idiomatic conversion applies to HTTP
+  endpoint bodies only.)*
 - **FR-005**: The manual `null → None` boundary conversions performed for the converted types MUST
   be removed; the converted types MUST never expose `null` to the domain/application layers.
 - **FR-006**: The externally observable `POST /greet` contract MUST be unchanged: the same request

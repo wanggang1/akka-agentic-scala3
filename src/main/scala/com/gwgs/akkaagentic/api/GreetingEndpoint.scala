@@ -5,7 +5,7 @@ import akka.javasdk.annotations.Acl
 import akka.javasdk.annotations.http.{HttpEndpoint, Post}
 import akka.javasdk.client.ComponentClient
 import akka.javasdk.http.HttpResponses
-import com.fasterxml.jackson.annotation.{JsonCreator, JsonIgnoreProperties, JsonProperty}
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.gwgs.akkaagentic.application.GreetingAgent
 import com.gwgs.akkaagentic.domain.GreetingRequest
 
@@ -33,11 +33,14 @@ object GreetingEndpoint:
   /** Outbound wire type — never expose domain/application types (Constitution II).
     * Mirrors the agent's structured [[GreetingAgent.Result]] shape, but stays an
     * API-owned type so the wire contract is independent of the application layer.
+    *
+    * Idiomatic Scala (feature 003): a plain, annotation-free case class. All fields are
+    * always present, so no `Option`; the Scala Jackson module serializes it natively.
     */
-  final case class GreetReply @JsonCreator() (
-      @JsonProperty("greeting") greeting: String,
-      @JsonProperty("tone") tone: String,
-      @JsonProperty("timeOfDay") timeOfDay: String
+  final case class GreetReply(
+      greeting: String,
+      tone: String,
+      timeOfDay: String
   )
 
   /** Map the application result to the API wire type (API isolation). */
@@ -66,8 +69,10 @@ class GreetingEndpoint(componentClient: ComponentClient):
         val result = componentClient
           .forAgent()
           .inSession(UUID.randomUUID().toString)
-          // Interim glue: GreetingAgent.Request.timezone is still a nullable String until
-          // US2/T008 converts it to Option; `orNull` bridges until then.
+          // GreetingAgent.Request stays Java-shaped (nullable `String` timezone): it travels the
+          // component-command serializer, which uses a SEPARATE internal ObjectMapper that the
+          // public JsonSupport hook does NOT reach — so it can't be an idiomatic `Option` type
+          // (see feature 003 research R6). `orNull` bridges the endpoint's `Option` to it.
           .dynamicCall[GreetingAgent.Request, GreetingAgent.Result]("greeting-agent")
           .invoke(GreetingAgent.Request(valid.user, valid.text, request.timezone.orNull))
         HttpResponses.ok(toApi(result))

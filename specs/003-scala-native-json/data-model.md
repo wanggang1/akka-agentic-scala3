@@ -42,7 +42,14 @@ is effectively idempotent for our purpose (re-registering the same module is har
 - All fields always present → plain `String` (no `Option`). Drops all Jackson annotations.
 - Still an API-owned type distinct from `GreetingAgent.Result` (API isolation, constitution II).
 
-### `GreetingAgent.Request` — agent command parameter
+> **Amended (research R6):** the two `GreetingAgent` types below were **reverted to Java-shaped**
+> and are NOT converted. They travel the component-to-component serializer (a separate internal
+> mapper the Scala module can't reach), so annotation-free `Option` types fail at runtime there.
+> Only the endpoint DTOs above (`GreetRequest`/`GreetReply`) are converted. The tables below record
+> the *attempted* conversion; the shipped types keep `@JsonCreator`/`@JsonProperty` and a nullable
+> `String` timezone.
+
+### `GreetingAgent.Request` — agent command parameter (KEPT Java-shaped)
 
 | Field | Before | After |
 |-------|--------|-------|
