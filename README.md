@@ -94,6 +94,15 @@ component descriptor and serves every component listed in it.
 
 The service listens on `http://localhost:9000`.
 
+> **Gemini note — tools vs. native structured output.** `GreetingAgent` both exposes a
+> `@FunctionTool` (`currentTimeOfDay`) and returns a structured `Result`. Google Gemini
+> **cannot combine function calling with a JSON response mime type** — a live call using the
+> native-schema mode (`responseConformsTo`) fails with `500 INVALID_ARGUMENT: "Function calling
+> with a response mime type: 'application/json' is unsupported"`. The agent therefore uses
+> `responseAs` (the model is instructed to emit JSON in the system prompt, and the SDK parses
+> the reply text) plus an `onFailure` fallback for the occasional non-JSON reply. OpenAI models
+> support both together, so this constraint is Gemini-specific.
+
 **Valid request** — returns a **structured** greeting `{greeting, tone, timeOfDay}` that names
 the user, adapts to the message's intent, and reflects the caller's time of day. The optional
 `timezone` (an IANA id) drives `timeOfDay`; a question or help request is acknowledged warmly,

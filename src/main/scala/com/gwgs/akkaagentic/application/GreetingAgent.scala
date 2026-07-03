@@ -55,11 +55,13 @@ object GreetingAgent:
       |so it falls back to UTC. Never guess the time of day yourself. You may weave a
       |time-appropriate touch into the greeting (e.g. "Good morning").
       |
-      |Produce three fields:
-      |  - greeting: the greeting text (one or two sentences),
-      |  - tone: a short label for the tone/intent you detected,
-      |  - timeOfDay: exactly the value returned by the time-of-day tool
-      |    (morning, afternoon, evening, or night).""".stripMargin
+      |Reply with ONLY a JSON object of exactly this shape — no prose, no markdown code
+      |fences, nothing before or after it:
+      |{
+      |  "greeting": "<the greeting text, one or two sentences>",
+      |  "tone": "<a short label for the tone/intent you detected, e.g. casual, question, formal>",
+      |  "timeOfDay": "<exactly the value the time-of-day tool returned: morning, afternoon, evening, or night>"
+      |}""".stripMargin
 
 @Component(id = "greeting-agent")
 class GreetingAgent extends Agent:
@@ -75,7 +77,19 @@ class GreetingAgent extends Agent:
            |${timezoneLine(request)}
            |Greet them.""".stripMargin
       )
-      .responseConformsTo(classOf[Result])
+      // GEMINI CONSTRAINT: we deliberately use `responseAs` (parse JSON from the reply
+      // text, per the JSON-shape instructions in SystemMessage) rather than
+      // `responseConformsTo` (native JSON-schema mode). Google Gemini rejects combining
+      // function calling with a JSON response mime type — a live call fails with
+      // INVALID_ARGUMENT: "Function calling with a response mime type: 'application/json'
+      // is unsupported". Because this agent both exposes a @FunctionTool (currentTimeOfDay)
+      // and returns a structured Result, `responseConformsTo` is not usable here on Gemini.
+      // (OpenAI supports both together; if we ever switch providers we could revisit this.)
+      .responseAs(classOf[Result])
+      // `responseAs` parses free-form model text, which is occasionally not valid JSON
+      // (JsonParsingException). Degrade to a safe, model-free greeting rather than a 500:
+      // name the user, use a neutral tone, and compute timeOfDay directly from the domain.
+      .onFailure(_ => Result(s"Hello ${request.user}!", "neutral", TimeOfDay.now(Option(request.timezone))))
       .thenReply()
 
   /** A line telling the model which timezone to use for the time-of-day tool.
