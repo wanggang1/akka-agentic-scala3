@@ -2,6 +2,8 @@ package com.gwgs.akkaagentic.domain
 
 import java.time.{Instant, ZoneId}
 
+import scala.util.Try
+
 /** A raw greeting request: the user's name and the message text they sent, each
   * possibly absent.
   *
@@ -76,5 +78,4 @@ object TimeOfDay:
       .getOrElse(DefaultZone)
 
   private def parseZone(id: String): Option[ZoneId] =
-    try Some(ZoneId.of(id))
-    catch case _: Exception => None
+    Try(ZoneId.of(id)).toOption
