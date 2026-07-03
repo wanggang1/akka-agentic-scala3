@@ -28,7 +28,9 @@ class GreetingEndpointIntegrationTest extends TestKitSupport:
 
     val response = httpClient
       .POST("/greet")
-      .withRequestBody(GreetingEndpoint.GreetRequest("Ada", "hello there"))
+      // Present `Some` fields (incl. an optional timezone) round-trip over the wire via the
+      // Scala-aware ObjectMapper — the idiomatic, annotation-free GreetRequest.
+      .withRequestBody(GreetingEndpoint.GreetRequest(Some("Ada"), Some("hello there"), Some("America/New_York")))
       .responseBodyAs(classOf[GreetingEndpoint.GreetReply])
       .invoke()
 
@@ -43,7 +45,19 @@ class GreetingEndpointIntegrationTest extends TestKitSupport:
     // No fixedResponse: the model must never be called for invalid input.
     val response = httpClient
       .POST("/greet")
-      .withRequestBody(GreetingEndpoint.GreetRequest("", "hello there"))
+      .withRequestBody(GreetingEndpoint.GreetRequest(Some(""), Some("hello there"), None))
+      .invoke()
+
+    assertThat(response.status()).isEqualTo(StatusCodes.BAD_REQUEST)
+
+  @Test
+  def absentUserIsRejected(): Unit =
+    // The `user` property is entirely absent from the body. The Scala module deserializes
+    // that to `None` (feature 003's new path), which validation rejects — 400, no model call.
+    // Complements the domain unit test (which bypasses JSON) by exercising the real boundary.
+    val response = httpClient
+      .POST("/greet")
+      .withRequestBody(ContentTypes.APPLICATION_JSON, """{"text":"hello there"}""".getBytes)
       .invoke()
 
     assertThat(response.status()).isEqualTo(StatusCodes.BAD_REQUEST)
@@ -52,7 +66,7 @@ class GreetingEndpointIntegrationTest extends TestKitSupport:
   def blankTextIsRejected(): Unit =
     val response = httpClient
       .POST("/greet")
-      .withRequestBody(GreetingEndpoint.GreetRequest("Ada", "   "))
+      .withRequestBody(GreetingEndpoint.GreetRequest(Some("Ada"), Some("   "), None))
       .invoke()
 
     assertThat(response.status()).isEqualTo(StatusCodes.BAD_REQUEST)
