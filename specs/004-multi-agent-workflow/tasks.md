@@ -32,10 +32,10 @@ from the Scala capability 1 (research R1). Cap-1 is not touched.
 
 **⚠️ CRITICAL**: complete before any user-story phase.
 
-- [ ] T003 [P] Create `TimeOfDay` in `src/main/java/com/gwgs/akkaagentic/team/domain/TimeOfDay.java` — `of(Instant, ZoneId)` labels (morning 05–11, afternoon 12–16, evening 17–20, night else) and `now(String timezone)` with null/blank/invalid → UTC; never throws (data-model).
-- [ ] T004 [P] Create `Tone` in `src/main/java/com/gwgs/akkaagentic/team/domain/Tone.java` — `NEUTRAL` constant and `normalize(String)` (trim; null/blank → NEUTRAL).
-- [ ] T005 [P] Create the shared wire records in `src/main/java/com/gwgs/akkaagentic/team/application/`: `StartGreeting.java` (user, text, timezone), `ComposeRequest.java` (user, text, tone, timezone), `GreetingResult.java` (greeting, tone, timeOfDay) — plain Java records (data-model).
-- [ ] T006 [P] Create `TimeOfDayTest` in `src/test/java/com/gwgs/akkaagentic/team/domain/TimeOfDayTest.java` — label boundaries + absent/blank/invalid-zone → UTC fallback (depends on T003).
+- [x] T003 [P] Create `TimeOfDay` in `src/main/java/com/gwgs/akkaagentic/team/domain/TimeOfDay.java` — `of(Instant, ZoneId)` labels (morning 05–11, afternoon 12–16, evening 17–20, night else) and `now(String timezone)` with null/blank/invalid → UTC; never throws (data-model).
+- [x] T004 [P] Create `Tone` in `src/main/java/com/gwgs/akkaagentic/team/domain/Tone.java` — `NEUTRAL` constant and `normalize(String)` (trim; null/blank → NEUTRAL).
+- [x] T005 [P] Create the shared wire records in `src/main/java/com/gwgs/akkaagentic/team/application/`: `StartGreeting.java` (user, text, timezone), `ComposeRequest.java` (user, text, tone, timezone), `GreetingResult.java` (greeting, tone, timeOfDay) — plain Java records (data-model).
+- [x] T006 [P] Create `TimeOfDayTest` in `src/test/java/com/gwgs/akkaagentic/team/domain/TimeOfDayTest.java` — label boundaries + absent/blank/invalid-zone → UTC fallback (depends on T003).
 
 **Checkpoint**: `mvn test` green (domain compiles and TimeOfDay unit test passes).
 
