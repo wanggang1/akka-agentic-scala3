@@ -38,6 +38,14 @@
                 <version>${scala-maven-plugin.version}</version>
                 <configuration>
                     <scalaVersion>${scala.version}</scalaVersion>
+                    <!--
+                      Compile ONLY Scala here. By default the plugin also joint-compiles the Java
+                      sources (cap-2) via scalac/javac WITHOUT -parameters, clobbering the classes
+                      maven-compiler-plugin produced correctly and breaking HTTP path-variable
+                      binding. cap-1 (Scala) and cap-2 (Java) have no cross-references, so scalac
+                      never needs the Java sources — leave Java entirely to maven-compiler-plugin.
+                    -->
+                    <sendJavaToScalac>false</sendJavaToScalac>
                 </configuration>
                 <executions>
                     <execution>
@@ -63,6 +71,15 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <configuration>
                     <proc>none</proc>
+                    <!--
+                      Keep -parameters: the SDK binds HTTP path variables (e.g. /greetings/{id})
+                      to method parameters by their reflected names. Overriding this plugin's
+                      configuration drops the parent's compilerArgs, so restore it here or the
+                      param compiles as `arg0` and path binding fails at startup.
+                    -->
+                    <compilerArgs>
+                        <arg>-parameters</arg>
+                    </compilerArgs>
                 </configuration>
             </plugin>
         </plugins>
