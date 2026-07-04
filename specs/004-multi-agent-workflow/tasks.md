@@ -21,8 +21,8 @@ from the Scala capability 1 (research R1). Cap-1 is not touched.
 
 **Purpose**: enable mixed Scala+Java compilation without breaking the descriptor.
 
-- [ ] T001 Add `maven-compiler-plugin` (default `compile` + `testCompile`) to `pom.xml` with `<proc>none</proc>` to disable the Akka annotation processor (research R2); run `mvn compile` and confirm cap-1 still builds green (no Java sources yet).
-- [ ] T002 [P] Create cap-2 package directories: `src/main/java/com/gwgs/akkaagentic/team/{api,application,domain}` and `src/test/java/com/gwgs/akkaagentic/team/{api,application,domain}`.
+- [x] T001 Add `maven-compiler-plugin` (default `compile` + `testCompile`) to `pom.xml` with `<proc>none</proc>` to disable the Akka annotation processor (research R2); run `mvn compile` and confirm cap-1 still builds green (no Java sources yet).
+- [x] T002 [P] Create cap-2 package directories: `src/main/java/com/gwgs/akkaagentic/team/{api,application,domain}` and `src/test/java/com/gwgs/akkaagentic/team/{api,application,domain}`.
 
 ---
 

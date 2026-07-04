@@ -49,6 +49,22 @@
                     </execution>
                 </executions>
             </plugin>
+
+            <!--
+              Compiles the Java sources of capability 2 (com.gwgs.akkaagentic.team.*).
+              `-proc:none` disables annotation processing: akka-javasdk-parent binds the
+              ComponentAnnotationProcessor to javac, which would regenerate (and OVERWRITE)
+              our hand-maintained META-INF component descriptor, dropping the Scala (cap-1)
+              entries and the top-level service-setup. We keep that descriptor authoritative
+              and list every component (Scala and Java) by hand. See specs/004 research R2.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <proc>none</proc>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 </project>
