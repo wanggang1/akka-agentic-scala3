@@ -31,6 +31,16 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 > friction path is to write the whole capability in Java (`com.gwgs.akkaagentic.team.*`), fully
 > decoupled from the Scala capability 1. See README "Scala interop notes" §4.
 
+> **Test-language rule: match the test to the code under test.** Scala code gets Scala tests;
+> Java code gets Java tests — each capability stays one language end-to-end. This isn't just
+> style: the same method-reference wall applies in tests. Pure domain tests, `httpClient`
+> endpoint tests, and agent tests (via `dynamicCall`) *can* be Scala, but a test that drives a
+> **Workflow** must be Java — `WorkflowClient` exposes only `.method(Wf::start)` (no
+> `dynamicCall`), which a Scala lambda can't satisfy. Entity `TestKit` calls (`testKit.method(
+> Entity::cmd)`) likely share this limit — verify when the first entity lands. So "all tests in
+> one language" isn't achievable *or* desirable here; matching the code under test is the
+> low-friction path.
+
 ## Ideas / follow-ups
 
 Not on the four-capability path, captured so they're not forgotten:
