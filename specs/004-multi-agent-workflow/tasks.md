@@ -71,7 +71,7 @@ structured `{greeting, tone, timeOfDay}`.
 
 **Independent Test**: `GET` immediately after `POST` → `404`; `GET` on a random id → `404`.
 
-- [ ] T017 [US2] Add to `GreetingTeamEndpointIntegrationTest.java`: C2 (immediate `GET` before completion → `404`) and C4 (unknown/never-started id → `404`, no greeting) (depends on T016).
+- [x] T017 [US2] Add to `GreetingTeamEndpointIntegrationTest.java`: C2 (immediate `GET` before completion → `404`) and C4 (unknown/never-started id → `404`, no greeting) (depends on T016).
 
 **Checkpoint**: async lifecycle fully observable and correct.
 
@@ -83,7 +83,7 @@ structured `{greeting, tone, timeOfDay}`.
 
 **Independent Test**: cap-1's existing suite passes unmodified; service starts with all components.
 
-- [ ] T018 [US3] Run `mvn verify`; confirm cap-1's Scala tests pass unchanged and the descriptor lists **all** components (cap-1 agents/endpoints + cap-2 `tone-agent`/`greeting-composer-agent`/`greeting-workflow`/`GreetingTeamEndpoint`) plus the top-level `service-setup` (SC-006, FR-010). No cap-1 code changes.
+- [x] T018 [US3] Run `mvn verify`; confirm cap-1's Scala tests pass unchanged and the descriptor lists **all** components (cap-1 agents/endpoints + cap-2 `tone-agent`/`greeting-composer-agent`/`greeting-workflow`/`GreetingTeamEndpoint`) plus the top-level `service-setup` (SC-006, FR-010). No cap-1 code changes.
 
 **Checkpoint**: both capabilities coexist and are served.
 
@@ -95,7 +95,7 @@ structured `{greeting, tone, timeOfDay}`.
 
 **Independent Test**: blank user, blank text, malformed body each → error; unknown props tolerated.
 
-- [ ] T019 [US4] Add to `GreetingTeamEndpointIntegrationTest.java`: C7 (blank user → `400`; blank text → `400`), C8 (malformed JSON → `400`), C9 (unknown JSON property tolerated → normal flow) (depends on T016).
+- [x] T019 [US4] Add to `GreetingTeamEndpointIntegrationTest.java`: C7 (blank user → `400`; blank text → `400`), C8 (malformed JSON → `400`), C9 (unknown JSON property tolerated → normal flow) (depends on T016).
 
 **Checkpoint**: validation-first behavior verified.
 
