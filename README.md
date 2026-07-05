@@ -14,11 +14,18 @@ are compiled alongside the SDK via the `scala-maven-plugin`. See
 ## Project layout
 
 ```text
-src/main/scala/com/gwgs/akkaagentic/domain/        # GreetingRequest (+ validation), TimeOfDay
-src/main/scala/com/gwgs/akkaagentic/application/    # GreetingAgent (structured Result + @FunctionTool)
-src/main/scala/com/gwgs/akkaagentic/api/            # GreetingEndpoint (POST /greet)
+# Capability 1 — Scala (single agent: structured output + tool)
+src/main/scala/com/gwgs/akkaagentic/domain/         # GreetingRequest (+ validation), TimeOfDay
+src/main/scala/com/gwgs/akkaagentic/application/     # GreetingAgent (structured Result + @FunctionTool)
+src/main/scala/com/gwgs/akkaagentic/api/             # GreetingEndpoint (POST /greet)
+
+# Capability 2 — Java (multi-agent Workflow; see "Scala interop notes" §4 for why Java)
+src/main/java/com/gwgs/akkaagentic/team/domain/      # TimeOfDay, Tone (Java copies)
+src/main/java/com/gwgs/akkaagentic/team/application/ # ToneAgent, GreetingComposerAgent, GreetingWorkflow
+src/main/java/com/gwgs/akkaagentic/team/api/         # GreetingTeamEndpoint (POST /greetings, GET /greetings/{id})
+
 src/main/resources/application.conf                 # default model-provider config
-src/test/scala/com/gwgs/akkaagentic/...             # tests (TestModelProvider, no live model)
+src/test/{scala,java}/com/gwgs/akkaagentic/...       # tests (TestModelProvider, no live model)
 ```
 
 - **groupId**: `com.gwgs` · **base package**: `com.gwgs.akkaagentic` · **service**: `akka-agentic-scala3`
@@ -81,6 +88,23 @@ writing components in Scala needs explicit workarounds:
    `GreetingAgent.Request`/`Result` keep their Jackson annotations while the endpoint DTOs are
    idiomatic. Trying to make a component payload an annotation-free `Option` type fails at
    runtime with *"Cannot construct instance of `scala.Option`"*.
+
+4. **The workflow method-reference wall — Workflows can't be authored in Scala.** The entire
+   Akka `Workflow` API is keyed on Java **method references** resolved from `SerializedLambda`
+   via `impl.client.MethodRefResolver`: step wiring (`transitionTo`, `thenTransitionTo`,
+   `stepTimeout`, `stepRecovery`, `RecoverStrategy.failoverTo`) **and** the caller's
+   `componentClient.forWorkflow(id).method(Workflow::start)`. The resolver requires a
+   `Serializable` lambda whose `implMethodName` equals the target method name; a Scala lambda
+   compiles to a synthetic `$anonfun$N` and never resolves. Crucially, unlike agents there is
+   **no `dynamicCall` overload on `WorkflowClient`** and no string/step-name API anywhere — so a
+   Scala workflow can neither wire its own steps nor be invoked. This is the workflow analogue
+   of the two-mapper finding in §3: the least-friction path is to write the whole capability in
+   **Java**. Capability 2 (the multi-agent greeting workflow, `com.gwgs.akkaagentic.team.*`) is
+   therefore Java, fully decoupled from the Scala capability 1 — which stays put and unchanged.
+   Mixing Java into this Scala module needs three `pom.xml` settings (annotation processor off
+   via `-proc:none` so it can't overwrite the hand-maintained descriptor; `-parameters` restored
+   for HTTP path binding; `scala-maven-plugin` `sendJavaToScalac=false` so scalac doesn't
+   joint-compile the Java without `-parameters`).
 
 ## Build
 
@@ -160,6 +184,38 @@ curl -i -X POST http://localhost:9000/greet \
 # 400 Bad Request
 # user must not be blank
 ```
+
+### Capability 2 — multi-agent workflow (`POST /greetings`, async)
+
+Capability 2 orchestrates **two** agents through an Akka `Workflow`: a `ToneAgent` classifies the
+message's tone, then a `GreetingComposerAgent` composes the greeting *given* that tone (and calls a
+`@FunctionTool` for the time of day). Because a workflow runs its steps asynchronously, the HTTP
+surface is **start-then-poll**: `POST /greetings` returns `202 Accepted` immediately with a handle
+and a `Location`, then you poll `GET /greetings/{id}` until it returns `200`. (This capability is
+implemented in **Java** — see "Scala interop notes" §4 for why.)
+
+```shell
+# 1. Start — returns 202 + Location + {"id": "..."}; the greeting is not composed yet
+curl -i -X POST http://localhost:9000/greetings \
+  -H "Content-Type: application/json" \
+  -d '{"user":"Ada","text":"How do I reset my password?","timezone":"America/New_York"}'
+# 202 Accepted
+# Location: /greetings/6c9ff9cc-...
+# {"id":"6c9ff9cc-..."}
+```
+
+```shell
+# 2. Poll — 404 while still in progress, 200 with the structured greeting once ready
+curl -i http://localhost:9000/greetings/6c9ff9cc-...
+# 404 Not Found        (while the workflow is still running)
+# ...then...
+# 200 OK
+# {"greeting":"Good evening, Ada — happy to help.","tone":"question","timeOfDay":"evening"}
+```
+
+Same validation-first contract as capability 1: a blank `user`/`text` or malformed JSON body is
+rejected with `400` before any workflow starts or model is called; an unknown/never-started id
+polls as `404`.
 
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.

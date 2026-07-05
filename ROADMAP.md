@@ -7,8 +7,8 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 ## Where we are
 
-> **You are here:** Feature 1 (structured output + tools) — **done and merged** (PR #5).
-> Next up: capability 2, multi-agent Workflow (not yet specced).
+> **You are here:** Feature 2 (multi-agent Workflow) — **implemented, in review** on branch
+> `004-multi-agent-workflow`. Next up: capability 3, Autonomous Agent (not yet specced).
 
 ## The path
 
@@ -16,11 +16,20 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 |---|------------|--------------|--------|
 | — | Baseline greeting agent (foundation) | [`specs/001-greeting-agent`](specs/001-greeting-agent/) | ✅ Done — merged |
 | 1 | **Tools + structured output** — agent returns a typed `{greeting, tone, timeOfDay}` object and calls a `@FunctionTool` | [`specs/002-agent-tools-structured`](specs/002-agent-tools-structured/) | ✅ Done — merged (PR #5) |
-| 2 | **Multi-agent Workflow** — orchestrate two agents through an Akka `Workflow` | _not yet created_ | ⬜ Not started |
+| 2 | **Multi-agent Workflow** — orchestrate two agents (tone → compose) through an Akka `Workflow`; async start/poll HTTP. **Implemented in Java** (see below) | [`specs/004-multi-agent-workflow`](specs/004-multi-agent-workflow/) | 🚧 In review |
 | 3 | **Autonomous Agent** — durable, model-driven process with typed tasks | _not yet created_ | ⬜ Not started |
 | 4 | **Session memory** — multi-turn context across requests | _not yet created_ | ⬜ Not started |
 
 **Status legend:** ✅ done · 📋 planned (spec written) · 🚧 in progress · ⬜ not started
+
+> **Capability 2 is written in Java, not Scala.** The Akka `Workflow` API is keyed entirely on
+> Java *method references* resolved from `SerializedLambda` — step wiring (`transitionTo`,
+> `stepTimeout`, `RecoverStrategy.failoverTo`) **and** `WorkflowClient.method(...)`. There is no
+> string/step-name overload and no `dynamicCall` on `WorkflowClient` (unlike agents), so a Scala
+> lambda's mangled `$anonfun` name never resolves and a Scala workflow can't wire its own steps
+> or be invoked. This is the workflow analogue of feature 003's two-mapper finding; the least-
+> friction path is to write the whole capability in Java (`com.gwgs.akkaagentic.team.*`), fully
+> decoupled from the Scala capability 1. See README "Scala interop notes" §4.
 
 ## Ideas / follow-ups
 
