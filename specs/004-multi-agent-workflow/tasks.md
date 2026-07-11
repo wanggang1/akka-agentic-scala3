@@ -105,7 +105,7 @@ structured `{greeting, tone, timeOfDay}`.
 
 - [x] T020 [P] Update `README.md` — add "Scala interop notes §4: the workflow method-reference wall (cap-2 is Java)" and async `/greetings` curl examples (start + poll).
 - [x] T021 [P] Update `ROADMAP.md` — mark capability 2 status (🚧 in progress → ✅ on merge); note it is implemented in Java and why.
-- [ ] T022 Run full `mvn verify` (all green) and perform a manual live Gemini smoke test of the async flow (documented in quickstart; not part of the offline suite).
+- [x] T022 Run full `mvn verify` (all green) and perform a manual live Gemini smoke test of the async flow (documented in quickstart; not part of the offline suite). *(live `/greet` and `/greetings` start→poll flow confirmed OK against Gemini)*
 
 ---
 
