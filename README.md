@@ -24,6 +24,11 @@ src/main/java/com/gwgs/akkaagentic/team/domain/      # TimeOfDay, Tone (Java cop
 src/main/java/com/gwgs/akkaagentic/team/application/ # ToneAgent, GreetingComposerAgent, GreetingWorkflow
 src/main/java/com/gwgs/akkaagentic/team/api/         # GreetingTeamEndpoint (POST /greetings, GET /greetings/{id})
 
+# Capability 3 — Scala (Autonomous Agent; back to Scala — see "Scala interop notes" §5)
+src/main/scala/com/gwgs/akkaagentic/assistant/domain/      # KnowledgeBase (canned), HelpQuestion (validation)
+src/main/scala/com/gwgs/akkaagentic/assistant/application/ # HelpDeskAgent (AutonomousAgent + @FunctionTool), HelpDeskTasks, HelpAnswer (Java-shaped result)
+src/main/scala/com/gwgs/akkaagentic/assistant/api/         # HelpDeskEndpoint (POST /help, GET /help/{taskId})
+
 src/main/resources/application.conf                 # default model-provider config
 src/test/{scala,java}/com/gwgs/akkaagentic/...       # tests (TestModelProvider, no live model)
 ```
@@ -105,6 +110,30 @@ writing components in Scala needs explicit workarounds:
    via `-proc:none` so it can't overwrite the hand-maintained descriptor; `-parameters` restored
    for HTTP path binding; `scala-maven-plugin` `sendJavaToScalac=false` so scalac doesn't
    joint-compile the Java without `-parameters`).
+
+5. **The Autonomous Agent has *no* method-reference wall — back to Scala.** Capability 3 (the
+   autonomous help-desk agent, `com.gwgs.akkaagentic.assistant.*`) returns to **Scala**, because the
+   entire `AutonomousAgent` API is keyed on `Class` references, `Task` constants, and annotations —
+   **not** the Java `SerializedLambda` method references that make Workflows Java-only (§4). Verified
+   against the SDK 3.6.0 bytecode: `forAutonomousAgent(Class, id)`, `runSingleTask(Task)`,
+   `forTask(id).get(Task)`, `Task.name(...).resultConformsTo(Class)`, `AgentDefinition.capability(...)`
+   — no `Function` parameter anywhere. So a Scala agent and a Scala caller compile to exactly what the
+   SDK expects, with none of the workflow friction. The wall was **Workflow-specific**, not intrinsic
+   to durable orchestration on this SDK. Three things to know:
+
+   - **Descriptor key is `autonomous-agent`** (a distinct key from `agent`, confirmed from the
+     annotation processor's constant pool). Add `HelpDeskAgent` under it, the endpoint under
+     `http-endpoint`; the `HelpDeskTasks` holder and `HelpAnswer` are **not** components.
+   - **The task result stays Java-shaped** (§3 again): `Task.resultConformsTo(classOf[HelpAnswer])`
+     drives the built-in `complete_task` tool's schema *and* deserializes the model's completion
+     through the SDK's *internal* mapper, so `HelpAnswer` is a Jackson-annotated Scala case class with
+     a `java.util.List` (like cap-1's `GreetingAgent.Result`). The HTTP DTOs stay idiomatic.
+   - **Gemini's tools-vs-JSON limit (§Gemini note) does *not* apply here**: the typed result is
+     delivered by the `complete_task` *tool* (function calling), not a JSON response mime type, so the
+     domain tool (`lookupPolicy`) and the typed completion coexist as two function-calling features.
+
+   No `pom.xml` change was needed — the mixed build already compiles Scala cap-3, and (a pleasant
+   surprise) the Scala `@Get("/help/{taskId}")` path binding works **without** scalac `-parameters`.
 
 ## Build
 
@@ -216,6 +245,42 @@ curl -i http://localhost:9000/greetings/6c9ff9cc-...
 Same validation-first contract as capability 1: a blank `user`/`text` or malformed JSON body is
 rejected with `400` before any workflow starts or model is called; an unknown/never-started id
 polls as `404`.
+
+### Capability 3 — autonomous help-desk agent (`POST /help`, async)
+
+Capability 3 is a single **Autonomous Agent** (`HelpDeskAgent`) that answers a question through a
+**model-driven** loop: given a question, the model decides on its own whether to consult a
+knowledge-base `@FunctionTool` (`lookupPolicy`), then completes a **typed task** carrying
+`{answer, category, citedTopics, confidence}`. Unlike capability 2's fixed workflow sequence, no code
+orders the steps — the runtime drives the model until it completes (or fails) the task. The task is a
+durable, queryable record, so the HTTP surface is again **start-then-poll**. (Back to **Scala** — see
+"Scala interop notes" §5 for why the Autonomous Agent, unlike the Workflow, needs no Java.)
+
+```shell
+# 1. Start — returns 202 + Location + {"taskId": "..."}; the answer is not ready yet
+curl -i -X POST http://localhost:9000/help \
+  -H "Content-Type: application/json" \
+  -d '{"question":"How do I reset my password?"}'
+# 202 Accepted
+# Location: /help/2f1c...
+# {"taskId":"2f1c..."}
+```
+
+```shell
+# 2. Poll — 404 while the agent iterates, 200 with the typed answer once COMPLETED
+curl -i http://localhost:9000/help/2f1c...
+# 404 Not Found        (while the agent is still working)
+# ...then...
+# 200 OK
+# {"answer":"Use \"Forgot password\" on the sign-in page ...","category":"account",
+#  "citedTopics":["password-reset"],"confidence":90}
+```
+
+`citedTopics` is populated when the model chose to consult the knowledge base, and empty when it
+answered directly — the decision is the model's, not a fixed step. A task the agent reports it cannot
+answer polls as `422 Unprocessable Content` (distinct from `404` not-ready and `200` success); a blank
+question or malformed body is rejected `400` before any task starts; an unknown/never-started id polls
+as `404`.
 
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.

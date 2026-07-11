@@ -7,8 +7,9 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 ## Where we are
 
-> **You are here:** Feature 2 (multi-agent Workflow) — **done and merged** (PR #9). Next up:
-> capability 3, Autonomous Agent (not yet specced).
+> **You are here:** Feature 3 (Autonomous Agent) — **implemented, in review** on branch
+> `005-autonomous-agent`. Back to Scala (unlike cap-2). Next up: capability 4, Session memory
+> (not yet specced).
 
 ## The path
 
@@ -17,7 +18,7 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 | — | Baseline greeting agent (foundation) | [`specs/001-greeting-agent`](specs/001-greeting-agent/) | ✅ Done — merged |
 | 1 | **Tools + structured output** — agent returns a typed `{greeting, tone, timeOfDay}` object and calls a `@FunctionTool` | [`specs/002-agent-tools-structured`](specs/002-agent-tools-structured/) | ✅ Done — merged (PR #5) |
 | 2 | **Multi-agent Workflow** — orchestrate two agents (tone → compose) through an Akka `Workflow`; async start/poll HTTP. **Implemented in Java** (see below) | [`specs/004-multi-agent-workflow`](specs/004-multi-agent-workflow/) | ✅ Done — merged (PR #9) |
-| 3 | **Autonomous Agent** — durable, model-driven process with typed tasks | _not yet created_ | ⬜ Not started |
+| 3 | **Autonomous Agent** — durable, model-driven help-desk agent with a typed task + knowledge-base tool; async start/poll HTTP. **Back in Scala** (see below) | [`specs/005-autonomous-agent`](specs/005-autonomous-agent/) | 🚧 In review |
 | 4 | **Session memory** — multi-turn context across requests | _not yet created_ | ⬜ Not started |
 
 **Status legend:** ✅ done · 📋 planned (spec written) · 🚧 in progress · ⬜ not started
@@ -30,6 +31,20 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 > or be invoked. This is the workflow analogue of feature 003's two-mapper finding; the least-
 > friction path is to write the whole capability in Java (`com.gwgs.akkaagentic.team.*`), fully
 > decoupled from the Scala capability 1. See README "Scala interop notes" §4.
+
+> **Capability 3 is back in Scala — the wall was Workflow-specific, not intrinsic.** The
+> `AutonomousAgent` API is keyed on `Class` references, `Task` constants, and annotations —
+> `forAutonomousAgent(Class, id)`, `runSingleTask(Task)`, `forTask(id).get(Task)`,
+> `Task.name(...).resultConformsTo(Class)`, `AgentDefinition.capability(...)` — with **no**
+> `SerializedLambda` method reference anywhere (verified against the SDK 3.6.0 bytecode). So a Scala
+> agent and a Scala caller compile to exactly what the SDK expects, and cap-3 is idiomatic Scala with
+> none of cap-2's friction. This narrows the roadmap's through-line: the method-reference wall is
+> **specific to the Workflow API**, not to durable multi-step orchestration in general — the
+> Autonomous Agent, a *more* capable orchestration primitive, is Scala-friendly. The only carried-over
+> constraint is the familiar one (the task result stays Java-shaped, per feature 003's two-mapper
+> finding). Bonus: the Scala `@Get("/help/{taskId}")` path binding works without scalac `-parameters`.
+> Takeaway: **prefer the Autonomous Agent over a Workflow when a Scala capability needs the model to
+> drive the loop.** See README "Scala interop notes" §5.
 
 > **Test-language rule: match the test to the code under test.** Scala code gets Scala tests;
 > Java code gets Java tests — each capability stays one language end-to-end. This isn't just
