@@ -74,7 +74,14 @@ curl -i -X POST http://localhost:9000/help \
   agent decides whether/how often to call `lookupPolicy` before it calls the built-in `complete_task`
   tool. Watch the iteration in the logs / Akka console.
 - **The task is the durable record** — the answer is queryable by its `taskId` at any time via
-  `forTask(taskId).get(ANSWER)`; there is no wrapping Workflow.
+  `forTask(taskId).get(ANSWER)`; there is no wrapping Workflow. Durability is intrinsic to the
+  `AutonomousAgent`/`Task` primitives, *not* something `HelpDeskAgent` opts into (no `persist(...)`, no
+  state, no annotation): the runtime persists the task (id/status/result) and the agent's process state
+  to the service's durable store and recovers them after a crash/restart (FR-006).
+  - **Local restart caveat**: `exec:java` uses an **in-memory** store by default (state lost on
+    restart). To see a task survive a local restart, run with
+    `-Dakka.javasdk.dev-mode.persistence.enabled=true` (writes `db.mv.db`); a deployed service always
+    has its datastore on. See `akka-context/sdk/running-locally.html.md`.
 - **cap-1 & cap-2 untouched** — `POST /greet` and `/greetings` behave exactly as before.
 
 ## Gotchas (from research)

@@ -282,6 +282,35 @@ answer polls as `422 Unprocessable Content` (distinct from `404` not-ready and `
 question or malformed body is rejected `400` before any task starts; an unknown/never-started id polls
 as `404`.
 
+> **Why start-then-poll, and how the task survives — durability is in the runtime, not the agent
+> code.** A model-driven loop is long-running (several LLM round-trips), so `POST /help` starts the
+> work and returns a handle instead of blocking the HTTP request; the caller polls (or, in code, could
+> `componentClient.forTask(taskId).result(ANSWER)` to block until terminal). What makes that safe is
+> that the **task is durable** — and notice that *nothing in [`HelpDeskAgent`](src/main/scala/com/gwgs/akkaagentic/assistant/application/HelpDeskAgent.scala)
+> opts into persistence*: no `persist(...)`, no state field, no annotation. Durability is intrinsic to
+> the `AutonomousAgent`/`Task` primitives. The runtime persists two things as the loop progresses —
+> the **task** (its id, status, and typed result) and the **agent process state** (its queue and
+> iteration bookkeeping) — to the service's durable store, and recovers them automatically after a
+> crash or restart (Akka docs: *"Agent and task state is persisted along the way, so work survives
+> crashes and restarts"*). A task that was mid-flight resumes from its last persisted point; a
+> `COMPLETED` task's result stays queryable by its `taskId`. This is exactly why **no wrapping
+> `Workflow` is needed** for durability — the task already *is* the durable record. (Contrast an
+> `EventSourcedEntity`, where *you* write `effects().persist(event)` yourself.)
+>
+> **Local caveat — persistence is opt-in when running with `exec:java`.** By default the local dev
+> runtime uses an **in-memory** store, so a restart loses all state. To observe durability across a
+> local restart, enable the on-disk (H2) store:
+>
+> ```shell
+> set -a && source .env && set +a && \
+>   mvn compile exec:java -Dakka.javasdk.dev-mode.persistence.enabled=true
+> ```
+>
+> This writes a `db.mv.db` file; start → poll to `200`, restart the same command, and `GET
+> /help/{taskId}` still returns the answer from disk. A **deployed** service always has its backing
+> datastore on, so this flag is a local-development concern only. See Akka's *Running locally* docs
+> (`akka-context/sdk/running-locally.html.md`, "Running a service with persistence enabled").
+
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.
 
