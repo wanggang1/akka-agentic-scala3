@@ -1,9 +1,10 @@
 package com.gwgs.akkaagentic.assistant.api
 
 import java.time.Duration
+import java.util.UUID
 
-import akka.http.javadsl.model.StatusCodes
-import akka.javasdk.testkit.TestModelProvider.AutonomousAgentTools.completeTask
+import akka.http.javadsl.model.{ContentTypes, StatusCodes}
+import akka.javasdk.testkit.TestModelProvider.AutonomousAgentTools.{completeTask, failTask}
 import akka.javasdk.testkit.{TestKit, TestKitSupport, TestModelProvider}
 import com.gwgs.akkaagentic.assistant.application.{HelpAnswer, HelpDeskAgent}
 import org.assertj.core.api.Assertions.assertThat
@@ -100,3 +101,81 @@ class HelpDeskEndpointIntegrationTest extends TestKitSupport:
         assertThat(reply.body().category).isEqualTo("account")
         assertThat(reply.body().citedTopics).isEqualTo(List("password-reset")) // C5: cited
       }
+
+  // --- US2: polling an in-progress / unknown / failed task (contracts C2, C4, C7) ---
+
+  /** C2: GET right after POST — before the agent completes — is 404, never a fabricated answer. */
+  @Test
+  def getBeforeCompletionReturnsNotFound(): Unit =
+    // Model left unconfigured: the task can't reach COMPLETED, so the snapshot is not-ready.
+    val accepted = httpClient
+      .POST("/help")
+      .withRequestBody(HelpDeskEndpoint.AskRequest(Some("anything at all")))
+      .responseBodyAs(classOf[HelpDeskEndpoint.StartAccepted])
+      .invoke()
+    assertThat(accepted.status()).isEqualTo(StatusCodes.ACCEPTED)
+
+    // Omit responseBodyAs so a non-2xx status doesn't throw; assert 404 directly.
+    val reply = httpClient.GET("/help/" + accepted.body().taskId).invoke()
+    assertThat(reply.status()).isEqualTo(StatusCodes.NOT_FOUND) // C2
+
+  /** C4: GET on a task id that was never started is 404, with no answer invented. */
+  @Test
+  def getUnknownIdReturnsNotFound(): Unit =
+    val reply = httpClient.GET("/help/" + UUID.randomUUID()).invoke()
+    assertThat(reply.status()).isEqualTo(StatusCodes.NOT_FOUND) // C4
+
+  /** C7: when the agent abandons the task (fail_task), retrieval is 422 — distinct from 200 and 404. */
+  @Test
+  def failedTaskReturnsUnprocessable(): Unit =
+    model.fixedResponse(failTask("I cannot answer this question."))
+
+    val accepted = httpClient
+      .POST("/help")
+      .withRequestBody(HelpDeskEndpoint.AskRequest(Some("what is the meaning of life?")))
+      .responseBodyAs(classOf[HelpDeskEndpoint.StartAccepted])
+      .invoke()
+    assertThat(accepted.status()).isEqualTo(StatusCodes.ACCEPTED)
+    val taskId = accepted.body().taskId
+
+    Awaitility
+      .await()
+      .atMost(Duration.ofSeconds(20))
+      .untilAsserted { () =>
+        val reply = httpClient.GET("/help/" + taskId).invoke()
+        assertThat(reply.status()).isEqualTo(StatusCodes.UNPROCESSABLE_ENTITY) // C7
+      }
+
+  // --- US4: invalid input rejected before any work (contracts C8, C9) ---
+
+  /** C8: blank and absent questions are each rejected up front — no task started, no model call. */
+  @Test
+  def blankOrAbsentQuestionRejected(): Unit =
+    val blank = httpClient
+      .POST("/help")
+      .withRequestBody(HelpDeskEndpoint.AskRequest(Some("   ")))
+      .invoke()
+    assertThat(blank.status()).isEqualTo(StatusCodes.BAD_REQUEST)
+
+    // Absent field: `question` deserializes to None → rejected (400), not a 500.
+    val absent = httpClient
+      .POST("/help")
+      .withRequestBody(ContentTypes.APPLICATION_JSON, "{}".getBytes)
+      .invoke()
+    assertThat(absent.status()).isEqualTo(StatusCodes.BAD_REQUEST)
+
+  /** C9: a malformed body is rejected by the SDK; an unknown property is tolerated (normal flow). */
+  @Test
+  def malformedRejectedUnknownPropertyTolerated(): Unit =
+    val malformed = httpClient
+      .POST("/help")
+      .withRequestBody(ContentTypes.APPLICATION_JSON, "{ \"question\": ".getBytes)
+      .invoke()
+    assertThat(malformed.status()).isEqualTo(StatusCodes.BAD_REQUEST) // C9: malformed
+
+    // Extra property ignored (@JsonIgnoreProperties); the task starts normally → 202.
+    val extra = httpClient
+      .POST("/help")
+      .withRequestBody(ContentTypes.APPLICATION_JSON, """{"question":"hi there","surprise":"ignored"}""".getBytes)
+      .invoke()
+    assertThat(extra.status()).isEqualTo(StatusCodes.ACCEPTED) // C9: unknown prop tolerated
