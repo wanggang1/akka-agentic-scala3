@@ -108,7 +108,7 @@ components including the new `autonomous-agent`.
 
 - [x] T018 [P] Update `README.md` — add "Scala interop notes §5: the Autonomous Agent has no method-reference wall (cap-3 is Scala); descriptor key `autonomous-agent`; task result stays Java-shaped; Gemini tools-vs-JSON does not apply", the cap-3 async `/help` curl examples (start + poll + 422), and the project-layout entry for `assistant/*`.
 - [x] T019 [P] Update `ROADMAP.md` — mark capability 3 status (🚧 in progress → ✅ on merge); note it is Scala and *why* (contrast with cap-2: no method-ref wall), narrowing the R6 through-line.
-- [ ] T020 Run full `mvn verify` (all green) and perform a manual live Gemini smoke test of the async `/help` flow (documented in quickstart; not part of the offline suite; confirms R4 on a real call).
+- [x] T020 Run full `mvn verify` (all green) and perform a manual live Gemini smoke test of the async `/help` flow (documented in quickstart; not part of the offline suite; confirms R4 on a real call). *(live `/help` flow confirmed OK; durability also verified via a full-JVM-restart test with the on-disk H2 store)*
 
 ---
 

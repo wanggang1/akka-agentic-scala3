@@ -310,6 +310,10 @@ as `404`.
 > /help/{taskId}` still returns the answer from disk. A **deployed** service always has its backing
 > datastore on, so this flag is a local-development concern only. See Akka's *Running locally* docs
 > (`akka-context/sdk/running-locally.html.md`, "Running a service with persistence enabled").
+>
+> *Verified locally:* with the flag on, a `COMPLETED` task's typed result survived a full JVM restart
+> — a fresh process (new PID), started after the first was confirmed down, reconstructed the same
+> `{answer, category, citedTopics, confidence}` from the on-disk store.
 
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.
