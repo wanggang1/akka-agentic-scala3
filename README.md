@@ -29,6 +29,14 @@ src/main/scala/com/gwgs/akkaagentic/assistant/domain/      # KnowledgeBase (cann
 src/main/scala/com/gwgs/akkaagentic/assistant/application/ # HelpDeskAgent (AutonomousAgent + @FunctionTool), HelpDeskTasks, HelpAnswer (Java-shaped result)
 src/main/scala/com/gwgs/akkaagentic/assistant/api/         # HelpDeskEndpoint (POST /help, GET /help/{taskId})
 
+# Capability 4 — Scala (session memory: multi-turn chat; see "Scala interop notes" §6)
+src/main/scala/com/gwgs/akkaagentic/chat/domain/      # ChatMessage (validation)
+src/main/scala/com/gwgs/akkaagentic/chat/application/ # ChatAgent (request-based Agent + session memory)
+src/main/scala/com/gwgs/akkaagentic/chat/api/         # ChatEndpoint (POST /chat/{sessionId})
+# Note: session memory is backed by the SDK-internal SessionMemoryEntity (runtime-registered — NOT in
+# our descriptor). Cap-4's memory test is JAVA (src/test/java/.../chat) because the EventSourcedEntity
+# client is method-ref-only (no dynamicCall) so Scala can't query SessionMemoryEntity — see §6.
+
 src/main/resources/application.conf                 # default model-provider config
 src/test/{scala,java}/com/gwgs/akkaagentic/...       # tests (TestModelProvider, no live model)
 ```
@@ -134,6 +142,38 @@ writing components in Scala needs explicit workarounds:
 
    No `pom.xml` change was needed — the mixed build already compiles Scala cap-3, and (a pleasant
    surprise) the Scala `@Get("/help/{taskId}")` path binding works **without** scalac `-parameters`.
+
+6. **Session memory is Scala-friendly to *build*, but has two *testing* limits.** Capability 4 (the
+   multi-turn chat, `com.gwgs.akkaagentic.chat.*`) is **Scala**, and *building* on session memory adds
+   **no** new interop friction: it is keyed by the session-id string already passed to `.inSession(id)`;
+   the `MemoryProvider`/`MemoryFilter` API is builder-based (`String`/`int`/`Class` args — no method-ref
+   wall); the backing `SessionMemoryEntity` is **registered by the runtime**, so it is deliberately
+   **absent** from the hand-maintained descriptor (only `ChatAgent` under `agent` and `ChatEndpoint`
+   under `http-endpoint` are added); and the agent payload is a **bare `String`** in/out, so — unlike
+   cap-1's `Result` and cap-3's `HelpAnswer` — there is **no Java-shaped wire type** crossing the
+   internal mapper (the least-interop capability in the project). *Testing* it, however, surfaced two
+   real limits (feature 006 research R6):
+
+   - **The mocked model never sees replayed history.** With `TestModelProvider`, each model call
+     receives only the **current turn's** user message (verified: a size-1 message list across two
+     turns; a 2s gap changes nothing — not a race). The assembled session history is not surfaced into
+     a *test* model provider's input. So multi-turn **recall** (the model *using* prior turns) is not
+     observable offline through the mock, and is proven by the **live smoke test** instead.
+   - **Retention/isolation are provable offline — but only from Java.** Session memory *is* written and
+     readable in tests: reading `SessionMemoryEntity` for the session id after two turns returns the
+     4 stored messages (2 user + 2 AI), and a different id is empty — proving retention and isolation.
+     But that read must be **Java**: the `EventSourcedEntity` client is **method-reference-only**
+     (`SessionMemoryEntity::getHistory`) with **no `dynamicCall`** — the same wall as cap-2's
+     `WorkflowClient` (§4). A Scala caller cannot query it, so cap-4's memory test
+     ([`SessionMemoryIntegrationTest`](src/test/java/com/gwgs/akkaagentic/chat/application/SessionMemoryIntegrationTest.java))
+     is Java — matching the test language to a Java SDK entity Scala can't reach. Everything else
+     (agent wiring, HTTP contract, validation) stays Scala.
+
+   No `pom.xml` change was needed — the mixed build already compiles Scala cap-4 and its one Java test.
+   Takeaway: **the method-ref wall is not just a Workflow story — it recurs wherever the SDK client is
+   keyed on a Java method reference with no `dynamicCall` escape hatch (Workflow *and* EventSourcedEntity
+   clients).** The Agent and AutonomousAgent clients have `dynamicCall`; the entity/workflow clients do
+   not.
 
 ## Build
 
@@ -314,6 +354,59 @@ as `404`.
 > *Verified locally:* with the flag on, a `COMPLETED` task's typed result survived a full JVM restart
 > — a fresh process (new PID), started after the first was confirmed down, reconstructed the same
 > `{answer, category, citedTopics, confidence}` from the on-disk store.
+
+### Capability 4 — multi-turn chat (`POST /chat/{sessionId}`, synchronous)
+
+Capability 4 is a single request-based **`ChatAgent`** that holds a **multi-turn conversation**. There
+is no per-turn state in the agent: the runtime's **session memory**, keyed by the `sessionId` in the
+path, stores each turn and replays earlier turns as context on the next call with the same id. Unlike
+capabilities 2 and 3, this is **synchronous** — `POST /chat/{sessionId}` returns the reply directly, no
+polling. Reusing the same `sessionId` across requests is the whole feature. (Back in **Scala** — see
+"Scala interop notes" §6.)
+
+```shell
+# 1. State a fact on a conversation id you choose
+curl -i -X POST http://localhost:9000/chat/c-123 \
+  -H "Content-Type: application/json" \
+  -d '{"message":"my name is Ada"}'
+# 200 OK — {"sessionId":"c-123","reply":"Nice to meet you, Ada!"}
+```
+
+```shell
+# 2. Ask about it on the SAME id — the reply recalls turn 1
+curl -i -X POST http://localhost:9000/chat/c-123 \
+  -H "Content-Type: application/json" \
+  -d '{"message":"what is my name?"}'
+# 200 OK — {"sessionId":"c-123","reply":"Your name is Ada."}
+```
+
+A **different** id is a separate conversation with no shared context:
+
+```shell
+curl -i -X POST http://localhost:9000/chat/c-999 \
+  -H "Content-Type: application/json" \
+  -d '{"message":"what is my name?"}'
+# 200 OK — the reply does not know "Ada"
+```
+
+Same validation-first contract as the other capabilities: a blank/absent `message` or a malformed JSON
+body is rejected with `400` before the assistant is engaged; an unknown extra property is tolerated.
+
+```shell
+curl -i -X POST http://localhost:9000/chat/c-123 \
+  -H "Content-Type: application/json" -d '{"message":"  "}'
+# 400 Bad Request — message must not be blank
+```
+
+> **Where memory lives, and why the offline tests are split across two languages.** Nothing in
+> [`ChatAgent`](src/main/scala/com/gwgs/akkaagentic/chat/application/ChatAgent.scala) persists anything —
+> it just sets `.memory(MemoryProvider.limitedWindow())`. The conversation history is written to the
+> SDK-internal `SessionMemoryEntity` (an event-sourced entity keyed by `sessionId`) and replayed
+> automatically; durability is intrinsic, exactly as with cap-3's task. When testing this offline we
+> found (feature 006 research R6) that a mocked model is fed **only the current turn**, so *recall* is
+> verified by a **live** smoke test, while *retention* and *isolation* are proven offline by reading
+> `SessionMemoryEntity` directly — a **Java** test, because the entity client is method-ref-only (no
+> `dynamicCall`) and Scala can't call it. See "Scala interop notes" §6.
 
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.
