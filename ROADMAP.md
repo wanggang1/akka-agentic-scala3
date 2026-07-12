@@ -7,9 +7,9 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 ## Where we are
 
-> **You are here:** Feature 3 (Autonomous Agent) — **done** (offline suite green + live Gemini
-> smoke test + durability restart test passed) on branch `005-autonomous-agent`, ready to merge.
-> Back to Scala (unlike cap-2). Next up: capability 4, Session memory (not yet specced).
+> **You are here:** Feature 3 (Autonomous Agent) — **merged (PR #10)** (offline suite green + live
+> Gemini smoke test + durability restart test passed). Back to Scala (unlike cap-2). Next up:
+> capability 4, Session memory (not yet specced).
 
 ## The path
 
@@ -18,7 +18,7 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 | — | Baseline greeting agent (foundation) | [`specs/001-greeting-agent`](specs/001-greeting-agent/) | ✅ Done — merged |
 | 1 | **Tools + structured output** — agent returns a typed `{greeting, tone, timeOfDay}` object and calls a `@FunctionTool` | [`specs/002-agent-tools-structured`](specs/002-agent-tools-structured/) | ✅ Done — merged (PR #5) |
 | 2 | **Multi-agent Workflow** — orchestrate two agents (tone → compose) through an Akka `Workflow`; async start/poll HTTP. **Implemented in Java** (see below) | [`specs/004-multi-agent-workflow`](specs/004-multi-agent-workflow/) | ✅ Done — merged (PR #9) |
-| 3 | **Autonomous Agent** — durable, model-driven help-desk agent with a typed task + knowledge-base tool; async start/poll HTTP. **Back in Scala** (see below) | [`specs/005-autonomous-agent`](specs/005-autonomous-agent/) | ✅ Done — live-verified |
+| 3 | **Autonomous Agent** — durable, model-driven help-desk agent with a typed task + knowledge-base tool; async start/poll HTTP. **Back in Scala** (see below) | [`specs/005-autonomous-agent`](specs/005-autonomous-agent/) | ✅ Done — merged (PR #10) |
 | 4 | **Session memory** — multi-turn context across requests | _not yet created_ | ⬜ Not started |
 
 **Status legend:** ✅ done · 📋 planned (spec written) · 🚧 in progress · ⬜ not started
