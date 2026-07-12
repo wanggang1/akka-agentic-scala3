@@ -79,8 +79,8 @@ know the name.
 
 **Independent Test**: Blank message → `400`; malformed body → `400`; extra field + valid message → `200`.
 
-- [ ] T013 [US3] Create `ChatEndpointIntegrationTest` in `src/test/scala/com/gwgs/akkaagentic/chat/api/ChatEndpointIntegrationTest.scala` (HTTP layer via `httpClient`) covering the offline-provable contract: C7 a `200` reply echoes the path `sessionId` and carries the mocked reply (US1 wiring), C3 blank → 400, C4 absent field → 400, C5 malformed JSON → 400, C6 valid + unknown prop → 200 (US3). Use `TestModelProvider` for the agent; assert 400 cases via omitting `responseBodyAs` (per the httpClient failure-status pattern). (C1 recall / C2 isolation are memory-behavior → live smoke test T018, not asserted here — R6.)
-- [ ] T014 [US3] Run `mvn verify` to confirm the full contract passes and capabilities 1–3 remain green.
+- [x] T013 [US3] Create `ChatEndpointIntegrationTest` in `src/test/scala/com/gwgs/akkaagentic/chat/api/ChatEndpointIntegrationTest.scala` (HTTP layer via `httpClient`) covering the offline-provable contract: C7 a `200` reply echoes the path `sessionId` and carries the mocked reply (US1 wiring), C3 blank → 400, C4 absent field → 400, C5 malformed JSON → 400, C6 valid + unknown prop → 200 (US3). Use `TestModelProvider` for the agent; assert 400 cases via omitting `responseBodyAs` (per the httpClient failure-status pattern). (C1 recall / C2 isolation are memory-behavior → live smoke test T018, not asserted here — R6.) ✅ 5 tests green.
+- [x] T014 [US3] Run `mvn verify` to confirm the full contract passes and capabilities 1–3 remain green. ✅ BUILD SUCCESS, 33 integration tests, 0 failures.
 
 **Checkpoint**: All three stories independently functional.
 
