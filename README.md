@@ -407,6 +407,12 @@ curl -i -X POST http://localhost:9000/chat/c-123 \
 > verified by a **live** smoke test, while *retention* and *isolation* are proven offline by reading
 > `SessionMemoryEntity` directly — a **Java** test, because the entity client is method-ref-only (no
 > `dynamicCall`) and Scala can't call it. See "Scala interop notes" §6.
+>
+> *Verified live:* against Gemini, `POST /chat/c-123 {"message":"my name is Ada"}` then
+> `POST /chat/c-123 {"message":"what is my name?"}` replied *"Your name is Ada!"* — recall across two
+> separate requests on the same `sessionId`. The same question on a different id
+> (`POST /chat/c-999`) replied *"I don't know your name yet! You haven't told me."* — confirming memory
+> replay **and** per-session isolation end-to-end.
 
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.

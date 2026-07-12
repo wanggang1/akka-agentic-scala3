@@ -7,9 +7,10 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 ## Where we are
 
-> **You are here:** Feature 4 (Session memory) — **implementation complete**, offline suite green
-> (US1/US2/US3) on branch `006-session-memory`; live Gemini smoke test (recall proof) pending, then
-> PR. Back in Scala. This is the **last** of the four planned capabilities.
+> **You are here:** Feature 4 (Session memory) — **done** (offline suite green + live Gemini smoke test:
+> recall across turns on one session id, isolation across ids) on branch `006-session-memory`, ready to
+> merge. Back in Scala. This is the **last** of the four planned capabilities — the roadmap is complete
+> once it merges.
 
 ## The path
 
@@ -19,7 +20,7 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 | 1 | **Tools + structured output** — agent returns a typed `{greeting, tone, timeOfDay}` object and calls a `@FunctionTool` | [`specs/002-agent-tools-structured`](specs/002-agent-tools-structured/) | ✅ Done — merged (PR #5) |
 | 2 | **Multi-agent Workflow** — orchestrate two agents (tone → compose) through an Akka `Workflow`; async start/poll HTTP. **Implemented in Java** (see below) | [`specs/004-multi-agent-workflow`](specs/004-multi-agent-workflow/) | ✅ Done — merged (PR #9) |
 | 3 | **Autonomous Agent** — durable, model-driven help-desk agent with a typed task + knowledge-base tool; async start/poll HTTP. **Back in Scala** (see below) | [`specs/005-autonomous-agent`](specs/005-autonomous-agent/) | ✅ Done — merged (PR #10) |
-| 4 | **Session memory** — multi-turn chat; context replayed across requests via the SDK's `SessionMemoryEntity`, keyed by a caller-supplied session id; synchronous HTTP. **Scala** (see below) | [`specs/006-session-memory`](specs/006-session-memory/) | 🚧 Impl complete — offline green; live smoke test + PR pending |
+| 4 | **Session memory** — multi-turn chat; context replayed across requests via the SDK's `SessionMemoryEntity`, keyed by a caller-supplied session id; synchronous HTTP. **Scala** (see below) | [`specs/006-session-memory`](specs/006-session-memory/) | ✅ Done — live-verified; PR pending |
 
 **Status legend:** ✅ done · 📋 planned (spec written) · 🚧 in progress · ⬜ not started
 
