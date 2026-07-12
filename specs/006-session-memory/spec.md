@@ -123,14 +123,13 @@ assistant engagement; send a malformed request body and observe a client-error r
 ### Measurable Outcomes
 
 - **SC-001**: In a two-request exchange on one conversation id — state a fact, then ask about it — the
-  second reply reflects the fact from the first request, verified against the live model (smoke test).
-  *Offline note:* the mocked model (`TestModelProvider`) receives only the current turn, so recall is
-  not offline-observable through the mock; the offline suite instead pins that behavior as a regression
-  (see the Assumptions "Offline testability" note and research R6).
-- **SC-002**: A fact stated in one conversation never appears as known in a reply to a different
-  conversation id (cross-conversation isolation), verified against the live model (smoke test); the
-  offline suite covers the HTTP surface's per-session wiring but cannot observe isolation through the
-  mock (same reason as SC-001).
+  conversation retains both turns (verified offline by reading stored history) and the second reply
+  reflects the first (recall verified against the live model). *Offline note:* the mocked assistant is
+  fed only the current turn, so *recall* is only visible live; *retention* is proven offline. (See the
+  Assumptions "Offline testability" note and research R6.)
+- **SC-002**: A fact stored under one conversation id never appears under a different id — isolation
+  verified offline by reading each conversation's stored history (one populated, the other empty), and
+  re-confirmed end-to-end against the live model.
 - **SC-003**: A blank or absent message is rejected with a client error and the assistant is never
   engaged (verified with no model interaction recorded).
 - **SC-004**: A malformed request body is rejected with a client error; a body with extra unrecognized
@@ -164,12 +163,15 @@ assistant engagement; send a malformed request body and observe a client-error r
 - **Offline determinism.** Tests substitute a deterministic assistant so results do not depend on a
   live model, key, or network.
 - **Offline testability of memory (discovered during build, research R6).** The deterministic test
-  assistant receives only the *current* turn's message — the platform does not replay a session's
-  stored history into a test model provider's input. So the memory *behavior* (recall in one session,
-  isolation across sessions) is verified against the **live model** (a smoke test), while the offline
-  suite verifies the request/response wiring, input validation, and the HTTP contract, and pins the
-  test-assistant behavior as a regression. This does not change the runtime behavior — only where each
-  guarantee is checked.
+  assistant is fed only the *current* turn's message — a session's stored history is not surfaced into
+  a test model provider's input. However, memory is still **written and readable** offline: reading the
+  platform's stored conversation history directly confirms both turns are retained under their id and
+  that a different id is independent. So **retention** (US1) and **isolation** (US2) are proven offline,
+  while **recall** (the assistant actually using the replayed history) is verified against the **live
+  model**. Reading the stored history offline requires a small helper in the platform's native language
+  (the history store is queryable only via a typed method reference the primary language can't express)
+  — hence one Java test in an otherwise-Scala capability. This changes only *where* each guarantee is
+  checked, not the runtime behavior.
 
 ## Out of Scope
 

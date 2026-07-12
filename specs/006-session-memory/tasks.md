@@ -66,10 +66,10 @@ reply references "Ada".
 **Independent Test**: State "my name is Ada" on `C1`, ask "what is my name?" on `C2` → `C2` does not
 know the name.
 
-- [ ] T011 [US2] Isolation is **not offline-observable through the mock** (R6: the mock never sees any session's history, so it can't show cross-session leakage or its absence). Offline, add a wiring assertion to `ChatAgentIntegrationTest` that two *different* session ids each independently return their reply (the per-session plumbing). The authoritative isolation proof is the **live smoke test (T018)**. No production code changes (isolation is intrinsic to per-id session memory, research R1).
-- [ ] T012 [US2] Run `mvn verify` to confirm US1 + US2 wiring tests pass together.
+- [x] T011 [US2] Create `SessionMemoryIntegrationTest` (Java) in `src/test/java/com/gwgs/akkaagentic/chat/application/` — drives the real `ChatAgent` (mocked model), then reads the SDK-internal `SessionMemoryEntity` for the session id. Proves **retention** (US1: both turns of one session stored — 4 messages) *and* **isolation** (US2: a different session id is empty). Java by necessity: the EventSourcedEntity client is method-reference-only (`SessionMemoryEntity::getHistory`), no `dynamicCall` — the cap-2 `WorkflowClient` wall again (research R6). ✅ 2 tests green. (This replaced the throwaway write-diagnostic once R6 was settled: memory *is* written+readable offline; only recall stays live.)
+- [x] T012 [US2] Run `mvn verify` to confirm US1 + US2 tests pass together. *(covered by T014's full verify)*
 
-**Checkpoint**: Per-session wiring green; isolation *behavior* verified live (T018).
+**Checkpoint**: Retention (US1) + isolation (US2) proven offline via the entity query; recall stays live (T018).
 
 ---
 

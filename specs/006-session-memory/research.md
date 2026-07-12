@@ -94,35 +94,45 @@ feature). `readLast(k)` (rejected — YAGNI; risks evicting the fact under test)
 `TestModelProvider` mock receive that **accumulated history** (so a turn-2 assertion can match on the
 fact from turn 1), or only the **latest user message**?
 
-**Finding (measured, `ChatAgentIntegrationTest`)**: the mock receives **only the current turn's user
-message** — no replayed history, and not even the system prompt. Instrumenting the model input via
-`withMessageSelector(List<InputMessage> -> InputMessage)` across two turns on one session id showed each
-call getting a **size-1** message list (`call[0]="my name is Ada"`, `call[1]="what is my name?"`). A 2s
-gap between turns changed nothing, so it is **not** a write/read race — the SDK simply does not assemble
-session history into a *test* model provider's input.
+**Finding, part 1 — what the mock sees (measured, `ChatAgentIntegrationTest`)**: the mock receives
+**only the current turn's user message** — no replayed history, and not even the system prompt.
+Instrumenting the model input via `withMessageSelector(List<InputMessage> -> InputMessage)` across two
+turns on one session id showed each call getting a **size-1** message list (`call[0]="my name is Ada"`,
+`call[1]="what is my name?"`). A 2s gap between turns changed nothing, so it is **not** a write/read
+race.
 
-**Consequences**:
-- Multi-turn **recall** (US1) and **isolation** (US2) are **not observable offline through the mock** —
-  both depend on the model seeing (or not seeing) history, which the mock never does.
-- The Scala escape hatch is blocked: proving **retention** by querying `SessionMemoryEntity` needs the
-  **EventSourcedEntity client, which has no `dynamicCall`** (only Java `akka.japi.function.Function`
-  method-refs — verified by `javap`). That is the same method-ref wall as cap-2's `WorkflowClient`
-  (`[[akka-scala-workflow-methodref-wall]]`), so an offline retention check would require **Java** in
-  this otherwise pure-Scala capability.
+**Finding, part 2 — is memory actually written? (measured, `SessionMemoryIntegrationTest`)**: **yes.**
+Reading the SDK-internal `SessionMemoryEntity` for the session id after two turns returns **4 stored
+messages** (2 `UserMessage` + 2 `AiMessage`, `componentId = "chat-agent"`, `sequenceNumber = 5`); a
+never-used session id returns an **empty** history. So the earlier "the SDK does not assemble history
+into a test provider's input" was **too strong** — memory is written *and* readable offline; the mock's
+size-1 view is purely a **provider-feed gap** (the assembled history isn't surfaced *into the
+`TestModelProvider`*), not memory being off.
 
-**Decision (Scala-only, lean on the live test)**:
-- **Offline** (`TestModelProvider`, `httpClient`): assert the `dynamicCall`+`.inSession` wiring, per-turn
-  replies, input validation, and the full HTTP contract; and **pin the finding as a regression** —
-  a test asserting the mock sees exactly the current turn (so a future SDK that starts replaying history
-  to test providers would flip it and prompt us to strengthen the offline suite).
-- **Live** (Gemini smoke test, tasks T018): the authoritative proof of recall (US1) and isolation (US2).
-- Spec `SC-001`/`SC-002` were reworded accordingly (live verification + offline-limitation note).
+**Consequences (corrected)**:
+- **Retention** (US1) and **isolation** (US2) **are** provable offline — by reading `SessionMemoryEntity`
+  directly (turns stored under their id; a different id is independent).
+- That read must be **Java**: the EventSourcedEntity client is method-reference-only
+  (`SessionMemoryEntity::getHistory`) with **no `dynamicCall`** (verified by `javap`) — the same wall as
+  cap-2's `WorkflowClient` (`[[akka-scala-workflow-methodref-wall]]`), so a Scala caller cannot query it.
+- Only **recall** — the model *using* the replayed history in its answer — stays un-provable offline,
+  because the mock ignores the history it isn't fed. That is the live smoke test's job.
 
-**Why this is the right call**: it keeps cap-4 100% Scala (dragging Java in *only* to observe a test-only
-limitation would contradict the capability's point and add complexity — Constitution IV). The runtime
-behavior is unchanged; only the *locus* of each guarantee moves. This nuances the headline below: session
-memory is Scala-friendly to **use**, but its effect is **invisible to the offline mock**, and the
-entity-client method-ref wall blocks the Scala-only offline workaround.
+**Decision (kept a small Java test; recall stays live)**:
+- **Offline, Scala** (`ChatAgentIntegrationTest`, `httpClient`): `dynamicCall`+`.inSession` wiring,
+  per-turn replies, validation, HTTP contract; plus a **regression pin** that the mock sees exactly the
+  current turn (so a future SDK that starts feeding history to test providers would flip it).
+- **Offline, Java** (`SessionMemoryIntegrationTest`): retention (US1) and isolation (US2) via the
+  entity query. Java by necessity — matching the test language to a Java SDK entity Scala can't reach;
+  the module is already mixed Scala/Java (cap-2), so this is principled, not a compromise
+  (Constitution: "match the test to the code under test").
+- **Live** (Gemini smoke test, tasks T018): the authoritative proof of **recall** (and an end-to-end
+  re-confirmation of isolation).
+- Spec `SC-001`/`SC-002` reworded accordingly.
+
+This nuances the headline below: session memory is Scala-friendly to **use** *and* its effect is
+**written/readable offline** — but observing it requires the Java entity client (method-ref wall), and
+**recall** through the model is only visible against a real model.
 
 ## Summary of decisions
 
@@ -133,13 +143,14 @@ entity-client method-ref wall blocks the Scala-only offline workaround.
 | R3 | Descriptor | `chat-agent` (agent) + `ChatEndpoint` (http-endpoint) only; memory entity is runtime-registered |
 | R4 | Wire types | `String` agent payload (no Java-shaped type) + idiomatic `Option` HTTP DTOs |
 | R5 | MemoryProvider | Explicit `MemoryProvider.limitedWindow()`; no `readLast(N)` |
-| R6 | Offline memory proof | RESOLVED: the mock sees only the current turn; recall/isolation move to the live smoke test; finding pinned as a regression |
+| R6 | Offline memory proof | RESOLVED: mock sees only the current turn, BUT memory is written+readable offline (proven by reading `SessionMemoryEntity`); retention+isolation covered by a Java entity-query test; recall stays live; mock-blindness pinned as a regression |
 
 **Headline finding (refined by R6)**: session memory is **Scala-friendly to *use*** — string-keyed via
 `.inSession(id)`, builder-based `MemoryProvider` API (no method-ref wall), a runtime-owned backing entity
-(no descriptor entry), and a bare-`String` payload (no Java-shaped type). But its **effect is invisible to
-the offline mock** (`TestModelProvider` receives only the current turn), and the Scala-only offline
-workaround is blocked by the EventSourcedEntity client's method-ref wall (no `dynamicCall`). So the
-capability's memory *behavior* is verified live, while the offline suite covers wiring, validation, the
-HTTP contract, and pins the mock's blindness as a regression. Net: no new friction to *build* on Scala,
-one new limitation to *test* on Scala.
+(no descriptor entry), and a bare-`String` payload (no Java-shaped type). Its **effect is written and
+readable offline** (the `SessionMemoryEntity` accumulates both turns), so retention and isolation are
+offline-provable — but only by **reading the entity from Java**, because the EventSourcedEntity client is
+method-reference-only with no `dynamicCall` (the cap-2 `WorkflowClient` wall again). The mocked model is
+fed only the current turn, so **recall** (the model using history) is the one guarantee left to the live
+test. Net: no new friction to *build* session memory on Scala; to *test* it, retention/isolation need the
+Java entity client and recall needs a real model.
