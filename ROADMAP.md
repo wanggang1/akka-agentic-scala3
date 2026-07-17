@@ -10,6 +10,9 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 > **You are here:** Feature 4 (Session memory) — **done and merged (PR #11)** (offline suite green + live
 > Gemini smoke test: recall across turns on one session id, isolation across ids). Back in Scala. This was
 > the **last** of the four planned capabilities — **the roadmap is complete.**
+>
+> **📄 Retrospective:** [`FINDINGS.md`](FINDINGS.md) consolidates what all four capabilities taught us —
+> the single `dynamicCall` finding that explains every Scala-vs-Java outcome, plus the practical rubric.
 
 ## The path
 
