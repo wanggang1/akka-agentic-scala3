@@ -37,6 +37,15 @@ src/main/scala/com/gwgs/akkaagentic/chat/api/         # ChatEndpoint (POST /chat
 # our descriptor). Cap-4's memory test is JAVA (src/test/java/.../chat) because the EventSourcedEntity
 # client is method-ref-only (no dynamicCall) so Scala can't query SessionMemoryEntity — see §6.
 
+# Capability 5 — Scala (human-in-the-loop approval gate; see "Scala interop notes" §7)
+src/main/scala/com/gwgs/akkaagentic/approvals/domain/      # ApprovalQuestion (validation), TaskOutcome + ApprovalCase (pure FSM)
+src/main/scala/com/gwgs/akkaagentic/approvals/application/ # DraftAgent, PublishAgent (AutonomousAgents), ApprovalTasks + 3 Java-shaped task results
+src/main/scala/com/gwgs/akkaagentic/approvals/api/         # ApprovalEndpoint (POST /approvals, GET /approvals/{id}, POST .../approve|reject)
+# Note: the durable record is the three-task chain (draft -> unassigned gate -> publish) keyed by a
+# derived caseId — NO Entity, NO Workflow. The human decision is a plain TaskClient call (no method-ref
+# wall), so the whole capability incl. tests is Scala. The task entities are runtime-owned (NOT in our
+# descriptor), like cap-4's SessionMemoryEntity — see §7.
+
 src/main/resources/application.conf                 # default model-provider config
 src/test/{scala,java}/com/gwgs/akkaagentic/...       # tests (TestModelProvider, no live model)
 ```
@@ -174,6 +183,47 @@ writing components in Scala needs explicit workarounds:
    keyed on a Java method reference with no `dynamicCall` escape hatch (Workflow *and* EventSourcedEntity
    clients).** The Agent and AutonomousAgent clients have `dynamicCall`; the entity/workflow clients do
    not.
+
+7. **Human-in-the-loop is idiomatic Scala end-to-end — `TaskClient` has no method-ref wall.** Capability
+   5 (the approval gate, `com.gwgs.akkaagentic.approvals.*`) is **Scala, tests included**, and is the
+   clean counter-example to cap-2's Workflow wall (§4) and cap-4's forced Java entity test (§6). A
+   `DraftAgent` produces a candidate reply; an **approval task with no agent assigned** gates it; a
+   `PublishAgent` runs only once a human releases the gate. The mechanism is the Autonomous Agent
+   **external-input** pattern — a three-task dependency chain (`draft → gate → publish`), **not** an Akka
+   Workflow. Four things make this the least-friction orchestration capability yet:
+
+   - **The human decision is a plain `TaskClient` call — no method reference.** `forTask(id).assign(label)`
+     then `.complete(def, result)` (approve) or `.fail(reason)` (reject); `.get(def)`/`.result(def)` read
+     the snapshot. Every method is keyed on value objects and strings (verified against SDK 3.6.0
+     bytecode: `create`/`get`/`result`/`assign`/`complete`/`fail`), so there is **nothing for
+     `MethodRefResolver` to choke on**. Contrast a Workflow `pause`/`resume` gate, which *is*
+     method-ref-only and would force the whole capability into Java (§4). `TaskClient` sits on the
+     Scala-friendly side of the wall, alongside the Agent/AutonomousAgent clients' `dynamicCall`.
+   - **No Entity, no Workflow, no state of our own.** The three task ids are **derived** from one
+     `caseId` (`{caseId}-draft`/`-approval`/`-publish`), so the endpoint reconstructs the whole chain
+     from the URL and stores nothing; the tasks *are* the durable record (they survive restarts). This
+     is a **correctness requirement, not tidiness**: a `KeyValueEntity` mapping store would have
+     reintroduced the method-ref wall (entity clients are `.method(E::cmd)`-only, §6) and forced Java —
+     the very thing cap-5 exists to disprove.
+   - **The gate is enforced by the runtime, not our code.** The publish task `dependsOn` the approval
+     task, and the runtime never starts a task with unmet dependencies — so `PublishAgent`, though
+     *assigned* at submit time, cannot run until a person completes the gate; rejecting *fails* the gate,
+     which auto-cancels the dependent publish task, so no reply is ever published. Nothing in
+     [`ApprovalEndpoint`](src/main/scala/com/gwgs/akkaagentic/approvals/api/ApprovalEndpoint.scala) orders
+     the steps.
+   - **Task results stay Java-shaped; HTTP DTOs stay idiomatic** (the §3 two-mapper boundary again):
+     `Draft`/`ApprovalDecision`/`PublishedReply` are Jackson-annotated (they cross the internal mapper via
+     `resultConformsTo`), while the endpoint's request/response bodies are `Option`-typed Scala. The case
+     **state machine** and the **decision guard** live in pure-Scala domain
+     ([`ApprovalCase`](src/main/scala/com/gwgs/akkaagentic/approvals/domain/ApprovalCase.scala) /
+     `TaskOutcome`), unit-tested with no runtime — so the integration test only has to prove the wiring
+     and the dependency gate.
+
+   No `pom.xml` change was needed. Takeaway: **the method-ref wall is client-specific, and `TaskClient`
+   is on the right side of it** — a durable, human-gated, multi-step flow stays idiomatic Scala,
+   verification included. See specs/007 research R1/R2 and
+   [`docs/http-endpoint-sdk-boundary.md`](docs/http-endpoint-sdk-boundary.md) for the endpoint-layer
+   boundary decision.
 
 ## Build
 
@@ -413,6 +463,82 @@ curl -i -X POST http://localhost:9000/chat/c-123 \
 > separate requests on the same `sessionId`. The same question on a different id
 > (`POST /chat/c-999`) replied *"I don't know your name yet! You haven't told me."* — confirming memory
 > replay **and** per-session isolation end-to-end.
+
+### Capability 5 — human-in-the-loop approval gate (`POST /approvals`, async + a human decision)
+
+Capability 5 puts a **person in the loop**. A `DraftAgent` writes a candidate customer reply; the work
+then **pauses at a gate only a human can release**; on approval a `PublishAgent` produces the published
+reply, on rejection the chain ends. The mechanism is the Autonomous Agent **external-input** pattern — a
+three-task chain (`draft → unassigned gate → publish`) wired by task dependencies, **not** an Akka
+Workflow. Because the draft is produced asynchronously and the gate then waits for a person, the surface
+is **start → poll → decide → poll**. (Back in **Scala**, tests included — see "Scala interop notes" §7:
+the human decision is a plain `TaskClient` call with no method-ref wall.)
+
+```shell
+# 1. Submit a question — 202 + a case handle; the draft is being produced
+curl -i -X POST http://localhost:9000/approvals \
+  -H "Content-Type: application/json" \
+  -d '{"question":"How do I get a refund?"}'
+# 202 Accepted
+# Location: /approvals/2f1c...
+# {"caseId":"2f1c..."}
+```
+
+```shell
+# 2. Poll — "drafting" until the agent finishes, then "awaiting-approval" WITH the draft and NO reply
+curl -s http://localhost:9000/approvals/2f1c...
+# {"state":"drafting"}
+# ...then...
+# {"state":"awaiting-approval","draft":"You can request a refund within 30 days…"}
+```
+
+```shell
+# 3a. APPROVE — releases the publish step; poll to "published" with the final reply
+curl -i -X POST http://localhost:9000/approvals/2f1c.../approve \
+  -H "Content-Type: application/json" -d '{"note":"Looks good."}'
+# 200 OK — approved
+curl -s http://localhost:9000/approvals/2f1c...
+# {"state":"published","reply":"You can request a refund within 30 days…"}
+```
+
+```shell
+# 3b. REJECT (on a fresh case) — fails the gate; the publish task is auto-cancelled, so no reply is
+#     ever published. The note is retained.
+curl -i -X POST http://localhost:9000/approvals/<id>/reject \
+  -H "Content-Type: application/json" -d '{"note":"Tone is too casual; please revise."}'
+# 200 OK — rejected
+curl -s http://localhost:9000/approvals/<id>
+# {"state":"rejected","note":"Tone is too casual; please revise."}
+```
+
+Same validation-first contract as the other capabilities, plus decision integrity: a blank question or
+malformed body is `400` before any case starts; an unknown handle is `404`; a decision before the draft
+is ready, or a **second** decision after a gate is decided, is `409` (never a double-publish). Empty
+optional fields are omitted from the JSON (idiomatic Scala).
+
+> **Where durability lives — the task chain, not an Entity of ours.** Nothing in `ApprovalEndpoint`
+> persists anything: the three task ids are derived from one `caseId`, and the **tasks themselves** are
+> the durable record (the runtime persists task status + typed result, exactly as with cap-3). So the
+> pending gate survives a restart — drive a case to `awaiting-approval`, restart, then approve, and it
+> still publishes. As with cap-3, observing this across a **local** restart needs the on-disk store:
+>
+> ```shell
+> set -a && source .env && set +a && \
+>   mvn compile exec:java -Dakka.javasdk.dev-mode.persistence.enabled=true
+> ```
+>
+> *Verified live* (against Gemini, `gemini-2.5-flash`): both paths end-to-end.
+> **Approve** — `POST /approvals {"question":"How do I get a refund?"}` → poll returned
+> `{"state":"awaiting-approval","draft":"To request a refund, please refer to our refund policy…"}`
+> with **no `reply` field**; then `POST …/approve {"note":"Looks good."}` → `200 approved`, and the next
+> poll returned `{"state":"published","reply":"To request a refund, please refer to our refund policy…"}`
+> — the published reply **identical to the approved draft**, and present **only after** approval.
+> **Reject** — a fresh case reached `awaiting-approval` with its own draft; `POST …/reject {"note":"Tone
+> is too casual; please revise."}` → `200 rejected`, and polling returned
+> `{"state":"rejected","note":"Tone is too casual; please revise."}` with **no `reply`, ever** (stable
+> across repeated polls). Confirms the gate genuinely holds publishing until a human approves (SC-002,
+> SC-003), rejection stops it for good (FR-006), and — as noted in the Gemini caveat — the typed task
+> results round-trip through the `complete_task` tool with **no** tools-vs-JSON conflict.
 
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.

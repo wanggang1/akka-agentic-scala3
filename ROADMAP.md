@@ -7,12 +7,16 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 ## Where we are
 
-> **You are here:** Feature 4 (Session memory) — **done and merged (PR #11)** (offline suite green + live
-> Gemini smoke test: recall across turns on one session id, isolation across ids). Back in Scala. This was
-> the **last** of the four planned capabilities — **the roadmap is complete.**
+> **You are here:** Feature 5 (Human-in-the-loop approval gate) — **🚧 implemented, offline suite green
+> (47 integration tests); live Gemini smoke test + merge pending.** An **exploratory follow-up beyond the
+> original four**: the four-capability roadmap is complete; capability 5 pushes further into durable
+> multi-agent orchestration to test whether a human-gated flow can stay idiomatic Scala. It can — the
+> `TaskClient` decision API has no method-ref wall (§7).
 >
-> **📄 Retrospective:** [`FINDINGS.md`](FINDINGS.md) consolidates what all four capabilities taught us —
-> the single `dynamicCall` finding that explains every Scala-vs-Java outcome, plus the practical rubric.
+> **📄 Retrospective:** [`FINDINGS.md`](FINDINGS.md) consolidates what the first four capabilities taught
+> us — the single `dynamicCall` finding that explains every Scala-vs-Java outcome, plus the practical
+> rubric. Capability 5 extends that through-line: the wall is **client-specific**, and `TaskClient` is on
+> the Scala-friendly side of it.
 
 ## The path
 
@@ -23,6 +27,7 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 | 2 | **Multi-agent Workflow** — orchestrate two agents (tone → compose) through an Akka `Workflow`; async start/poll HTTP. **Implemented in Java** (see below) | [`specs/004-multi-agent-workflow`](specs/004-multi-agent-workflow/) | ✅ Done — merged (PR #9) |
 | 3 | **Autonomous Agent** — durable, model-driven help-desk agent with a typed task + knowledge-base tool; async start/poll HTTP. **Back in Scala** (see below) | [`specs/005-autonomous-agent`](specs/005-autonomous-agent/) | ✅ Done — merged (PR #10) |
 | 4 | **Session memory** — multi-turn chat; context replayed across requests via the SDK's `SessionMemoryEntity`, keyed by a caller-supplied session id; synchronous HTTP. **Scala** (see below) | [`specs/006-session-memory`](specs/006-session-memory/) | ✅ Done — merged (PR #11) |
+| 5 | **Human-in-the-loop approval gate** *(exploratory follow-up)* — a `DraftAgent` drafts a reply, an **unassigned approval task** gates it, a `PublishAgent` runs only on approval; the Autonomous Agent **external-input** pattern (a three-task dependency chain, no Workflow); async start/poll + a human decision endpoint. **Scala, tests included** (see below) | [`specs/007-human-approval-gate`](specs/007-human-approval-gate/) | 🚧 Offline suite green; live smoke + merge pending |
 
 **Status legend:** ✅ done · 📋 planned (spec written) · 🚧 in progress · ⬜ not started
 
@@ -61,6 +66,21 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 > **the method-ref wall is not Workflow-specific after all — it is a property of every SDK client with no
 > `dynamicCall` escape hatch (Workflow *and* EventSourcedEntity clients); the Agent/AutonomousAgent
 > clients have it, so they're Scala-callable).** See README "Scala interop notes" §6.
+
+> **Capability 5 stays in Scala — `TaskClient` is on the Scala-friendly side of the wall.** The
+> human-in-the-loop approval gate is **Scala end-to-end, tests included** — the clean counter-example to
+> cap-2's Java Workflow and cap-4's forced Java entity test. The human decision goes through
+> `componentClient.forTask(id)`, whose whole surface (`create`/`get`/`result`/`assign`/`complete`/`fail`)
+> is keyed on value objects and strings — **no `SerializedLambda` method reference** (verified against SDK
+> 3.6.0 bytecode) — so there is nothing for `MethodRefResolver` to choke on, unlike a Workflow
+> `pause`/`resume` gate. Two design choices keep it that way: **(1)** the mechanism is the Autonomous Agent
+> *external-input* pattern — a three-task chain (`draft → unassigned gate → publish`) where the runtime
+> withholds `publish` until a human completes the gate — **not** a Workflow; **(2)** the three task ids are
+> *derived* from one `caseId`, so there is **no Entity** storing the mapping — which matters because an
+> entity client *would* reintroduce the method-ref wall (§6, cap-4) and force Java. Result: a durable,
+> human-gated, multi-step flow that is idiomatic Scala including verification. Takeaway: **the wall is
+> client-specific — `TaskClient` (like the Agent/AutonomousAgent clients) has no method-ref requirement;
+> the Workflow and EventSourcedEntity clients do.** See README "Scala interop notes" §7.
 
 > **Test-language rule: match the test to the code under test.** Scala code gets Scala tests;
 > Java code gets Java tests — each capability stays one language end-to-end. This isn't just
