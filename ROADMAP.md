@@ -7,11 +7,12 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 ## Where we are
 
-> **You are here:** Feature 5 (Human-in-the-loop approval gate) — **🚧 implemented, offline suite green
-> (47 integration tests); live Gemini smoke test + merge pending.** An **exploratory follow-up beyond the
-> original four**: the four-capability roadmap is complete; capability 5 pushes further into durable
-> multi-agent orchestration to test whether a human-gated flow can stay idiomatic Scala. It can — the
-> `TaskClient` decision API has no method-ref wall (§7).
+> **You are here:** Feature 5 (Human-in-the-loop approval gate) — **✅ done and merged (PR #12)** (offline
+> suite green — 47 integration tests — plus a live Gemini smoke test: approve → published with the reply
+> only after approval; reject → rejected, no reply ever). An **exploratory follow-up beyond the original
+> four**: the four-capability roadmap is complete; capability 5 pushed further into durable multi-agent
+> orchestration to test whether a human-gated flow can stay idiomatic Scala. It can — the `TaskClient`
+> decision API has no method-ref wall (§7).
 >
 > **📄 Retrospective:** [`FINDINGS.md`](FINDINGS.md) consolidates what the first four capabilities taught
 > us — the single `dynamicCall` finding that explains every Scala-vs-Java outcome, plus the practical
@@ -27,7 +28,7 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 | 2 | **Multi-agent Workflow** — orchestrate two agents (tone → compose) through an Akka `Workflow`; async start/poll HTTP. **Implemented in Java** (see below) | [`specs/004-multi-agent-workflow`](specs/004-multi-agent-workflow/) | ✅ Done — merged (PR #9) |
 | 3 | **Autonomous Agent** — durable, model-driven help-desk agent with a typed task + knowledge-base tool; async start/poll HTTP. **Back in Scala** (see below) | [`specs/005-autonomous-agent`](specs/005-autonomous-agent/) | ✅ Done — merged (PR #10) |
 | 4 | **Session memory** — multi-turn chat; context replayed across requests via the SDK's `SessionMemoryEntity`, keyed by a caller-supplied session id; synchronous HTTP. **Scala** (see below) | [`specs/006-session-memory`](specs/006-session-memory/) | ✅ Done — merged (PR #11) |
-| 5 | **Human-in-the-loop approval gate** *(exploratory follow-up)* — a `DraftAgent` drafts a reply, an **unassigned approval task** gates it, a `PublishAgent` runs only on approval; the Autonomous Agent **external-input** pattern (a three-task dependency chain, no Workflow); async start/poll + a human decision endpoint. **Scala, tests included** (see below) | [`specs/007-human-approval-gate`](specs/007-human-approval-gate/) | 🚧 Offline suite green; live smoke + merge pending |
+| 5 | **Human-in-the-loop approval gate** *(exploratory follow-up)* — a `DraftAgent` drafts a reply, an **unassigned approval task** gates it, a `PublishAgent` runs only on approval; the Autonomous Agent **external-input** pattern (a three-task dependency chain, no Workflow); async start/poll + a human decision endpoint. **Scala, tests included** (see below) | [`specs/007-human-approval-gate`](specs/007-human-approval-gate/) | ✅ Done — merged (PR #12) |
 
 **Status legend:** ✅ done · 📋 planned (spec written) · 🚧 in progress · ⬜ not started
 

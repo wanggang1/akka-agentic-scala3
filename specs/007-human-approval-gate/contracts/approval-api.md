@@ -54,6 +54,7 @@ every lifecycle state; only an unknown handle is `404` (FR-002, FR-003, US3).
 | `200 OK` | `published` | `reply` (the final reply) |
 | `200 OK` | `rejected` | `note` (reviewer's note, if any) |
 | `200 OK` | `draft-failed` | `note` (failure reason) |
+| `200 OK` | `publish-failed` | `draft`, `note` (failure reason) — approved but publishing failed; beyond the spec's minimum, reported rather than polling `publishing` forever |
 | `404 Not Found` | unknown `caseId` | `approval case not found` — never a fabricated draft/reply |
 
 ```bash
