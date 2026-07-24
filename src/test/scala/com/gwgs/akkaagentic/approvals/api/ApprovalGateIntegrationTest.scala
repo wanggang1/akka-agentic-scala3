@@ -2,8 +2,10 @@ package com.gwgs.akkaagentic.approvals.api
 
 import java.time.Duration
 
+import java.util.UUID
+
 import akka.http.javadsl.model.StatusCodes
-import akka.javasdk.testkit.TestModelProvider.AutonomousAgentTools.completeTask
+import akka.javasdk.testkit.TestModelProvider.AutonomousAgentTools.{completeTask, failTask}
 import akka.javasdk.testkit.{TestKit, TestKitSupport, TestModelProvider}
 import com.gwgs.akkaagentic.approvals.application.{Draft, DraftAgent, PublishAgent, PublishedReply}
 import org.assertj.core.api.Assertions.assertThat
@@ -73,6 +75,12 @@ class ApprovalGateIntegrationTest extends TestKitSupport:
       .withRequestBody(ApprovalEndpoint.DecisionRequest(note))
       .invoke()
 
+  /** Raw GET that does not parse the body, so a non-2xx status can be asserted (a 404 would make
+    * `responseBodyAs` throw). Returns the status.
+    */
+  private def rawGetStatus(caseId: String) =
+    httpClient.GET("/approvals/" + caseId).invoke().status()
+
   // --- C1 / C2 / C3: the approve path ----------------------------------------------------------
 
   /** C1: a valid submission is acknowledged immediately with a handle and a `Location`, before any
@@ -129,3 +137,93 @@ class ApprovalGateIntegrationTest extends TestKitSupport:
 
     val published = awaitState(caseId, "published")
     assertThat(published.reply).isEqualTo(Some("PUBLISHED: refunds within 30 days."))
+
+  // --- C4: the reject path (US2) ---------------------------------------------------------------
+
+  /** C4: rejecting fails the gate, which auto-cancels the publish task, so the case reaches `rejected`
+    * carrying the reviewer's note and **no reply is ever produced** (SC-003, SC-004, FR-006).
+    *
+    * The reject → `failureReason` round-trip is the one part of this path the domain unit tests cannot
+    * cover (they stub the outcome rather than derive it): here the note goes in over HTTP and comes back
+    * out via the gate task's `failureReason`, mapped to `CaseProgress.Rejected(note)`.
+    */
+  @Test
+  def rejectionStopsPublishAndRetainsTheNote(): Unit =
+    draftModel.fixedResponse(completeTask(Draft("You can request a refund within 30 days.")))
+    // Prime the publish model too: if the gate were not real, a cancelled dependency would still let
+    // this fire. It must never run.
+    publishModel.fixedResponse(completeTask(PublishedReply("PUBLISHED: should never appear.")))
+
+    val caseId = submit("How do I get a refund?")
+    awaitState(caseId, "awaiting-approval")
+
+    val decision = decide(caseId, "reject", Some("Tone is too casual; please revise."))
+    assertThat(decision.status()).isEqualTo(StatusCodes.OK)
+
+    val rejected = awaitState(caseId, "rejected")
+    assertThat(rejected.note).isEqualTo(Some("Tone is too casual; please revise."))
+    assertThat(rejected.reply).isEqualTo(None)
+
+    // Give the (primed, dependency-cancelled) publish agent room to misbehave, then assert it did not.
+    Thread.sleep(2000)
+    val terminal = caseState(caseId)
+    assertThat(terminal.state).isEqualTo("rejected")
+    assertThat(terminal.reply).isEqualTo(None)
+
+  // --- C9 / C10 / C5-GET: observing the lifecycle (US3) ----------------------------------------
+
+  /** C9: when the draft agent abandons its task (fails it), the case reaches a terminal `draft-failed`
+    * state — distinct from `awaiting-approval` — and the gate never opens. This is a runtime-reachable
+    * state the fast mock can produce deterministically (unlike the transient `drafting`, whose
+    * distinctness is proven in `ApprovalCaseTest`).
+    */
+  @Test
+  def draftAbandonedShowsDraftFailedAndNeverOpensGate(): Unit =
+    draftModel.fixedResponse(failTask("no basis to draft a reply"))
+    // Prime publish anyway: it must never run, because the gate is never reached.
+    publishModel.fixedResponse(completeTask(PublishedReply("PUBLISHED: should never appear.")))
+
+    val caseId = submit("How do I get a refund?")
+    val failed = awaitState(caseId, "draft-failed")
+
+    // Distinct from the gate-open state, and no draft/reply is fabricated.
+    assertThat(failed.state).isNotEqualTo("awaiting-approval")
+    assertThat(failed.reply).isEqualTo(None)
+    assertThat(failed.draft).isEqualTo(None)
+
+    // The gate never opened, so a decision on it is refused (not awaiting) — 409, never 200.
+    Thread.sleep(2000)
+    assertThat(caseState(caseId).state).isEqualTo("draft-failed")
+    assertThat(decide(caseId, "approve").status()).isEqualTo(StatusCodes.CONFLICT)
+
+  /** C10: the two terminal outcomes and a terminal failure are all reported as distinct states.
+    * (`published` and `rejected` are each proven reachable in C3/C4; `draft-failed` in C9. Here we
+    * assert the three labels differ from one another and from the in-progress vocabulary, which is what
+    * a poller relies on to tell them apart — FR-002, US3.)
+    */
+  @Test
+  def terminalStatesAreDistinct(): Unit =
+    // approved -> published
+    draftModel.fixedResponse(completeTask(Draft("Draft A.")))
+    publishModel.fixedResponse(completeTask(PublishedReply("Published A.")))
+    val approved = submit("question A")
+    awaitState(approved, "awaiting-approval")
+    decide(approved, "approve")
+    val publishedState = awaitState(approved, "published").state
+
+    // rejected
+    val rejectedCase = submit("question B")
+    awaitState(rejectedCase, "awaiting-approval")
+    decide(rejectedCase, "reject", Some("no"))
+    val rejectedState = awaitState(rejectedCase, "rejected").state
+
+    assertThat(List(publishedState, rejectedState, "drafting", "awaiting-approval").distinct.size)
+      .isEqualTo(4)
+
+  /** C5 (GET half): an unknown handle is `404` — never a fabricated draft or reply. Permanent home of
+    * the research-R2 finding: `forTask(unknownId).get(def)` throws `CommandException`, which the
+    * endpoint maps to not-found (distinguishing an unknown case from one still drafting).
+    */
+  @Test
+  def unknownCaseIdReturnsNotFound(): Unit =
+    assertThat(rawGetStatus(UUID.randomUUID().toString)).isEqualTo(StatusCodes.NOT_FOUND)

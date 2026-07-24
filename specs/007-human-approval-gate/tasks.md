@@ -80,8 +80,8 @@ published**.
 `rejected` with the note; assert `reply` is absent now and stays absent.
 
 - [x] T018 [US2] **Done early** (built in the T012-T015 pass — it shares `onOpenGate` with approve; splitting it would have meant reopening the file). Add `@Post("/approvals/{caseId}/reject")` to `src/main/scala/com/gwgs/akkaagentic/approvals/api/ApprovalEndpoint.scala` — same R4 guard as approve; on the open gate, `forTask(approvalId).assign("reviewer")` then `.fail(note)` (the note becomes the task's `failureReason`) → 200 `rejected`. Failing the gate auto-cancels the dependent publish task (research R3), so no reply is produced (FR-006).
-- [ ] T019 [US2] Add **C4** to `ApprovalGateIntegrationTest` — reject with a note → 200; poll → `rejected` carrying the note; assert `reply` is never present, including after the publish mock would otherwise have fired (SC-003, SC-004).
-- [ ] T020 [US2] Run `mvn verify` to confirm US1 + US2 pass together.
+- [x] T019 [US2] Add **C4** to `ApprovalGateIntegrationTest` — reject with a note → 200; poll → `rejected` carrying the note; assert `reply` is never present, including after the publish mock would otherwise have fired (SC-003, SC-004). ✅ green — `rejectionStopsPublishAndRetainsTheNote`; proves the note round-trip (in via `fail(reason)`, out via `failureReason`) that the domain unit tests stub.
+- [x] T020 [US2] Run `mvn verify` to confirm US1 + US2 pass together. ✅ BUILD SUCCESS — 37 integration tests, 0 failures.
 
 **Checkpoint**: Both halves of the human decision proven — the gate is a real gate.
 
@@ -94,8 +94,8 @@ published**.
 **Independent Test**: Assert `drafting` ≠ `awaiting-approval`; a never-started handle → 404; the two
 terminal states (`published`, `rejected`) are distinct from each other and from in-progress.
 
-- [ ] T021 [US3] Add lifecycle tests to `src/test/scala/com/gwgs/akkaagentic/approvals/api/ApprovalGateIntegrationTest.scala` — **C9** (draft agent abandons: `draftModel.fixedResponse(failTask(...))` → GET `draft-failed`, distinct from `awaiting-approval`, gate never opens), **C10** (`published` vs `rejected` vs in-progress all distinct), and the GET half of **C5** (unknown `caseId` → 404, never a fabricated draft/reply — this is also the permanent home of the T011 finding).
-- [ ] T022 [US3] Run `mvn verify` to confirm the lifecycle states are asserted and everything stays green.
+- [x] T021 [US3] Add lifecycle tests to `src/test/scala/com/gwgs/akkaagentic/approvals/api/ApprovalGateIntegrationTest.scala` — **C9** (draft agent abandons: `draftModel.fixedResponse(failTask(...))` → GET `draft-failed`, distinct from `awaiting-approval`, gate never opens), **C10** (`published` vs `rejected` vs in-progress all distinct), and the GET half of **C5** (unknown `caseId` → 404, never a fabricated draft/reply — this is also the permanent home of the T011 finding). ✅ green — C9 `draftAbandonedShowsDraftFailedAndNeverOpensGate`, C10 `terminalStatesAreDistinct`, C5-GET `unknownCaseIdReturnsNotFound`. **Deviation:** the transient `drafting` state is NOT asserted via the integration test (racy — the fast mock blows through it); its distinctness from `awaiting-approval` is proven in `ApprovalCaseTest` (pure domain), consistent with the split-by-layer discipline.
+- [x] T022 [US3] Run `mvn verify` to confirm the lifecycle states are asserted and everything stays green. ✅ BUILD SUCCESS — 40 integration tests, 0 failures.
 
 **Checkpoint**: The gate's state is observable at every point (FR-002, FR-003).
 
@@ -107,7 +107,7 @@ terminal states (`published`, `rejected`) are distinct from each other and from 
 
 **Independent Test**: The caps-1–4 suites pass unmodified, and the descriptor lists every component.
 
-- [ ] T023 [US5] Run `mvn verify` and confirm the capability 1–4 test classes pass **unmodified** (no file under `src/{main,test}/{scala,java}/com/gwgs/akkaagentic/{application,api,domain,team,assistant,chat}` was touched by this feature), and review `src/main/resources/META-INF/akka-javasdk-components_com.gwgs_akka-agentic-scala3.conf` so that every component of all five capabilities is listed exactly once (FR-012, FR-013, SC-007).
+- [x] T023 [US5] Run `mvn verify` and confirm the capability 1–4 test classes pass **unmodified** (no file under `src/{main,test}/{scala,java}/com/gwgs/akkaagentic/{application,api,domain,team,assistant,chat}` was touched by this feature), and review `src/main/resources/META-INF/akka-javasdk-components_com.gwgs_akka-agentic-scala3.conf` so that every component of all five capabilities is listed exactly once (FR-012, FR-013, SC-007). ✅ git diff confirms only `approvals/` + the shared descriptor changed (no caps 1–4 source touched); T022 verify ran all caps 1–4 tests green unmodified; descriptor cross-checked against annotated classes — 6 endpoint / 4 agent / 3 autonomous-agent / 1 workflow, each exactly once, no duplicates.
 
 **Checkpoint**: All five capabilities coexist.
 
