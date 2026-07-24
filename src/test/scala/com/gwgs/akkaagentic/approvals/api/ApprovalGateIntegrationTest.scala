@@ -4,7 +4,7 @@ import java.time.Duration
 
 import java.util.UUID
 
-import akka.http.javadsl.model.StatusCodes
+import akka.http.javadsl.model.{ContentTypes, StatusCodes}
 import akka.javasdk.testkit.TestModelProvider.AutonomousAgentTools.{completeTask, failTask}
 import akka.javasdk.testkit.{TestKit, TestKitSupport, TestModelProvider}
 import com.gwgs.akkaagentic.approvals.application.{Draft, DraftAgent, PublishAgent, PublishedReply}
@@ -227,3 +227,83 @@ class ApprovalGateIntegrationTest extends TestKitSupport:
   @Test
   def unknownCaseIdReturnsNotFound(): Unit =
     assertThat(rawGetStatus(UUID.randomUUID().toString)).isEqualTo(StatusCodes.NOT_FOUND)
+
+  // --- C8 / C5-decision / C6 / C7: validation and decision integrity (US4) ---------------------
+
+  private def rawSubmitStatus(json: String) =
+    httpClient.POST("/approvals").withRequestBody(ContentTypes.APPLICATION_JSON, json.getBytes).invoke().status()
+
+  /** C8: a blank question is rejected with `400` before any case is started or model is invoked. The
+    * guard is `ApprovalQuestion.validate`, which runs before any `componentClient` call — so a `400`
+    * here means no draft/approval/publish task was ever created (FR-010, SC-006).
+    */
+  @Test
+  def blankQuestionRejectedNoCaseStarted(): Unit =
+    val status = httpClient
+      .POST("/approvals")
+      .withRequestBody(ApprovalEndpoint.SubmitRequest(Some("   ")))
+      .invoke() // no responseBodyAs, so a 400 does not throw
+      .status()
+    assertThat(status).isEqualTo(StatusCodes.BAD_REQUEST)
+
+  /** C8: an absent `question` field deserializes to `None` → `400`, not a `500`. */
+  @Test
+  def absentQuestionRejected(): Unit =
+    assertThat(rawSubmitStatus("{}")).isEqualTo(StatusCodes.BAD_REQUEST)
+
+  /** C8: a malformed JSON body is rejected at the SDK boundary → `400`. */
+  @Test
+  def malformedBodyRejected(): Unit =
+    assertThat(rawSubmitStatus("{ \"question\": ")).isEqualTo(StatusCodes.BAD_REQUEST)
+
+  /** C8: an unknown extra property alongside a valid question is tolerated → `202`. */
+  @Test
+  def unknownPropertyTolerated(): Unit =
+    draftModel.fixedResponse(completeTask(Draft("ok")))
+    assertThat(rawSubmitStatus("""{"question":"How do I get a refund?","surprise":"ignored"}"""))
+      .isEqualTo(StatusCodes.ACCEPTED)
+
+  /** C5 (decision half): approving or rejecting an unknown handle is `404` — the case is not affected
+    * (there is none) and no chain is fabricated (FR-008).
+    */
+  @Test
+  def decisionOnUnknownHandleReturnsNotFound(): Unit =
+    val id = UUID.randomUUID().toString
+    assertThat(decide(id, "approve").status()).isEqualTo(StatusCodes.NOT_FOUND)
+    assertThat(decide(id, "reject").status()).isEqualTo(StatusCodes.NOT_FOUND)
+
+  /** C6: a decision arriving before the draft is ready is refused `409` (not awaiting approval), not
+    * treated as success — it cannot skip the draft or satisfy the publish dependency early (FR-008).
+    *
+    * Deterministic without a race: the draft model is left **unprimed**, so the draft task can never
+    * reach `COMPLETED`; the decision guard therefore always sees a non-completed draft and returns 409,
+    * regardless of timing.
+    */
+  @Test
+  def decisionBeforeDraftReadyIsRefused(): Unit =
+    val caseId = submit("How do I get a refund?") // draftModel intentionally not primed
+    assertThat(decide(caseId, "approve").status()).isEqualTo(StatusCodes.CONFLICT)
+    assertThat(decide(caseId, "reject").status()).isEqualTo(StatusCodes.CONFLICT)
+
+  /** C7: a second decision after a gate is already decided is a safe no-op `409` — the terminal outcome
+    * is unchanged and no second publish occurs (FR-009). Guarded on the observed gate status, so this
+    * does not rely on `complete`/`fail` being idempotent.
+    */
+  @Test
+  def secondDecisionIsRefusedAndDoesNotPublishTwice(): Unit =
+    draftModel.fixedResponse(completeTask(Draft("You can request a refund within 30 days.")))
+    publishModel.fixedResponse(completeTask(PublishedReply("PUBLISHED: refunds within 30 days.")))
+
+    val caseId = submit("How do I get a refund?")
+    awaitState(caseId, "awaiting-approval")
+    assertThat(decide(caseId, "approve").status()).isEqualTo(StatusCodes.OK)
+    awaitState(caseId, "published")
+
+    // A repeated approve, and a reject after approval, are both refused; the outcome does not flip.
+    assertThat(decide(caseId, "approve").status()).isEqualTo(StatusCodes.CONFLICT)
+    assertThat(decide(caseId, "reject").status()).isEqualTo(StatusCodes.CONFLICT)
+
+    Thread.sleep(2000)
+    val terminal = caseState(caseId)
+    assertThat(terminal.state).isEqualTo("published")
+    assertThat(terminal.reply).isEqualTo(Some("PUBLISHED: refunds within 30 days."))

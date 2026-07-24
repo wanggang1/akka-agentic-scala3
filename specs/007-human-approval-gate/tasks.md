@@ -121,8 +121,8 @@ terminal states (`published`, `rejected`) are distinct from each other and from 
 → 404; decision before the gate opens → 409; second decision after a gate is decided → 409 with the
 terminal outcome unchanged.
 
-- [ ] T024 [US4] Add the validation and decision-integrity tests to `src/test/scala/com/gwgs/akkaagentic/approvals/api/ApprovalGateIntegrationTest.scala` — **C8** (blank question → 400 and malformed JSON → 400, each with **no case started and no model call**; unknown extra property tolerated → 202), the decision half of **C5** (approve/reject on an unknown handle → 404), **C6** (decision before the draft is ready → 409, state unchanged), **C7** (second decision after the gate is decided → 409, terminal outcome unchanged, **no second publish**). Assert non-2xx statuses by omitting `responseBodyAs` (the project's httpClient failure-status pattern).
-- [ ] T025 [US4] Run `mvn verify` to confirm the full offline contract (C1–C10) passes with no API key or network (SC-006, SC-008).
+- [x] T024 [US4] Add the validation and decision-integrity tests to `src/test/scala/com/gwgs/akkaagentic/approvals/api/ApprovalGateIntegrationTest.scala` — **C8** (blank question → 400 and malformed JSON → 400, each with **no case started and no model call**; unknown extra property tolerated → 202), the decision half of **C5** (approve/reject on an unknown handle → 404), **C6** (decision before the draft is ready → 409, state unchanged), **C7** (second decision after the gate is decided → 409, terminal outcome unchanged, **no second publish**). Assert non-2xx statuses by omitting `responseBodyAs` (the project's httpClient failure-status pattern). ✅ green — 6 cases. C6 made deterministic by leaving the draft model unprimed (draft never COMPLETED ⇒ guard always 409, no race); C7 guards on observed status + a 2s window to confirm no second publish.
+- [x] T025 [US4] Run `mvn verify` to confirm the full offline contract (C1–C10) passes with no API key or network (SC-006, SC-008). ✅ BUILD SUCCESS — 47 integration tests, 0 failures, offline.
 
 **Checkpoint**: All five user stories independently functional.
 
