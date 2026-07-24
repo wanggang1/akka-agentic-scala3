@@ -527,7 +527,18 @@ optional fields are omitted from the JSON (idiomatic Scala).
 >   mvn compile exec:java -Dakka.javasdk.dev-mode.persistence.enabled=true
 > ```
 >
-> *Verified live:* _(pending — capability-5 live smoke test against Gemini; see specs/007 T029)._
+> *Verified live* (against Gemini, `gemini-2.5-flash`): both paths end-to-end.
+> **Approve** — `POST /approvals {"question":"How do I get a refund?"}` → poll returned
+> `{"state":"awaiting-approval","draft":"To request a refund, please refer to our refund policy…"}`
+> with **no `reply` field**; then `POST …/approve {"note":"Looks good."}` → `200 approved`, and the next
+> poll returned `{"state":"published","reply":"To request a refund, please refer to our refund policy…"}`
+> — the published reply **identical to the approved draft**, and present **only after** approval.
+> **Reject** — a fresh case reached `awaiting-approval` with its own draft; `POST …/reject {"note":"Tone
+> is too casual; please revise."}` → `200 rejected`, and polling returned
+> `{"state":"rejected","note":"Tone is too casual; please revise."}` with **no `reply`, ever** (stable
+> across repeated polls). Confirms the gate genuinely holds publishing until a human approves (SC-002,
+> SC-003), rejection stops it for good (FR-006), and — as noted in the Gemini caveat — the typed task
+> results round-trip through the `complete_task` tool with **no** tools-vs-JSON conflict.
 
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.
