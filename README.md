@@ -244,14 +244,14 @@ deterministic.
 
 ## Run locally
 
-This service uses a Google AI Gemini model (`gemini-2.5-flash`), which needs an API key at
-runtime. The key is read from the `GOOGLE_AI_GEMINI_API_KEY` environment variable (see
-`application.conf`). Copy `.env.example` to `.env` (git-ignored), set your key there, then load it
-into the environment before running — the JVM does **not** read `.env` automatically:
+By default this service runs against **local open-source models via [Ollama](https://ollama.com)**
+— no API key, no network. `application.conf` sets `model-provider = ollama` (model `qwen3:8b`).
+Pull the model once, then launch:
 
 ```shell
-cp .env.example .env          # then edit .env and set your key
-set -a && source .env && set +a && mvn compile exec:java
+ollama pull qwen3:8b                          # once
+mvn compile exec:java                          # uses local Ollama (qwen3:8b)
+OLLAMA_MODEL=qwen3:14b mvn compile exec:java   # override the model
 ```
 
 This repo has no `main` of its own: `exec:java` launches the Akka runtime entry point
@@ -259,6 +259,38 @@ This repo has no `main` of its own: `exec:java` launches the Akka runtime entry 
 component descriptor and serves every component listed in it.
 
 The service listens on `http://localhost:9000`.
+
+#### Using Google Gemini instead
+
+The provider is selected by `akka.javasdk.agent.model-provider`, made env-overridable via
+`MODEL_PROVIDER` — so switching is a launch-time flag, no recompile and no code change. To use
+Gemini (`gemini-2.5-flash`), supply a `GOOGLE_AI_GEMINI_API_KEY` (the JVM does **not** read `.env`
+automatically) and flip the provider:
+
+```shell
+cp .env.example .env          # then set GOOGLE_AI_GEMINI_API_KEY and MODEL_PROVIDER=googleai-gemini
+set -a && source .env && set +a && mvn compile exec:java
+# or inline, one-off:
+MODEL_PROVIDER=googleai-gemini GOOGLE_AI_GEMINI_API_KEY=… mvn compile exec:java
+```
+
+#### Choosing an Ollama model
+
+**Pick a model that does reliable tool/function calling.** Four of the five capabilities deliver
+structured output through function-calling tools — cap-1's `@FunctionTool`, and the
+`AutonomousAgent` `complete_task` tool behind cap-3/cap-5's typed tasks — so the model must call
+tools well, not just chat. On an M1 / 32 GB Mac, good choices (tested class, not exhaustive):
+
+| Model | Notes |
+|---|---|
+| `qwen3:8b` *(default)* | Strong, reliable tool calling + JSON; fast. Start here. |
+| `qwen2.5:14b` / `qwen3:14b` | Better structured-output reliability; still comfortable in 32 GB. |
+| `llama3.1:8b` | Solid non-Qwen alternative with well-tested tool calling. |
+| `qwen3:4b` | Fine for quick smoke tests; weakest at multi-step tool use — expect the occasional malformed completion on cap-3/cap-5 (caught by each agent's `onFailure` fallback). |
+
+The Gemini-specific "tools vs. JSON" limitation (see the Gemini note below) does **not** apply to
+Ollama; the agents already use the model-agnostic `responseAs` + `onFailure` path. Tests are
+unaffected either way — they run on `TestModelProvider`, so no model server is needed for `mvn verify`.
 
 > **Gemini note — tools vs. native structured output.** `GreetingAgent` both exposes a
 > `@FunctionTool` (`currentTimeOfDay`) and returns a structured `Result`. Google Gemini
