@@ -7,12 +7,21 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 ## Where we are
 
-> **You are here:** Feature 5 (Human-in-the-loop approval gate) — **✅ done and merged (PR #12)** (offline
-> suite green — 47 integration tests — plus a live Gemini smoke test: approve → published with the reply
-> only after approval; reject → rejected, no reply ever). An **exploratory follow-up beyond the original
-> four**: the four-capability roadmap is complete; capability 5 pushed further into durable multi-agent
-> orchestration to test whether a human-gated flow can stay idiomatic Scala. It can — the `TaskClient`
-> decision API has no method-ref wall (§7).
+> **You are here:** Feature 6 (Agent-to-agent delegation) — **🚧 in progress**
+> ([`specs/008-agent-to-agent`](specs/008-agent-to-agent/)). A personal assistant per username (persisted
+> chat history + to-do list) that **delegates** to another user's assistant by username. The headline is a
+> two-sided interop result: delegation is idiomatic **Scala** via agent `dynamicCall` (R1), but a per-user
+> mutable to-do list re-hits the entity method-ref wall and is quarantined into a Java `TodoEntity` +
+> tool-object seam (R2). Notably, this takes the SDK-**discouraged** "agent chaining" path on purpose
+> (Workflows would force Java and can't do dynamic by-username targeting — R7).
+>
+> **⏭️ Committed next — Feature 7: AutonomousAgent delegation.** The *recommended* dynamic multi-agent
+> delegation primitive (`Delegation.to(...)`), the blessed counterpart to cap-6's hand-rolled request-based
+> chaining. It stays Scala (cap-3/5 finding: the `AutonomousAgent`/`Task` APIs have no method-ref wall), so
+> cap-7 will directly contrast "the recommended way" against cap-6's exploration of the discouraged way.
+>
+> Capabilities 1–5 are **✅ done and merged**; 5 was an exploratory follow-up beyond the original four (the
+> `TaskClient` decision API has no method-ref wall — §7).
 >
 > **📄 Retrospective:** [`FINDINGS.md`](FINDINGS.md) consolidates what the first four capabilities taught
 > us — the single `dynamicCall` finding that explains every Scala-vs-Java outcome, plus the practical
@@ -29,6 +38,8 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 | 3 | **Autonomous Agent** — durable, model-driven help-desk agent with a typed task + knowledge-base tool; async start/poll HTTP. **Back in Scala** (see below) | [`specs/005-autonomous-agent`](specs/005-autonomous-agent/) | ✅ Done — merged (PR #10) |
 | 4 | **Session memory** — multi-turn chat; context replayed across requests via the SDK's `SessionMemoryEntity`, keyed by a caller-supplied session id; synchronous HTTP. **Scala** (see below) | [`specs/006-session-memory`](specs/006-session-memory/) | ✅ Done — merged (PR #11) |
 | 5 | **Human-in-the-loop approval gate** *(exploratory follow-up)* — a `DraftAgent` drafts a reply, an **unassigned approval task** gates it, a `PublishAgent` runs only on approval; the Autonomous Agent **external-input** pattern (a three-task dependency chain, no Workflow); async start/poll + a human decision endpoint. **Scala, tests included** (see below) | [`specs/007-human-approval-gate`](specs/007-human-approval-gate/) | ✅ Done — merged (PR #12) |
+| 6 | **Agent-to-agent delegation** *(exploratory)* — a personal assistant per username (persisted chat history + to-do list) that **delegates** to another user's assistant by username; request-based **agent chaining** — the SDK-discouraged path — proven idiomatic **Scala**, with the to-do store quarantined into Java; synchronous HTTP + a structural one-hop guard (see below) | [`specs/008-agent-to-agent`](specs/008-agent-to-agent/) | 🚧 In progress |
+| 7 | **AutonomousAgent delegation** *(committed next)* — the **recommended** dynamic multi-agent delegation primitive (`Delegation.to(...)`), the blessed counterpart to cap-6's hand-rolled chaining; stays Scala (cap-3/5 finding). Will contrast "recommended vs discouraged" delegation head-to-head | _spec TBD_ | 📋 Planned |
 
 **Status legend:** ✅ done · 📋 planned (spec written) · 🚧 in progress · ⬜ not started
 

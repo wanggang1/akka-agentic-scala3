@@ -172,6 +172,112 @@ isolation at the to-do/HTTP layer and defers recall to the live run.
 
 ---
 
+## R7 — Agent chaining is the "not recommended" path; we take it deliberately (the key finding)
+
+**Decision**: Implement delegation as **request-based agent chaining** — `PersonalAssistantAgent` A's
+`ForwardTool` invokes `PersonalAssistantAgent` B through `componentClient.forAgent().dynamicCall(...)` and
+relays the reply — **knowing the SDK documentation explicitly discourages agent chaining** and steers
+toward Workflows.
+
+**The doc says** (`akka-context/sdk/agents/extending.html.md`, "Akka components as function tools"):
+
+> **Agents cannot be used as tools for other agents.** While an agent can define its own tools by
+> annotating methods with `@FunctionTool`, you cannot pass an agent class to another agent's
+> `effects().tools()` method.
+>
+> Agent chaining (where one agent calls another agent) is not a recommended pattern. Instead, use
+> Workflows to orchestrate multiple agents. Workflows provide better control over the execution flow,
+> error handling, and state management when coordinating between multiple agents.
+
+Two distinct constraints are bundled there:
+
+1. **Hard rule — you cannot pass an `Agent` class to `.tools()`.** We **comply**: `ForwardTool` is a plain
+   tool object (not an agent, not an agent class); it calls `componentClient.forAgent().inSession(target)
+   .dynamicCall("personal-assistant-agent")` *internally*. We never hand `PersonalAssistantAgent.class` to
+   `.tools()`. So the hard rule is not violated.
+2. **Soft guidance — "agent chaining … is not a recommended pattern; use Workflows."** This we
+   **deliberately deviate from**, and the deviation is the point of the capability.
+
+**Rationale for deviating**:
+
+- **The recommended alternative (Workflow) forces Java.** Workflow step wiring and the `WorkflowClient`
+  are Java-method-reference-only with no `dynamicCall` (feature-004). Routing cap-6 through a Workflow
+  would drag the whole capability into Java — defeating the entire purpose (proving A2A delegation as
+  idiomatic Scala).
+- **A Workflow can't even express this shape.** Workflows have a **fixed step topology**; cap-6 delegates
+  to *an arbitrary user's assistant chosen by the model at runtime by username*. The target is dynamic and
+  data-dependent — not encodable as a static step graph.
+- **cap-2 already covers Workflow orchestration.** `GreetingWorkflow` (Java) is the project's
+  Workflow-orchestrates-agents data point. A Workflow here would add no new SDK coverage.
+
+**The genuinely recommended path for *dynamic* delegation** is not a Workflow but an **`AutonomousAgent`
+with a `Delegation.to(...)` capability** (AGENTS.md, "Autonomous Agent Orchestrating Multiple Agents
+(Dynamic)"). That stays Scala (feature-005: no wall) and is the blessed model-driven delegation primitive.
+cap-6 chooses the **lighter** request-based-chaining path on purpose, to map what you give up by doing so.
+That recommended path is the **committed next capability (cap-7)** — see `ROADMAP.md` — which will contrast
+recommended-vs-discouraged delegation head-to-head.
+
+**What you give up by chaining (accepted risks)**:
+
+| Concern | Workflow / AutonomousAgent-Delegation | cap-6 request-based chaining |
+|---|---|---|
+| Retry / error handling around the cross-agent call | Framework-managed (`RecoverStrategy`, task retries) | None — a failed delegate surfaces as a failed tool call |
+| Durability of the in-flight cross-agent call | Durable (workflow state / task) | **Not** durable mid-flight — caller retries (R3) |
+| Loop prevention | N/A (topology is fixed) or framework-bounded | **Our own** structural one-hop guard (R4) |
+| Observability of the delegated step | Per-step / per-task lifecycle | Just a tool-call span inside A's turn |
+| Target selection | Static (Workflow) / model-chosen (Delegation) | Model-chosen by username (dynamic) — **the win** |
+| Language | Workflow = Java; Delegation = Scala | **Scala** |
+
+**Alternatives considered**: (a) **Workflow** — rejected: forces Java, and can't express dynamic
+by-username targeting; already covered by cap-2. (b) **`AutonomousAgent` Delegation** — *not* rejected on
+merit; it is the recommended dynamic-delegation primitive and the **committed cap-7** (`ROADMAP.md`). cap-6
+intentionally takes the request-based-chaining path first to document its limits (this table). (c) **Do nothing / single
+agent** — rejected: no delegation, no capability.
+
+**Bottom line**: cap-6's headline finding is not merely "delegation is Scala-clean" (R1) but "**the SDK
+discourages request-based agent chaining, yet it works and stays idiomatic Scala — at the cost of the
+framework-managed retry/durability/observability you'd get from a Workflow or an AutonomousAgent
+Delegation, which we substitute with a hand-rolled one-hop guard and a sync+retry contract.**"
+
+---
+
+## R8 — Language-of-consumer rule, and the Scala↔Java compile direction (verified)
+
+**Decision**: Place each shared type in **the language of its consumer(s)**, and only ever cross the
+Java/Scala boundary in the **Scala→Java** direction (the clean one), never Java→Scala (the noisy one).
+
+- `Todo` / `TodoList` → consumed **only** by the Java `TodoEntity` + `TodoTools` → **Java**.
+- `AssistantRequest` → consumed **only** by the Scala endpoint (validation) → **Scala**.
+- `PersonalAssistantAgent.Request` → consumed by Scala (agent, endpoint, `ForwardTool`) **but must be
+  Java-shaped** because it serializes across the internal mapper → **Java-shaped Scala case class** (the
+  one type that must satisfy both a Scala consumer and Jackson).
+
+**Rationale** — purity is *not* why the to-do types are Java (a common misread). Two things decide it:
+
+1. **Serialization**: `TodoList` is entity state → crosses the internal Jackson mapper → must be
+   Java-*shaped*. That alone permits an annotated Scala case class, so it is not decisive.
+2. **Consumer language + boundary asymmetry** (decisive): the to-do types' only callers are Java, and the
+   **Java→Scala** call direction is the *noisy* one — Java calling a Scala `object`/case class means
+   `TodoList$.MODULE$.empty()` and `scala.Option` juggling (the exact friction cap-2 hit, which it solved
+   by keeping a Java copy of `TimeOfDay` — see the comment in `TimeOfDay.java`). The **Scala→Java**
+   direction is clean (a Java record is just a normal class/methods to Scala). So we keep the to-do data
+   Java (matching its Java consumers) and let the *Scala* agent reach *Java* `TodoTools` — never the
+   reverse.
+
+**Empirical check** (this build, not theory): a throwaway Scala source referencing the Java `TodoList`
+(`TodoList.empty().add("x").nextId`) **compiled — `BUILD SUCCESS`**. And the real `PersonalAssistantAgent`
+(Scala) constructing `new TodoTools(componentClient, username)` (Java) compiles. So the Scala→Java seam is
+confirmed to work in this mixed module. The `pom.xml` recipe (`sendJavaToScalac=false`, `-proc:none`,
+`-parameters`) is about not letting scalac clobber javac's `-parameters` output and not regenerating the
+descriptor — **not** a ban on cross-references. The friction that matters is at the *language* level
+(Java→Scala noise), which the language-of-consumer rule sidesteps entirely.
+
+**Alternatives considered**: (a) *All-Scala domain, annotate `TodoList` for Jackson* — rejected: its only
+consumers are Java, so it would force a Java→Scala dependency (the noisy direction) for zero benefit. (b)
+*Java copies of the Scala `AssistantRequest`* — unnecessary: nothing Java consumes it.
+
+---
+
 ## Cross-cutting: descriptor & build
 
 - **Descriptor** gains `PersonalAssistantAgent` under `agent`, a **new `key-value-entity`** key listing
@@ -190,3 +296,5 @@ isolation at the to-do/HTTP layer and defers recall to the live run.
 | R4 | HTTP `{message}` DTO ↔ Java-shaped internal `Request`; `delegated` structural one-hop guard | Both (two-mapper) |
 | R5 | `readLast(N)` bounded window | Scala |
 | R6 | Chat = SessionMemoryEntity; to-dos = our KeyValueEntity; both keyed by username | — |
+| R7 | Request-based agent **chaining** — the SDK-discouraged path — taken deliberately (Workflow forces Java + can't do dynamic by-username; AutonomousAgent Delegation is the recommended alt / possible cap-7) | **Scala** (trades framework retry/durability for a hand-rolled one-hop guard + sync/retry) |
+| R8 | Language-of-consumer rule; only cross Scala→Java (clean), never Java→Scala (noisy); verified Scala→Java compiles here | — |

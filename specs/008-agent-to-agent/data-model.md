@@ -38,13 +38,14 @@ Immutable, copy-on-write. The `TodoEntity` KeyValueEntity state.
 |---|---|---|
 | `empty()` | `static TodoList` | an assistant with no to-dos |
 | `todos()` | `List<Todo>` | unmodifiable, defensively copied |
-| `nextId()` | `int` | `max(id)+1`, or `1` when empty — the id `add` will assign |
+| `nextId` | `int` | monotonic **high-water** mark (persisted field), starts at `1` — the id `add` will assign; only ever grows |
 | `add(description)` | `TodoList` | append an incomplete `Todo` with id `nextId()` |
 | `find(id)` | `Optional<Todo>` | the item, if present |
 | `delete(id)` | `TodoList` | copy without `id` (unchanged copy if absent) |
 | `setCompleted(id, completed)` | `TodoList` | copy with that id's flag set (unchanged copy if absent) |
 
-**Rules**: ids never reused within a list (monotonic via `nextId()`); every mutator returns a **new**
+**Rules**: ids never reused within a list — `nextId` is a monotonic high-water mark that only grows, so
+deleting the highest item does **not** let a later `add` reclaim its id; every mutator returns a **new**
 `TodoList` (immutability); `delete`/`setCompleted` on an unknown id are **no-ops** (the *entity* reports
 found/not-found to the tool by consulting `find` first — FR-003).
 
