@@ -2,8 +2,8 @@ package com.gwgs.akkaagentic.a2a.application
 
 import akka.javasdk.testkit.{TestKit, TestKitSupport, TestModelProvider}
 import akka.javasdk.testkit.TestModelProvider.AiResponse
-import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.Test
+import org.assertj.core.api.Assertions.{assertThat, assertThatThrownBy}
+import org.junit.jupiter.api.{BeforeEach, Test}
 
 /** Deterministic test for [[PersonalAssistantAgent]] with a mocked model.
   *
@@ -23,12 +23,18 @@ class PersonalAssistantAgentTest extends TestKitSupport:
     TestKit.Settings.DEFAULT
       .withModelProvider(classOf[PersonalAssistantAgent], model)
 
+  @BeforeEach
+  def resetModel(): Unit = model.reset()
+
   private def ask(username: String, message: String): String =
+    invoke(PersonalAssistantAgent.Request(username, message)) // delegated defaults false (top-level)
+
+  private def invoke(req: PersonalAssistantAgent.Request): String =
     componentClient
       .forAgent()
-      .inSession(username) // session id = username, as the endpoint does
+      .inSession(req.username) // session id = username, as the endpoint does
       .dynamicCall[PersonalAssistantAgent.Request, String]("personal-assistant-agent")
-      .invoke(PersonalAssistantAgent.Request(username, message))
+      .invoke(req)
 
   /** T014: the agent adds a to-do via the tool, and a later `list` in the same session reflects it —
     * so the add genuinely persisted to `TodoEntity` through the tool object.
@@ -57,3 +63,39 @@ class PersonalAssistantAgentTest extends TestKitSupport:
     val listReply = ask("alice", "show my to-dos")
     // The list reflects the earlier add: proof the entity persisted across the two tool calls.
     assertThat(listReply).contains("buy milk")
+
+  /** T022 (US2): a top-level request can delegate — alice's assistant forwards to bob's assistant (a real
+    * nested agent call via `ForwardTool` → agent `dynamicCall`), and relays bob's reply with attribution.
+    */
+  @Test
+  def topLevelRequestDelegatesToAnotherAssistant(): Unit =
+    // alice (top-level) is told to contact bob -> calls the forward tool targeting bob with "GREET".
+    model
+      .whenMessage((m: String) => m.contains("contact bob"))
+      .reply(new TestModelProvider.ToolInvocationRequest("ForwardTool_askAssistant", """{"username":"bob","question":"GREET"}"""))
+    // bob (the delegate) receives "GREET" and simply answers.
+    model
+      .whenMessage((m: String) => m.contains("GREET"))
+      .reply(new AiResponse("Hi there!"))
+    // alice relays the forward tool's result (which ForwardTool prefixes with "bob's assistant:").
+    model
+      .whenToolResult((tr) => tr.name().endsWith("askAssistant"))
+      .thenReply((tr) => new AiResponse(tr.content()))
+
+    val reply = ask("alice", "please contact bob")
+    assertThat(reply).contains("bob's assistant:") // attribution added by ForwardTool
+    assertThat(reply).contains("Hi there!") // bob's actual reply, relayed to alice
+
+  /** T022 (US2, SC-004): the one-hop guard — a request that arrives *as a delegate* (`delegated = true`)
+    * is offered no forward tool, so an attempt to delegate onward cannot be dispatched.
+    */
+  @Test
+  def delegatedRequestCannotDelegateOnward(): Unit =
+    // Script the model to (try to) forward — but a delegated call has no forward tool registered.
+    model
+      .whenMessage((m: String) => m.contains("contact carol"))
+      .reply(new TestModelProvider.ToolInvocationRequest("ForwardTool_askAssistant", """{"username":"carol","question":"GREET"}"""))
+
+    assertThatThrownBy(() =>
+      invoke(PersonalAssistantAgent.Request("bob", "please contact carol", delegated = true))
+    ).isInstanceOf(classOf[RuntimeException])

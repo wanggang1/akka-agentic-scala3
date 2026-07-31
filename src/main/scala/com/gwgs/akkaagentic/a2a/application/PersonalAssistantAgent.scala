@@ -29,10 +29,19 @@ object PersonalAssistantAgent:
     */
   private val HistoryWindow = 10
 
-  private def systemMessage(username: String): String =
+  /** System prompt. When `canDelegate`, the assistant is told it may forward to another user's assistant;
+    * a delegated call omits both the forward tool and this instruction, so it cannot delegate onward.
+    */
+  private def systemMessage(username: String, canDelegate: Boolean): String =
+    val delegation =
+      if canDelegate then
+        s"""
+           |If the user asks you to ask, check with, or get something done by ANOTHER person's assistant,
+           |use the delegation tool with that person's username, and relay their assistant's reply.""".stripMargin
+      else ""
     s"""You are $username, a concise and helpful personal assistant.
        |You manage $username's personal to-do list. When the user asks, use the provided tools to
-       |list, add, delete, or complete to-dos — never invent to-dos or ids, always use the tools.
+       |list, add, delete, or complete to-dos — never invent to-dos or ids, always use the tools.$delegation
        |After acting, reply in one or two short sentences confirming what you did, or answering the
        |question directly if no tool was needed.""".stripMargin
 
@@ -41,13 +50,21 @@ class PersonalAssistantAgent(componentClient: ComponentClient) extends Agent:
   import PersonalAssistantAgent.*
 
   /** Answer one message for `req.username`'s assistant. Chat history is replayed from session memory
-    * keyed by the username (set by the caller via `.inSession(username)`); to-dos are managed through
-    * the Java [[TodoTools]] seam. (Delegation via `ForwardTool` is wired in a later step.)
+    * keyed by the username (set by the caller via `.inSession(username)`); to-dos are managed through the
+    * Java [[TodoTools]] seam; delegation goes through [[ForwardTool]].
+    *
+    * One-hop guard (research R4): a top-level request (`delegated = false`) is offered both tools; a
+    * request that arrived *as a delegate* (`delegated = true`) is offered only the to-do tools, so it
+    * structurally cannot delegate again — bounding any A→B→A chain to a single hop.
     */
   def request(req: Request): Agent.Effect[String] =
-    effects()
-      .memory(MemoryProvider.limitedWindow().readLast(HistoryWindow))
-      .tools(new TodoTools(componentClient, req.username))
-      .systemMessage(systemMessage(req.username))
+    val todoTools = new TodoTools(componentClient, req.username)
+    val base = effects().memory(MemoryProvider.limitedWindow().readLast(HistoryWindow))
+    // Offer the forward tool only to a top-level request — a delegate gets to-do tools alone (one hop).
+    val withTools =
+      if req.delegated then base.tools(todoTools)
+      else base.tools(todoTools, new ForwardTool(componentClient, req.username))
+    withTools
+      .systemMessage(systemMessage(req.username, canDelegate = !req.delegated))
       .userMessage(req.message)
       .thenReply()
