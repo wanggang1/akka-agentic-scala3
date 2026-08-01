@@ -93,6 +93,32 @@ class PersonalAssistantEndpointIntegrationTest extends TestKitSupport:
     // ...and NOT under amy (per-user isolation of the delegated effect).
     assertThat(post("amy", "list my to-dos")).doesNotContain("prepare slides")
 
+  /** T026 (US3, SC-005): per-user isolation — a to-do added under `alice` is invisible to `carol`.
+    * Each username is its own session (memory) and its own `TodoEntity` key, so lists never bleed across
+    * users. Recall (the model *using* prior turns) is not asserted here — mock never sees replayed history
+    * (research R6); it is proven by the live smoke test.
+    */
+  @Test
+  def todosAreIsolatedPerUser(): Unit =
+    model
+      .whenMessage((m: String) => m.contains("add"))
+      .reply(new TestModelProvider.ToolInvocationRequest("TodoTools_addTodo", """{"description":"alice-secret"}"""))
+    model
+      .whenMessage((m: String) => m.contains("list"))
+      .reply(new TestModelProvider.ToolInvocationRequest("TodoTools_listTodos", "{}"))
+    model
+      .whenToolResult((tr) => tr.name().endsWith("addTodo"))
+      .thenReply((tr) => new AiResponse(s"Added it (item ${tr.content()})."))
+    model
+      .whenToolResult((tr) => tr.name().endsWith("listTodos"))
+      .thenReply((tr) => new AiResponse(tr.content()))
+
+    // Distinct usernames — TodoEntity state persists across methods in the shared runtime, so isolate
+    // from the "alice" used by validRequestAddsTodoAndReturnsOk.
+    post("iso-alice", "please add something") // lands under iso-alice
+    assertThat(post("iso-alice", "list my to-dos")).contains("alice-secret") // iso-alice sees it
+    assertThat(post("iso-carol", "list my to-dos")).doesNotContain("alice-secret") // iso-carol does not
+
   /** Validation: a blank message is rejected up front — `400`, assistant never engaged. */
   @Test
   def blankMessageRejected(): Unit =
@@ -111,3 +137,24 @@ class PersonalAssistantEndpointIntegrationTest extends TestKitSupport:
       .withRequestBody(akka.http.javadsl.model.ContentTypes.APPLICATION_JSON, "{}".getBytes)
       .invoke()
     assertThat(reply.status()).isEqualTo(StatusCodes.BAD_REQUEST)
+
+  /** T028 (US4): a malformed JSON body is rejected by the SDK boundary → `400` (assistant never engaged). */
+  @Test
+  def malformedBodyRejected(): Unit =
+    val reply = httpClient
+      .POST("/request/alice")
+      .withRequestBody(akka.http.javadsl.model.ContentTypes.APPLICATION_JSON, "{ \"message\": ".getBytes)
+      .invoke()
+    assertThat(reply.status()).isEqualTo(StatusCodes.BAD_REQUEST)
+
+  /** T028 (US4): an unknown extra property alongside a valid message is tolerated → `200`
+    * (`RequestBody` is `@JsonIgnoreProperties`).
+    */
+  @Test
+  def unknownPropertyTolerated(): Unit =
+    model.fixedResponse("ok")
+    val reply = httpClient
+      .POST("/request/alice")
+      .withRequestBody(akka.http.javadsl.model.ContentTypes.APPLICATION_JSON, """{"message":"hi","surprise":"ignored"}""".getBytes)
+      .invoke()
+    assertThat(reply.status()).isEqualTo(StatusCodes.OK)
