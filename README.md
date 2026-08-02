@@ -718,16 +718,46 @@ curl -i -X POST http://localhost:9000/request/alice \
 > access to your name"* — recall across turns **and** per-user isolation. **Validation** — a blank
 > `message` returned `400`.
 >
-> > **Live caveat — qwen3:8b can emit a null-content tool-call turn, and it durably poisons that session.**
+> > **Live caveat — qwen3:8b can emit a null-content tool-call turn; handled in two layers.**
 > > On one delegation attempt the model returned an assistant message with `content: null` on a tool-call
 > > turn (runtime `AK-01202 … argument "content" is null`); that request failed **and** every *subsequent*
-> > turn for the same username kept failing, because the bad message was persisted into session memory and
-> > re-thrown on replay. It is **intermittent** (a fresh `emma → frank` delegation succeeded on the first
-> > try) and **model-specific** (a known Ollama/qwen tool-calling quirk, not a wiring defect — the 131
-> > offline tests on `TestModelProvider` are green). Mitigations if it bites in practice: prefer a
-> > stronger tool-calling model (`qwen2.5:14b` / `qwen3:14b`, or a hosted model), and/or add an
-> > `.onFailure(...)` fallback so a null-content reply doesn't propagate raw. Left as an honest limitation
-> > of running a small local model, not patched over.
+> > turn for the same username kept failing. It is **intermittent** (a fresh `emma → frank` delegation
+> > succeeded on the first try) and **model-specific** (a known Ollama/qwen tool-calling quirk, not a wiring
+> > defect — the offline tests on `TestModelProvider` are green).
+> >
+> > **Mechanism (traced to SDK 3.6.0 sources — the write precedes the throw).** The SDK persists session
+> > memory only in `AgentImpl.onSuccess`, which builds an `AiMessage` from the model response; `AiMessage.text`
+> > and the SPI DTOs (`ModelResponse.content`, `ContextMessage.AiMessage.content`) are all **nullable with no
+> > constructor null-check**. So a null-content turn is written to `SessionMemoryEntity` **as-is**, and the
+> > `AK-01202` throw fires *afterward*, on the caller-side `ComponentClientsImpl.transformResponse` (and again
+> > when the live model provider replays the stored null). This poisoning **cannot be reproduced offline** —
+> > the mock persists the null message but never replays stored history through the langchain4j conversion
+> > where the throw originates (the mock sees only the current turn).
+> >
+> > **Two-layer handling (implemented — [`PersonalAssistantAgent`](src/main/scala/com/gwgs/akkaagentic/a2a/application/PersonalAssistantAgent.scala)),
+> > because two *different* nulls need two *different* fixes:**
+> > 1. **Root cause (future turns)** — [`NullSafeAiContentInterceptor`](src/main/scala/com/gwgs/akkaagentic/a2a/application/NullSafeAiContentInterceptor.scala),
+> >    a `SessionMemoryInterceptor` wired via `.memory(MemoryProvider.limitedWindow().readLast(10).withInterceptor(...))`,
+> >    rewrites a null AI `text` to `""` **on the write path, before persist** (preserving `toolCallRequests`), so
+> >    the poison never lands in memory. This targets the null that langchain4j *accepts* — a `content: null`
+> >    **tool-call** turn (`content:null`+`tool_calls` is legal), which the runtime persists as part of a
+> >    **successful** turn. Because that turn *succeeds*, `.onFailure` can't see it — yet the stored null breaks
+> >    every later replay. Without the interceptor, `.onFailure` alone would return the fallback *forever* on a
+> >    poisoned session (graceful, but permanently dead); the interceptor keeps the session working normally.
+> >    Verified at two levels: a Scala **unit** test of `beforeWrite`, and a Java **integration** test
+> >    ([`NullContentPersistenceIntegrationTest`](src/test/java/com/gwgs/akkaagentic/a2a/application/NullContentPersistenceIntegrationTest.java))
+> >    that drives a null-content tool-call turn through the real agent and reads `SessionMemoryEntity` back —
+> >    the stored `text` is `""`, tool call preserved. A control run with the interceptor removed stores `null`,
+> >    proving langchain4j does **not** normalize it and the interceptor is load-bearing. (The downstream NPE
+> >    itself stays live-only — the mock never replays history through the langchain4j conversion where it fires.)
+> > 2. **Graceful degradation (current turn)** — `.onFailure(_ => FailureReply)` turns a failed turn into a clean
+> >    reply instead of a `500` — including a null *final* reply (which langchain4j **rejects**, so it fails the
+> >    turn before anything is persisted) and the recurring replay failures on an already-poisoned session. Also
+> >    closes the AGENTS.md agent-checklist gap. Covered by an offline `failWith` test. Note the interceptor is
+> >    **write-only** (it does not run on read), so it never touches the current turn's reply — that's `.onFailure`'s job.
+> >
+> > Belt-and-suspenders, not a silver bullet: also prefer a stronger tool-calling model (`qwen2.5:14b` /
+> > `qwen3:14b`, or a hosted model) if it bites in practice.
 
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.

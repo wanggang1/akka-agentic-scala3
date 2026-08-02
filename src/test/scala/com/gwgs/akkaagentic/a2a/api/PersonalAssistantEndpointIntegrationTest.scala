@@ -119,6 +119,26 @@ class PersonalAssistantEndpointIntegrationTest extends TestKitSupport:
     assertThat(post("iso-alice", "list my to-dos")).contains("alice-secret") // iso-alice sees it
     assertThat(post("iso-carol", "list my to-dos")).doesNotContain("alice-secret") // iso-carol does not
 
+  /** Graceful degradation: a model failure (e.g. the qwen3 null-content tool-call quirk, README cap-6
+    * "Live caveat") is caught by the agent's `.onFailure` and returned as a clean `200` fallback reply,
+    * not a raw `500`. Proves one bad model turn degrades to a friendly message instead of an error.
+    */
+  @Test
+  def modelFailureDegradesToFallbackReply(): Unit =
+    model
+      .whenMessage((m: String) => m.contains("boom"))
+      .failWith(new RuntimeException("simulated model failure"))
+
+    val reply = httpClient
+      .POST("/request/frank")
+      .withRequestBody(PersonalAssistantEndpoint.RequestBody(Some("boom")))
+      .responseBodyAs(classOf[PersonalAssistantEndpoint.Reply])
+      .invoke()
+
+    assertThat(reply.status()).isEqualTo(StatusCodes.OK)
+    assertThat(reply.body().username).isEqualTo("frank")
+    assertThat(reply.body().reply).contains("try again") // the FailureReply fallback, not a 500
+
   /** Validation: a blank message is rejected up front — `400`, assistant never engaged. */
   @Test
   def blankMessageRejected(): Unit =

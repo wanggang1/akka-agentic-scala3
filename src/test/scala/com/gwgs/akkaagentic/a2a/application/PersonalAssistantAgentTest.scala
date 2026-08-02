@@ -2,7 +2,7 @@ package com.gwgs.akkaagentic.a2a.application
 
 import akka.javasdk.testkit.{TestKit, TestKitSupport, TestModelProvider}
 import akka.javasdk.testkit.TestModelProvider.AiResponse
-import org.assertj.core.api.Assertions.{assertThat, assertThatThrownBy}
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.{BeforeEach, Test}
 
 /** Deterministic test for [[PersonalAssistantAgent]] with a mocked model.
@@ -87,7 +87,10 @@ class PersonalAssistantAgentTest extends TestKitSupport:
     assertThat(reply).contains("Hi there!") // bob's actual reply, relayed to alice
 
   /** T022 (US2, SC-004): the one-hop guard — a request that arrives *as a delegate* (`delegated = true`)
-    * is offered no forward tool, so an attempt to delegate onward cannot be dispatched.
+    * is offered no forward tool, so an attempt to delegate onward cannot be dispatched. Since the forward
+    * tool is absent, the model's (scripted) forward call cannot be fulfilled; the agent's `.onFailure`
+    * degrades that to a clean fallback reply rather than a raw error — and crucially, no onward delegation
+    * happens (the reply never carries carol's assistant's content).
     */
   @Test
   def delegatedRequestCannotDelegateOnward(): Unit =
@@ -95,7 +98,12 @@ class PersonalAssistantAgentTest extends TestKitSupport:
     model
       .whenMessage((m: String) => m.contains("contact carol"))
       .reply(new TestModelProvider.ToolInvocationRequest("ForwardTool_askAssistant", """{"username":"carol","question":"GREET"}"""))
+    // If the guard leaked and carol WERE reached, this is what she'd say — it must never surface.
+    model
+      .whenMessage((m: String) => m.contains("GREET"))
+      .reply(new AiResponse("carol-was-reached"))
 
-    assertThatThrownBy(() =>
-      invoke(PersonalAssistantAgent.Request("bob", "please contact carol", delegated = true))
-    ).isInstanceOf(classOf[RuntimeException])
+    val reply = invoke(PersonalAssistantAgent.Request("bob", "please contact carol", delegated = true))
+
+    assertThat(reply).contains("try again") // graceful FailureReply — the forward tool was not available
+    assertThat(reply).doesNotContain("carol-was-reached") // the one-hop guard held: no onward delegation

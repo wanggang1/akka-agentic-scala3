@@ -29,6 +29,17 @@ object PersonalAssistantAgent:
     */
   private val HistoryWindow = 10
 
+  /** Graceful-degradation reply (AGENTS.md agent checklist: tool/structured agents should have an
+    * `onFailure`). A model or tool failure — notably a small local model emitting a **null-content
+    * tool-call turn** that the runtime rejects (see README cap-6 "Live caveat" and
+    * [[qwen3-null-content-poisons-session]]) — becomes this clean reply instead of a raw `500`. It does
+    * NOT un-poison a session on its own (that's the memory interceptor's job); it bounds one bad turn to
+    * a single friendly reply, and catches the *recurring* poisoned turns whose failure surfaces inside
+    * this agent's own model call.
+    */
+  private val FailureReply =
+    "Sorry, I couldn't complete that request just now. Please try again."
+
   /** System prompt. When `canDelegate`, the assistant is told it may forward to another user's assistant;
     * a delegated call omits both the forward tool and this instruction, so it cannot delegate onward.
     */
@@ -59,7 +70,8 @@ class PersonalAssistantAgent(componentClient: ComponentClient) extends Agent:
     */
   def request(req: Request): Agent.Effect[String] =
     val todoTools = new TodoTools(componentClient, req.username)
-    val base = effects().memory(MemoryProvider.limitedWindow().readLast(HistoryWindow))
+    val base = effects().memory(
+      MemoryProvider.limitedWindow().readLast(HistoryWindow).withInterceptor(NullSafeAiContentInterceptor))
     // Offer the forward tool only to a top-level request — a delegate gets to-do tools alone (one hop).
     val withTools =
       if req.delegated then base.tools(todoTools)
@@ -67,4 +79,5 @@ class PersonalAssistantAgent(componentClient: ComponentClient) extends Agent:
     withTools
       .systemMessage(systemMessage(req.username, canDelegate = !req.delegated))
       .userMessage(req.message)
+      .onFailure((_: Throwable) => FailureReply)
       .thenReply()
