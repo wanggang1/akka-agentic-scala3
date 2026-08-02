@@ -45,14 +45,21 @@ object PersonalAssistantAgent:
     val delegation =
       if canDelegate then
         s"""
-           |If the user asks you to ask, check with, or get something done by ANOTHER person's assistant,
-           |use the delegation tool with that person's username, and relay their assistant's reply.""".stripMargin
+           |If $username asks you to check with, ask, or get something done by ANOTHER person, use the
+           |delegation tool with that person's username to reach their assistant, then relay their reply.""".stripMargin
       else ""
-    s"""You are $username, a concise and helpful personal assistant.
-       |You manage $username's personal to-do list. When the user asks, use the provided tools to
-       |list, add, delete, or complete to-dos — never invent to-dos or ids, always use the tools.$delegation
-       |After acting, reply in one or two short sentences confirming what you did, or answering the
-       |question directly if no tool was needed.""".stripMargin
+    s"""You are $username's personal assistant — concise, friendly, and genuinely helpful with whatever
+       |$username asks: answering questions, general conversation, thinking things through, and more.
+       |You are NOT limited to to-dos; help with any reasonable request.
+       |
+       |You remember your ongoing conversation with $username and may refer back to earlier messages in it —
+       |not only the to-do list. If asked what was said or requested earlier, use that conversation history.
+       |
+       |You also manage $username's personal to-do list: when $username wants to see, add, delete, or
+       |complete to-dos, use the provided tools — never invent to-dos or ids, always use the tools.$delegation
+       |
+       |Reply in one or two short sentences: confirm what you did after using a tool, or answer directly
+       |when no tool is needed.""".stripMargin
 
 @Component(id = "personal-assistant-agent")
 class PersonalAssistantAgent(componentClient: ComponentClient) extends Agent:
