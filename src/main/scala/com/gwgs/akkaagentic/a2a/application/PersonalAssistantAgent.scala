@@ -4,8 +4,11 @@ import akka.javasdk.agent.{Agent, MemoryProvider}
 import akka.javasdk.annotations.Component
 import akka.javasdk.client.ComponentClient
 import com.fasterxml.jackson.annotation.{JsonCreator, JsonProperty}
+import org.slf4j.LoggerFactory
 
 object PersonalAssistantAgent:
+
+  private val logger = LoggerFactory.getLogger(classOf[PersonalAssistantAgent])
 
   /** The agent's single command parameter — the internal, agent-to-agent wire type.
     *
@@ -23,11 +26,6 @@ object PersonalAssistantAgent:
       @JsonProperty("message") message: String,
       @JsonProperty("delegated") delegated: Boolean = false
   )
-
-  /** Bounded chat-history window (research R5): replay only the last N messages to cap token growth.
-    * Note a delegated reply and `listTodos` output both count against this window.
-    */
-  private val HistoryWindow = 10
 
   /** Graceful-degradation reply (AGENTS.md agent checklist: tool/structured agents should have an
     * `onFailure`). A model or tool failure — notably a small local model emitting a **null-content
@@ -71,7 +69,14 @@ class PersonalAssistantAgent(componentClient: ComponentClient) extends Agent:
   def request(req: Request): Agent.Effect[String] =
     val todoTools = new TodoTools(componentClient, req.username)
     val base = effects().memory(
-      MemoryProvider.limitedWindow().readLast(HistoryWindow).withInterceptor(NullSafeAiContentInterceptor))
+      // Full session history (no readLast trim) + the null-content interceptor. We deliberately do NOT
+      // use .readLast(N): the SDK's last-N trim (MemoryHistoryUtils.trimToLastN) is a naive subList that
+      // ignores tool-call/response pairing, so once a tool-using session exceeds N messages it orphans a
+      // ToolCallResponse at the window head — an invalid chat sequence the model provider rejects, surfaced
+      // confusingly as "argument content is null". This was the actual cause of cap-6's live "poisoning"
+      // (proven live: removing readLast fixes it). Tradeoff: unbounded token growth on long sessions;
+      // compaction is the proper bound (future work). See README cap-6 "Live caveat".
+      MemoryProvider.limitedWindow().withInterceptor(NullSafeAiContentInterceptor))
     // Offer the forward tool only to a top-level request — a delegate gets to-do tools alone (one hop).
     val withTools =
       if req.delegated then base.tools(todoTools)
@@ -79,5 +84,9 @@ class PersonalAssistantAgent(componentClient: ComponentClient) extends Agent:
     withTools
       .systemMessage(systemMessage(req.username, canDelegate = !req.delegated))
       .userMessage(req.message)
-      .onFailure((_: Throwable) => FailureReply)
+      .onFailure { error =>
+        // Log the real cause — otherwise the fallback swallows it and failures are undiagnosable.
+        logger.warn(s"Assistant request failed for [${req.username}]; returning fallback reply", error)
+        FailureReply
+      }
       .thenReply()

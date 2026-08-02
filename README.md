@@ -260,12 +260,16 @@ writing components in Scala needs explicit workarounds:
      `key-value-entity` key**; `TodoTools` is not a component. A consequence (FR-009): there is **no direct
      to-do HTTP endpoint** — to-dos are reached only *through* the assistant, because a Scala endpoint
      couldn't call the entity client anyway.
-   - **Memory adds no friction (as in §6).** Chat history is the SDK's session memory keyed by `username`
-     (`.inSession(username)` + `.memory(MemoryProvider.limitedWindow().readLast(10))`), backed by the
-     runtime-owned `SessionMemoryEntity` — **not** in our descriptor. As with cap-4, offline tests prove
-     *retention/isolation* (distinct usernames never bleed) but **recall is live-only** — the mock model
-     sees only the current turn (research R6). Delegated replies and `listTodos` output both count against
-     the `readLast(N)` window (research R5).
+   - **Memory adds no friction to *build* — but `readLast(N)` has a tool-call sharp edge.** Chat history is
+     the SDK's session memory keyed by `username` (`.inSession(username)` + `.memory(MemoryProvider.limitedWindow()...)`),
+     backed by the runtime-owned `SessionMemoryEntity` — **not** in our descriptor. As with cap-4, offline
+     tests prove *retention/isolation* (distinct usernames never bleed) but **recall is live-only** — the
+     mock model sees only the current turn (research R6). **We deliberately do NOT use `.readLast(N)`:** its
+     naive last-N trim orphans a tool-call/response pair once a tool-using session exceeds N messages, which
+     the model provider rejects as an invalid sequence (surfaced misleadingly as `argument "content" is
+     null`). This was cap-6's real live failure — proven by removing `readLast` — so we keep **full history**
+     and accept the token-growth tradeoff (compaction is the proper bound; future work). See the cap-6 "Live
+     caveat".
    - **Mixed Scala/Java in one package needs the language-of-consumer rule (research R8).** With Scala and
      Java types now side by side, the guideline is: **put each shared type in the language of its
      consumer(s), and only ever depend Scala→Java, never Java→Scala.** `Todo`/`TodoList` are pure
@@ -718,46 +722,40 @@ curl -i -X POST http://localhost:9000/request/alice \
 > access to your name"* — recall across turns **and** per-user isolation. **Validation** — a blank
 > `message` returned `400`.
 >
-> > **Live caveat — qwen3:8b can emit a null-content tool-call turn; handled in two layers.**
-> > On one delegation attempt the model returned an assistant message with `content: null` on a tool-call
-> > turn (runtime `AK-01202 … argument "content" is null`); that request failed **and** every *subsequent*
-> > turn for the same username kept failing. It is **intermittent** (a fresh `emma → frank` delegation
-> > succeeded on the first try) and **model-specific** (a known Ollama/qwen tool-calling quirk, not a wiring
-> > defect — the offline tests on `TestModelProvider` are green).
+> > **Live caveat — a session that stops working after a few tool-using turns, surfaced as
+> > `argument "content" is null`.** Symptom: `add` / `add` / `complete` succeed, then `what is on my list?`
+> > (and every later turn) fails with the fallback reply. The runtime reports
+> > `AK-01202 … Model error: argument "content" is null`, which *looks* like a null-content model quirk but
+> > is actually misleading.
 > >
-> > **Mechanism (traced to SDK 3.6.0 sources — the write precedes the throw).** The SDK persists session
-> > memory only in `AgentImpl.onSuccess`, which builds an `AiMessage` from the model response; `AiMessage.text`
-> > and the SPI DTOs (`ModelResponse.content`, `ContextMessage.AiMessage.content`) are all **nullable with no
-> > constructor null-check**. So a null-content turn is written to `SessionMemoryEntity` **as-is**, and the
-> > `AK-01202` throw fires *afterward*, on the caller-side `ComponentClientsImpl.transformResponse` (and again
-> > when the live model provider replays the stored null). This poisoning **cannot be reproduced offline** —
-> > the mock persists the null message but never replays stored history through the langchain4j conversion
-> > where the throw originates (the mock sees only the current turn).
+> > **Actual cause (proven live) — the SDK's `readLast(N)` orphans tool-call pairs.** Each tool-using turn
+> > persists **4** messages (`User`, `AiMessage`+tool-call, `ToolCallResponse`, `AiMessage`-final), so 3 turns
+> > = 12 messages. The SDK's last-N trim ([`MemoryHistoryUtils.trimToLastN`] in SDK 3.6.0) is a **naive
+> > `subList(size-N, size)`** that ignores tool-call/response pairing — with `readLast(10)` the window head
+> > becomes an **orphaned `ToolCallResponse`** (its preceding `AiMessage`+tool-call was dropped). That invalid
+> > chat sequence is rejected during request assembly (before the call even reaches Ollama) and the SDK
+> > surfaces it as the confusing `argument "content" is null`. **Proven by experiment:** the same failing flow
+> > works once `.readLast(N)` is removed — hence this capability uses **full session history**
+> > (`MemoryProvider.limitedWindow()`, no `readLast`). *Correction:* an earlier version of this note blamed
+> > qwen3 null-content persistence; a live A/B (remove `readLast` → fixed) showed the window trim was the real
+> > cause. Tradeoff of full history: **unbounded token growth** on long sessions — **compaction** (summarize
+> > old turns without slicing pairs) is the proper bound, left as future work.
 > >
-> > **Two-layer handling (implemented — [`PersonalAssistantAgent`](src/main/scala/com/gwgs/akkaagentic/a2a/application/PersonalAssistantAgent.scala)),
-> > because two *different* nulls need two *different* fixes:**
-> > 1. **Root cause (future turns)** — [`NullSafeAiContentInterceptor`](src/main/scala/com/gwgs/akkaagentic/a2a/application/NullSafeAiContentInterceptor.scala),
-> >    a `SessionMemoryInterceptor` wired via `.memory(MemoryProvider.limitedWindow().readLast(10).withInterceptor(...))`,
-> >    rewrites a null AI `text` to `""` **on the write path, before persist** (preserving `toolCallRequests`), so
-> >    the poison never lands in memory. This targets the null that langchain4j *accepts* — a `content: null`
-> >    **tool-call** turn (`content:null`+`tool_calls` is legal), which the runtime persists as part of a
-> >    **successful** turn. Because that turn *succeeds*, `.onFailure` can't see it — yet the stored null breaks
-> >    every later replay. Without the interceptor, `.onFailure` alone would return the fallback *forever* on a
-> >    poisoned session (graceful, but permanently dead); the interceptor keeps the session working normally.
-> >    Verified at two levels: a Scala **unit** test of `beforeWrite`, and a Java **integration** test
-> >    ([`NullContentPersistenceIntegrationTest`](src/test/java/com/gwgs/akkaagentic/a2a/application/NullContentPersistenceIntegrationTest.java))
-> >    that drives a null-content tool-call turn through the real agent and reads `SessionMemoryEntity` back —
-> >    the stored `text` is `""`, tool call preserved. A control run with the interceptor removed stores `null`,
-> >    proving langchain4j does **not** normalize it and the interceptor is load-bearing. (The downstream NPE
-> >    itself stays live-only — the mock never replays history through the langchain4j conversion where it fires.)
-> > 2. **Graceful degradation (current turn)** — `.onFailure(_ => FailureReply)` turns a failed turn into a clean
-> >    reply instead of a `500` — including a null *final* reply (which langchain4j **rejects**, so it fails the
-> >    turn before anything is persisted) and the recurring replay failures on an already-poisoned session. Also
-> >    closes the AGENTS.md agent-checklist gap. Covered by an offline `failWith` test. Note the interceptor is
-> >    **write-only** (it does not run on read), so it never touches the current turn's reply — that's `.onFailure`'s job.
+> > **Two defensive layers kept alongside** ([`PersonalAssistantAgent`](src/main/scala/com/gwgs/akkaagentic/a2a/application/PersonalAssistantAgent.scala)),
+> > for related but distinct failure modes:
+> > 1. **`NullSafeAiContentInterceptor`** — a `SessionMemoryInterceptor` (`.withInterceptor(...)`) rewriting a
+> >    null AI `text` to `""` **on the write path** (preserving `toolCallRequests`). A `content:null`+`tool_calls`
+> >    turn *is* legal and langchain4j accepts it, so the runtime persists it as null — proven offline by a Java
+> >    `getHistory` test ([`NullContentPersistenceIntegrationTest`](src/test/java/com/gwgs/akkaagentic/a2a/application/NullContentPersistenceIntegrationTest.java)):
+> >    stored `text` is `""` with the interceptor, **`null` without it** (so langchain4j does not normalize;
+> >    the interceptor is load-bearing). Honest scope: this null-content *persistence* is real, but it was
+> >    **not** the cause of the live failure above — the `readLast` trim was. Kept as defense-in-depth.
+> > 2. **`.onFailure(_ => FailureReply)` + a `logger.warn`** — degrades any failed turn to a clean `200`
+> >    instead of a raw `500`, and (crucially) **logs the real exception** — the silent fallback was why this
+> >    bug was initially invisible in the logs. Closes the AGENTS.md agent-checklist gap. Offline `failWith` test.
 > >
-> > Belt-and-suspenders, not a silver bullet: also prefer a stronger tool-calling model (`qwen2.5:14b` /
-> > `qwen3:14b`, or a hosted model) if it bites in practice.
+> > Belt-and-suspenders: also prefer a stronger tool-calling model (`qwen2.5:14b` / `qwen3:14b`, or a hosted
+> > model) if small-model tool quirks bite in practice.
 
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.
