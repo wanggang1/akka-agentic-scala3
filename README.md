@@ -46,6 +46,18 @@ src/main/scala/com/gwgs/akkaagentic/approvals/api/         # ApprovalEndpoint (P
 # wall), so the whole capability incl. tests is Scala. The task entities are runtime-owned (NOT in our
 # descriptor), like cap-4's SessionMemoryEntity — see §7.
 
+# Capability 6 — Scala agent + Java entity (agent-to-agent delegation; see "Scala interop notes" §8)
+src/main/scala/com/gwgs/akkaagentic/a2a/domain/       # AssistantRequest (validation)
+src/main/java/com/gwgs/akkaagentic/a2a/domain/         # Todo, TodoList (pure data/logic — Java, consumed by TodoEntity)
+src/main/scala/com/gwgs/akkaagentic/a2a/application/   # PersonalAssistantAgent (per-username), ForwardTool (Scala delegation via dynamicCall)
+src/main/java/com/gwgs/akkaagentic/a2a/application/     # TodoEntity (KeyValueEntity), TodoTools (Java tool object — reaches the entity past the method-ref wall)
+src/main/scala/com/gwgs/akkaagentic/a2a/api/           # PersonalAssistantEndpoint (POST /request/{username}, synchronous)
+# Note: one assistant per username. Chat history via session memory (username = session id, runtime-owned
+# SessionMemoryEntity — NOT in our descriptor); to-dos via the Java TodoEntity, reached only through the
+# Java TodoTools tool object (the entity client is method-ref-only — the wall); delegation to another
+# user's assistant via agent dynamicCall (Scala-clean). ForwardTool/TodoTools are NOT components. This is
+# the SDK-discouraged "agent chaining" path, taken deliberately in Scala — see §8, and specs/008 R7.
+
 src/main/resources/application.conf                 # default model-provider config
 src/test/{scala,java}/com/gwgs/akkaagentic/...       # tests (TestModelProvider, no live model)
 ```
@@ -224,6 +236,59 @@ writing components in Scala needs explicit workarounds:
    verification included. See specs/007 research R1/R2 and
    [`docs/http-endpoint-sdk-boundary.md`](docs/http-endpoint-sdk-boundary.md) for the endpoint-layer
    boundary decision.
+
+8. **Agent-to-agent delegation is Scala-clean — but the entity behind it forces a Java quarantine, and a
+   mixed-language module needs a language-of-consumer rule.** Capability 6 (personal assistants,
+   `com.gwgs.akkaagentic.a2a.*`) is a request-based `PersonalAssistantAgent`, one per username, that manages
+   its own to-do list *and* can **delegate** to another user's assistant. It combines the two sides of the
+   method-ref wall in a single capability, so it is the clearest illustration of where the wall does and
+   doesn't bite:
+
+   - **Delegation itself is idiomatic Scala (the positive result, research R1).** One assistant invokes
+     another through the **agent** `ComponentClient`'s `dynamicCall` — exactly the escape hatch cap-1 uses
+     (§2) — so [`ForwardTool`](src/main/scala/com/gwgs/akkaagentic/a2a/application/ForwardTool.scala) is a
+     plain Scala tool object that calls `forAgent().inSession(targetUsername).dynamicCall(...)`. No wall.
+     (`ForwardTool` is **not** a component, and crucially **not** an `Agent` handed to `.tools()` — the SDK
+     forbids passing an `Agent` class as a tool; we only ever call the agent *through* the component client.)
+   - **The to-do store re-hits the wall, and is quarantined in Java (research R2).** A per-user to-do list
+     is durable state → a `KeyValueEntity`. But the **entity** client is method-reference-only
+     (`.method(TodoEntity::add)`, no `dynamicCall`) — the same wall as cap-2's `WorkflowClient` (§4) and
+     cap-4's `SessionMemoryEntity` (§6). So the entity **and its caller** are **Java**: the Scala agent
+     reaches the entity only through a Java tool object,
+     [`TodoTools`](src/main/java/com/gwgs/akkaagentic/a2a/application/TodoTools.java), which owns the
+     `.method(TodoEntity::…)` calls. `TodoEntity` is listed in the descriptor under a **new
+     `key-value-entity` key**; `TodoTools` is not a component. A consequence (FR-009): there is **no direct
+     to-do HTTP endpoint** — to-dos are reached only *through* the assistant, because a Scala endpoint
+     couldn't call the entity client anyway.
+   - **Memory adds no friction to *build* — but `readLast(N)` has a tool-call sharp edge.** Chat history is
+     the SDK's session memory keyed by `username` (`.inSession(username)` + `.memory(MemoryProvider.limitedWindow()...)`),
+     backed by the runtime-owned `SessionMemoryEntity` — **not** in our descriptor. As with cap-4, offline
+     tests prove *retention/isolation* (distinct usernames never bleed) but **recall is live-only** — the
+     mock model sees only the current turn (research R6). **We deliberately do NOT use `.readLast(N)`:** its
+     naive last-N trim orphans a tool-call/response pair once a tool-using session exceeds N messages, which
+     the model provider rejects as an invalid sequence (surfaced misleadingly as `argument "content" is
+     null`). This was cap-6's real live failure — proven by removing `readLast` — so we keep **full history**
+     and accept the token-growth tradeoff (compaction is the proper bound; future work). See the cap-6 "Live
+     caveat".
+   - **Mixed Scala/Java in one package needs the language-of-consumer rule (research R8).** With Scala and
+     Java types now side by side, the guideline is: **put each shared type in the language of its
+     consumer(s), and only ever depend Scala→Java, never Java→Scala.** `Todo`/`TodoList` are pure
+     data/logic but live in **Java** because their consumer is the Java `TodoEntity` (a Java class reading a
+     Scala `case class` is noisy — `MODULE$`, `Option` interop); the Scala agent reading a Java record is
+     clean. Verified empirically that Scala→Java compiles cleanly in this mixed build. The two-mapper
+     boundary (§3) still holds: the agent's `Request` is Java-shaped (crosses the internal mapper), the HTTP
+     body is idiomatic `Option`-typed Scala.
+   - **This is the SDK-"discouraged" agent-chaining path, taken deliberately (research R7).** The docs steer
+     multi-agent flows toward Workflows — but a Workflow would force the whole capability into Java (§4) and
+     couldn't do **dynamic by-username targeting** (the target is a runtime string, not a compile-time
+     method reference). An `AutonomousAgent` with a `Delegation` capability is the "blessed" alternative and
+     is **pinned as the next capability (cap-7)** — cap-6 explores the lighter request-based chaining first,
+     precisely to feel where it strains.
+
+   No `pom.xml` change was needed (the mixed build from §4 already compiles Scala+Java here). Takeaway:
+   **`dynamicCall` makes agent→agent delegation Scala-clean, but any *durable* per-actor state drags the
+   entity — and its immediate caller — back to Java; keep that quarantine small and behind a tool object.**
+   See specs/008 research R1/R2/R7/R8.
 
 ## Build
 
@@ -571,6 +636,126 @@ optional fields are omitted from the JSON (idiomatic Scala).
 > across repeated polls). Confirms the gate genuinely holds publishing until a human approves (SC-002,
 > SC-003), rejection stops it for good (FR-006), and — as noted in the Gemini caveat — the typed task
 > results round-trip through the `complete_task` tool with **no** tools-vs-JSON conflict.
+
+### Capability 6 — agent-to-agent delegation (`POST /request/{username}`, synchronous)
+
+Capability 6 gives each **username** its own `PersonalAssistantAgent`: it remembers the conversation
+(session memory keyed by the username), keeps a personal **to-do list**, and — the headline — can
+**delegate** to *another* user's assistant, relaying that assistant's reply. Everything runs through one
+synchronous endpoint, `POST /request/{username}`, and the model decides (from the message) whether to
+manage the caller's own to-dos or to forward to someone else's assistant. (Back in **Scala**, tests
+included — the agent→agent call goes through `dynamicCall`; only the durable to-do entity is quarantined
+in Java. See "Scala interop notes" §8.)
+
+```shell
+# Manage your OWN to-do list in natural language — the model calls the to-do tools
+curl -s -X POST http://localhost:9000/request/alice \
+  -H "Content-Type: application/json" -d '{"message":"add a to-do to buy milk"}'
+# {"username":"alice","reply":"Added \"buy milk\" as item 1."}
+curl -s -X POST http://localhost:9000/request/alice \
+  -H "Content-Type: application/json" -d '{"message":"what is on my list?"}'
+# {"username":"alice","reply":"1. buy milk (open)"}
+```
+
+**Delegation** — ask your assistant to get something done by *another* user's assistant. The effect lands
+under the **target** user; your reply relays their assistant's confirmation:
+
+```shell
+curl -s -X POST http://localhost:9000/request/alice \
+  -H "Content-Type: application/json" \
+  -d '{"message":"ask bob'\''s assistant to add a to-do: prepare slides"}'
+# {"username":"alice","reply":"bob's assistant: Added \"prepare slides\" as item 1."}
+
+curl -s -X POST http://localhost:9000/request/bob \
+  -H "Content-Type: application/json" -d '{"message":"what is on my list?"}'
+# {"username":"bob","reply":"1. prepare slides (open)"}   <- landed under bob, not alice
+```
+
+**Memory & isolation** — the same username is one continuous conversation; a different username is a
+separate one with its own memory *and* its own to-do list:
+
+```shell
+curl -s -X POST http://localhost:9000/request/alice \
+  -H "Content-Type: application/json" -d '{"message":"my name is Alice"}'
+curl -s -X POST http://localhost:9000/request/alice \
+  -H "Content-Type: application/json" -d '{"message":"what is my name?"}'
+# recalls "Alice" (same username = same conversation)
+curl -s -X POST http://localhost:9000/request/carol \
+  -H "Content-Type: application/json" -d '{"message":"what is my name?"}'
+# does NOT know "Alice" (different username = isolated)
+```
+
+Same validation-first contract as the other capabilities: a blank/absent `message` or malformed JSON body
+is `400` before the assistant is engaged; an unknown extra property is tolerated. A **one-hop loop guard**
+bounds delegation: a request that arrived *as a delegate* is offered no forward tool, so an A→B→A chain
+cannot form.
+
+```shell
+curl -i -X POST http://localhost:9000/request/alice \
+  -H "Content-Type: application/json" -d '{"message":"  "}'
+# 400 Bad Request — message must not be blank   (no model call)
+```
+
+> **Where durability lives — session memory + a to-do entity, none of it in the agent.** The assistant is
+> stateless and short-lived; each turn the runtime replays the last N messages from the runtime-owned
+> `SessionMemoryEntity` (keyed by username) and the to-dos live in a `TodoEntity` (`KeyValueEntity`, keyed
+> by username). Neither is persisted by our code. To observe history/to-dos surviving a **local** restart,
+> enable the on-disk store (as with cap-3/cap-5):
+>
+> ```shell
+> mvn compile exec:java -Dakka.javasdk.dev-mode.persistence.enabled=true
+> ```
+>
+> **Two interop findings in one capability** (see §8): delegation is idiomatic Scala via the agent
+> client's `dynamicCall` (no wall), but the to-do `KeyValueEntity` client is method-reference-only, so the
+> entity **and its caller** are quarantined in Java behind a `TodoTools` tool object — the same wall as
+> cap-2/cap-4. As with cap-4, offline tests prove *retention/isolation* while **recall is verified live**
+> (the mock model sees only the current turn).
+>
+> *Verified live* (against local Ollama, `qwen3:8b`), all four scenarios end-to-end:
+> **Own to-dos** — `add buy milk` / `add call the dentist` / `what is on my list?` returned the two items
+> (`1. buy milk (open)`, `2. call the dentist (open)`). **Delegation** — `emma` asking *"ask frank's
+> assistant to add a to-do: prepare slides"* replied *"Frank's assistant added the to-do 'prepare slides'
+> with ID 1"*; `frank`'s list then showed `1. prepare slides (open)` while `emma`'s stayed empty — the
+> effect landed under the **target** and stayed isolated. **Recall** — on `iris`, *"my name is Iris"* then
+> *"what is my name?"* replied *"Your name is Iris."*, while `jack` (a different username) *"don't have
+> access to your name"* — recall across turns **and** per-user isolation. **Validation** — a blank
+> `message` returned `400`.
+>
+> > **Live caveat — a session that stops working after a few tool-using turns, surfaced as
+> > `argument "content" is null`.** Symptom: `add` / `add` / `complete` succeed, then `what is on my list?`
+> > (and every later turn) fails with the fallback reply. The runtime reports
+> > `AK-01202 … Model error: argument "content" is null`, which *looks* like a null-content model quirk but
+> > is actually misleading.
+> >
+> > **Actual cause (proven live) — the SDK's `readLast(N)` orphans tool-call pairs.** Each tool-using turn
+> > persists **4** messages (`User`, `AiMessage`+tool-call, `ToolCallResponse`, `AiMessage`-final), so 3 turns
+> > = 12 messages. The SDK's last-N trim ([`MemoryHistoryUtils.trimToLastN`] in SDK 3.6.0) is a **naive
+> > `subList(size-N, size)`** that ignores tool-call/response pairing — with `readLast(10)` the window head
+> > becomes an **orphaned `ToolCallResponse`** (its preceding `AiMessage`+tool-call was dropped). That invalid
+> > chat sequence is rejected during request assembly (before the call even reaches Ollama) and the SDK
+> > surfaces it as the confusing `argument "content" is null`. **Proven by experiment:** the same failing flow
+> > works once `.readLast(N)` is removed — hence this capability uses **full session history**
+> > (`MemoryProvider.limitedWindow()`, no `readLast`). *Correction:* an earlier version of this note blamed
+> > qwen3 null-content persistence; a live A/B (remove `readLast` → fixed) showed the window trim was the real
+> > cause. Tradeoff of full history: **unbounded token growth** on long sessions — **compaction** (summarize
+> > old turns without slicing pairs) is the proper bound, left as future work.
+> >
+> > **Two defensive layers kept alongside** ([`PersonalAssistantAgent`](src/main/scala/com/gwgs/akkaagentic/a2a/application/PersonalAssistantAgent.scala)),
+> > for related but distinct failure modes:
+> > 1. **`NullSafeAiContentInterceptor`** — a `SessionMemoryInterceptor` (`.withInterceptor(...)`) rewriting a
+> >    null AI `text` to `""` **on the write path** (preserving `toolCallRequests`). A `content:null`+`tool_calls`
+> >    turn *is* legal and langchain4j accepts it, so the runtime persists it as null — proven offline by a Java
+> >    `getHistory` test ([`NullContentPersistenceIntegrationTest`](src/test/java/com/gwgs/akkaagentic/a2a/application/NullContentPersistenceIntegrationTest.java)):
+> >    stored `text` is `""` with the interceptor, **`null` without it** (so langchain4j does not normalize;
+> >    the interceptor is load-bearing). Honest scope: this null-content *persistence* is real, but it was
+> >    **not** the cause of the live failure above — the `readLast` trim was. Kept as defense-in-depth.
+> > 2. **`.onFailure(_ => FailureReply)` + a `logger.warn`** — degrades any failed turn to a clean `200`
+> >    instead of a raw `500`, and (crucially) **logs the real exception** — the silent fallback was why this
+> >    bug was initially invisible in the logs. Closes the AGENTS.md agent-checklist gap. Offline `failWith` test.
+> >
+> > Belt-and-suspenders: also prefer a stronger tool-calling model (`qwen2.5:14b` / `qwen3:14b`, or a hosted
+> > model) if small-model tool quirks bite in practice.
 
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.
