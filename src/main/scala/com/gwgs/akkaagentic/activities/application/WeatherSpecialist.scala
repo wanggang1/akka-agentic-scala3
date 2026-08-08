@@ -8,8 +8,9 @@ import com.gwgs.akkaagentic.activities.domain.WeatherData
   *
   * It is a **delegation worker**: the [[ActivityCoordinator]] delegates to it via `Delegation.to(...)`.
   * Verified in specs/009 research D1 that a request-based `Agent` is a valid delegation target
-  * (`Agent implements AgentDelegationWorker`). The single command handler receives the delegation
-  * brief (which names the location); the model calls [[currentConditions]] and replies with a summary.
+  * (`Agent implements AgentDelegationWorker`), proven live in T006. The single command handler receives
+  * the delegation brief (which names the location); the model calls [[currentConditions]] and replies
+  * with a summary.
   *
   * The `@Component` `description` is what the coordinator's model sees as the delegation-tool
   * description, so it must clearly state this specialist's expertise (capabilities.html.md).
