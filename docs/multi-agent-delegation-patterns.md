@@ -91,9 +91,9 @@ Delegation.to(Class<? extends AgentDelegationWorker>, Class<? extends AgentDeleg
 **Both** `akka.javasdk.agent.Agent` (request-based) **and** `akka.javasdk.agent.autonomous.AutonomousAgent`
 implement the `AgentDelegationWorker` marker — so a delegation worker can be **either**:
 
-- a **request-based `Agent`** — single model call, `String` in/out; lighter; the worker's reply becomes the
-  delegation tool's result. (cap-7's choice — Simplicity.) Caveat: the request-based-worker *adaptation*
-  (instruction-in / reply-out) is under-documented; verify with a small live smoke.
+- a **request-based `Agent`** — single model call; lighter; the worker's reply becomes the delegation tool's
+  result. (cap-7's choice — Simplicity.) **Verified live** in cap-7 that this works (an unknown location
+  returned the canned weather *default*, un-hallucinatable → the request-based worker genuinely ran).
 - an **`AutonomousAgent`** — its own `TaskAcceptance` + a **typed, schema-validated** subtask result, and a
   durable per-subtask task record. The canonical `capabilities.html.md` form; heavier. Choose this when the
   worker needs its own tool loop, typed/validated results, or further delegation.
@@ -101,8 +101,28 @@ implement the `AgentDelegationWorker` marker — so a delegation worker can be *
 Rule of thumb: **request-based workers for single-call specialists; autonomous workers when a worker is itself
 an investigation.**
 
+### Testing caveat learned in cap-7 (SDK 3.6.0)
+
+**Request-based delegation is not faithfully *mockable* offline** in the 3.6.0 testkit:
+`TestModelProvider.AutonomousAgentTools.delegateTo(Class, String)` delivers a generic `json.akka.io/object`
+payload the request-based worker cannot deserialize (fails against a `String` *and* a record). A delegation
+mock silently **false-greens** (the WARN-level delegation failure doesn't fail the test). So test the
+coordinator→task→typed-result path with a **direct** `completeTask` offline, and prove the **delegation
+itself live** (as cap-4/cap-6 did for session-memory recall). The 3-arg autonomous-worker form
+`delegateTo(Task, AutonomousAgent, String)` carries the task result type and *does* round-trip — another
+reason to reach for autonomous workers if faithful offline delegation tests matter to you. Also:
+`consultedSpecialists`-style **self-report is model-authored and unreliable on small models** — use the
+runtime's delegation **notifications** for ground truth. (Both are logged as follow-ups.)
+
+## cap-7 in code
+- `src/main/scala/com/gwgs/akkaagentic/activities/application/ActivityCoordinator.scala` — `AutonomousAgent`,
+  `TaskAcceptance.of(SUGGEST)` + `Delegation.to(classOf[WeatherSpecialist], classOf[ActivitySpecialist])`.
+- `WeatherSpecialist.scala` / `ActivitySpecialist.scala` — request-based delegate `Agent`s.
+- `ActivityTasks.scala` (the `SUGGEST` task) / `ActivitySuggestion.scala` (Java-shaped result) /
+  `api/ActivityEndpoint.scala` (start-then-poll).
+
 ## See also
 - Akka docs: `akka-context/sdk/autonomous-agents/capabilities.html.md` (Delegation, Handoff, Moderation,
-  Teams, external input), `coordination.html.md` (patterns).
-- README "Scala interop notes" §4 (Workflow wall), §5 (AutonomousAgent no wall), §8 (cap-6 chaining).
-- `specs/009-autonomous-delegation/research.md` for the cap-7-specific decisions.
+  Teams, external input), `coordination.html.md` (patterns), `testing.html.md` (delegation mocking helpers).
+- README "Scala interop notes" §4 (Workflow wall), §5 (AutonomousAgent no wall), §8 (cap-6 chaining), §9 (cap-7).
+- `specs/009-autonomous-delegation/research.md` for the cap-7-specific decisions (D1/D6/D9).
