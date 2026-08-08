@@ -23,13 +23,14 @@ findings (README "Scala interop notes" §2/§3/§5).
 - **Alternatives considered**: AutonomousAgent workers (canonical `capabilities.html.md` form) — fuller
   primitive, typed/validated subtask results, but more moving parts (3 autonomous agents + 3 task types) and
   benefits that are speculative for this tool-light domain (YAGNI).
-- **RISK / verify-early**: the request-based-worker *adaptation* is under-documented — how the delegation
-  subtask instruction is delivered to a request-based Agent's single command handler, and how its `String`
-  reply becomes the delegation tool's return value. **Mitigation**: the FIRST implementation step is a
-  minimal live delegation smoke (coordinator → one request-based specialist) to confirm the adaptation
-  before building both specialists + the endpoint. **Fallback**: if awkward, promote specialists to
-  AutonomousAgent workers with typed subtask tasks (`WEATHER`/`ACTIVITIES`) — a localized change (agents +
-  ActivityTasks), endpoint/domain untouched.
+- **RISK / verify-early — RESOLVED ✅ (T006, live 2026-08-07)**: the request-based-worker *adaptation* was
+  under-documented. The T006 spike (coordinator + request-based `WeatherSpecialist`, live on Ollama qwen3:8b)
+  **confirmed it works**: `POST /activities {location:"Boston",preferences:"outdoorsy, with kids"}` →
+  `200 {"suggestion":"...Franklin Park...playgrounds...","weatherConsidered":"Clear skies, 20°C...",
+  "consultedSpecialists":["weather-specialist"]}`. The framework delivers the subtask instruction to the
+  request-based Agent's single command handler and returns its `String` reply to the coordinator, which
+  synthesizes the typed result. **Primary approach (request-based specialists) stands; the AutonomousAgent-
+  worker fallback is NOT needed.**
 
 ## D2 — No method-reference wall; whole capability is Scala
 
