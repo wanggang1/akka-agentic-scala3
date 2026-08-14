@@ -67,8 +67,9 @@ class ActivityEndpoint(componentClient: ComponentClient):
           .runSingleTask(ActivityTasks.SUGGEST.instructions(valid.instruction))
         HttpResponses.accepted(StartAccepted(taskId)).addHeader(Location.create("/activities/" + taskId))
 
-  /** Retrieve the suggestion by task id. COMPLETED -> 200, FAILED -> 422, still-running or unknown
-    * id -> 404. Never fabricates a suggestion. */
+  /** Retrieve the suggestion by task id. COMPLETED -> 200, FAILED -> 422, still-running -> 404
+    * ("not ready"), unknown/never-issued id -> 404 ("no such task"). Both not-found cases are 404, but
+    * carry distinct messages so a caller can tell "still working" from "wrong id". Never fabricates. */
   @Get("/activities/{taskId}")
   def get(taskId: String): HttpResponse =
     Try(componentClient.forTask(taskId).get(ActivityTasks.SUGGEST)) match
@@ -79,9 +80,10 @@ class ActivityEndpoint(componentClient: ComponentClient):
           case TaskStatus.FAILED =>
             unprocessable(snapshot.failureReason().orElse("the coordinator could not produce a suggestion"))
           case _ =>
-            HttpResponses.notFound("suggestion not ready")
+            HttpResponses.notFound("suggestion not ready") // task exists, still coordinating
       case scala.util.Failure(_) =>
-        HttpResponses.notFound("suggestion not ready")
+        // The task id was never issued (or a transient read error): distinct from "not ready".
+        HttpResponses.notFound("no task with that id")
 
   /** 422 Unprocessable Content — a terminal task failure, distinct from 404 (not ready) and 200. */
   private def unprocessable(reason: String): HttpResponse =
