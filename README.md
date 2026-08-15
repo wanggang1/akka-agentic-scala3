@@ -58,6 +58,16 @@ src/main/scala/com/gwgs/akkaagentic/a2a/api/           # PersonalAssistantEndpoi
 # user's assistant via agent dynamicCall (Scala-clean). ForwardTool/TodoTools are NOT components. This is
 # the SDK-discouraged "agent chaining" path, taken deliberately in Scala — see §8, and specs/008 R7.
 
+# Capability 7 — Scala (AutonomousAgent Delegation; the SDK-recommended dynamic delegation; see §9)
+src/main/scala/com/gwgs/akkaagentic/activities/domain/      # SuggestionQuestion (validation), WeatherData (canned, offline)
+src/main/scala/com/gwgs/akkaagentic/activities/application/ # ActivityCoordinator (AutonomousAgent + Delegation.to), WeatherSpecialist + ActivitySpecialist (request-based delegates), ActivityTasks, ActivitySuggestion (Java-shaped result)
+src/main/scala/com/gwgs/akkaagentic/activities/api/         # ActivityEndpoint (POST /activities, GET /activities/{taskId})
+# Note: a coordinator (AutonomousAgent) delegates to two request-based specialist Agents via the built-in
+# Delegation capability — the "recommended" dynamic-delegation primitive, contrasting cap-6's hand-rolled
+# ForwardTool chaining and cap-2's fixed Java Workflow. All Scala (no method-ref wall). The Task is the
+# durable record (no Entity/Workflow). ActivityTasks/ActivitySuggestion are NOT components. See docs/
+# multi-agent-delegation-patterns.md.
+
 src/main/resources/application.conf                 # default model-provider config
 src/test/{scala,java}/com/gwgs/akkaagentic/...       # tests (TestModelProvider, no live model)
 ```
@@ -289,6 +299,38 @@ writing components in Scala needs explicit workarounds:
    **`dynamicCall` makes agent→agent delegation Scala-clean, but any *durable* per-actor state drags the
    entity — and its immediate caller — back to Java; keep that quarantine small and behind a tool object.**
    See specs/008 research R1/R2/R7/R8.
+
+9. **AutonomousAgent `Delegation` is Scala-clean and the "recommended" counterpart to cap-6 — but
+   request-based delegation isn't faithfully *mockable* offline in this SDK.** Capability 7 (the activity
+   coordinator, `com.gwgs.akkaagentic.activities.*`) is an `AutonomousAgent` that **delegates** to two
+   request-based specialist `Agent`s via the built-in `Delegation.to(...)` capability and **synthesizes** a
+   typed result. It is the SDK-**recommended** dynamic-delegation primitive (docs steer multi-agent flows
+   here), the blessed counterpart to cap-6's discouraged hand-rolled `ForwardTool` chaining, and a third
+   point against cap-2's fixed Java Workflow. Findings:
+
+   - **Delegation is Scala-clean — no method-ref wall (research D1/D2).** `Delegation.to(Class...)`,
+     `TaskAcceptance.of(Task)`, `runSingleTask`, `forTask(id).get(Task)` are all keyed on `Class`/`Task`,
+     not Java method references (cap-3/cap-5 §5). The specialists are called *by the framework* (delegation
+     tools), never by our code, so there is no client method-ref to trip on. Whole capability is Scala.
+   - **`Delegation.to(...)` accepts request-based *and* autonomous workers (bytecode-verified).** Its
+     signature is `Delegation.to(Class<? extends AgentDelegationWorker>...)`, and **both** `Agent` and
+     `AutonomousAgent` implement `AgentDelegationWorker`. We chose **request-based specialists** (Simplicity;
+     cleanest cap-6 contrast). **Verified live** that a request-based worker really is delegated to (an
+     unknown location returned `WeatherData`'s canned default — un-hallucinatable — proving the weather
+     specialist actually ran).
+   - **The two-mapper boundary holds (§3).** The task result `ActivitySuggestion` is Java-shaped (it crosses
+     the internal mapper via `resultConformsTo`/`complete_task`), while the HTTP DTOs are idiomatic
+     `Option`-typed Scala. The Task is the durable record — no Entity, no Workflow (like cap-3/cap-5).
+   - **Offline testing limit (research D9) — request-based delegation is NOT faithfully mockable in the SDK
+     3.6.0 testkit.** `AutonomousAgentTools.delegateTo(Class, String)` delivers a generic `json.akka.io/object`
+     the worker can't deserialize (proven with a `String` param *and* a record). A delegation mock is a
+     silent **false-green** (the WARN-level delegation failure doesn't fail the test). So the offline tests
+     assert the coordinator→task→typed-result→endpoint path with a **direct** completion, and **delegation +
+     synthesis is proven live**. `consultedSpecialists` is model-**self-reported** (research D6) and
+     unreliable on small models (qwen3 under-reports which specialists it consulted), so SC-002 (dynamic
+     choice) is a live/best-effort criterion. Both are logged TODOs (revisit on a newer SDK; use runtime
+     notifications for ground-truth delegation records). See specs/009 research D1/D6/D9 and
+     [`docs/multi-agent-delegation-patterns.md`](docs/multi-agent-delegation-patterns.md).
 
 ## Build
 
@@ -756,6 +798,65 @@ curl -i -X POST http://localhost:9000/request/alice \
 > >
 > > Belt-and-suspenders: also prefer a stronger tool-calling model (`qwen2.5:14b` / `qwen3:14b`, or a hosted
 > > model) if small-model tool quirks bite in practice.
+
+### Capability 7 — activity coordinator via AutonomousAgent delegation (`POST /activities`, async)
+
+Capability 7 is an **Autonomous Agent** (`ActivityCoordinator`) that suggests activities by **delegating** to
+two request-based specialists — a `WeatherSpecialist` and an `ActivitySpecialist` — through the SDK's built-in
+**`Delegation`** capability, then **synthesizing** their input into one typed result. Unlike cap-2 (a fixed
+Java `Workflow`) the model chooses which specialist(s) to consult at runtime; unlike cap-6 (hand-rolled
+`ForwardTool` chaining by username) this is the SDK-**recommended** dynamic-delegation primitive, dynamic
+**by class**. Because coordination is multi-round-trip, the surface is **start-then-poll** (like cap-3). (Back
+in **Scala** — the delegation API has no method-ref wall; see "Scala interop notes" §9.)
+
+```shell
+# 1. Start — 202 + a task handle; the coordinator is delegating to specialists
+curl -i -X POST http://localhost:9000/activities \
+  -H "Content-Type: application/json" \
+  -d '{"location":"Boston","preferences":"outdoorsy, with kids"}'
+# 202 Accepted
+# Location: /activities/9671183c-...
+# {"taskId":"9671183c-..."}
+
+# 2. Poll — 404 while coordinating, 200 with the synthesized suggestion once COMPLETED
+curl -s http://localhost:9000/activities/9671183c-...
+# 404 Not Found        (while the coordinator delegates + synthesizes)
+# ...then...
+# 200 OK
+# {"suggestion":"Enjoy a day at the park with swings, slides, and a picnic under the clear skies...
+#   fly kites in the gentle breeze—both activities thrive in 20°C weather!",
+#  "weatherConsidered":"clear skies, 20°C",
+#  "consultedSpecialists":["weather-specialist","activity-specialist"]}
+```
+
+`weatherConsidered` comes from the (canned, offline) `WeatherData`; `consultedSpecialists` reflects which
+delegates the coordinator's model consulted. Same validation-first, poll contract as the other async
+capabilities: a blank/absent `location` or malformed body is `400` before any task starts; an unknown/
+never-started id polls `404`; a task the coordinator reports it cannot complete polls `422`.
+
+```shell
+curl -i -X POST http://localhost:9000/activities \
+  -H "Content-Type: application/json" -d '{"location":"  "}'
+# 400 Bad Request — location must not be blank   (no task started)
+```
+
+> **Where durability lives, and two testing caveats.** As with cap-3, nothing in `ActivityCoordinator`
+> persists anything — the **Task is the durable record** (no Entity, no Workflow); observing it across a local
+> restart needs the on-disk store (`-Dakka.javasdk.dev-mode.persistence.enabled=true`). Two honest caveats
+> (see "Scala interop notes" §9 and specs/009 research D6/D9):
+> 1. **Delegation is proven *live*, not offline.** Request-based delegation isn't faithfully mockable in the
+>    SDK 3.6.0 testkit (the mock delivers an untyped payload the worker rejects), so the offline tests use a
+>    direct completion and the delegation itself is verified live.
+> 2. **`consultedSpecialists` is model self-reported and best-effort.** Small models under-report which
+>    specialists they consulted; the coordinator *does* delegate dynamically, but the reported list can be
+>    incomplete. Ground-truth via runtime notifications is a logged follow-up.
+>
+> *Verified live* (Ollama `qwen3:8b`): `POST /activities {Boston, outdoorsy/with kids}` → after polling,
+> `200` with a coherent kid-friendly park/kites suggestion, `weatherConsidered:"clear skies, 20°C"` (the
+> canned Boston conditions), and `consultedSpecialists:["weather-specialist","activity-specialist"]`. A blank
+> `location` returned `400`; an unknown task id `404`. An **unknown** location (e.g. "Atlantis") returned
+> `WeatherData`'s canned default — un-hallucinatable — confirming the weather specialist is genuinely
+> delegated to, not guessed.
 
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.
