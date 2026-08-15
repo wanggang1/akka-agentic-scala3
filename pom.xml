@@ -28,6 +28,22 @@
             <artifactId>akka-javasdk-testkit</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Capability 8 (RAG): in-process embeddings + in-memory vector store. Both artifacts are
+             ALREADY in the akka-javasdk 3.6.0 dependency tree (langchain4j 1.15.0 / embeddings
+             1.15.0-beta25) - see specs/010 research R1. We only pin them at the SDK-aligned versions
+             and promote them to compile scope so Scala source may reference InMemoryEmbeddingStore and
+             AllMiniLmL6V2QuantizedEmbeddingModel. The ONNX model is packaged in-jar (no download, no
+             network, no API key). -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-embeddings-all-minilm-l6-v2-q</artifactId>
+            <version>1.15.0-beta25</version>
+        </dependency>
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j</artifactId>
+            <version>1.15.0</version>
+        </dependency>
     </dependencies>
 
     <build>

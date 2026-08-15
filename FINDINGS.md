@@ -22,6 +22,7 @@ only two of the four clients have one.
 | `AutonomousAgentClient` | `Class` + `Task` constants | ✅ yes |
 | `WorkflowClient` | method-ref **only** | ❌ no |
 | `EventSourcedEntityClient` | method-ref **only** | ❌ no |
+| `DependencyProvider` (custom DI, cap-8) | `Class` key (`getDependency[T](Class[T])`) | ✅ yes |
 
 **Any client keyed solely on a Java method reference is unreachable from Scala.** That is the whole
 story; everything below is a corollary. Crucially, the wall is a property of the *client*, not of
@@ -58,6 +59,16 @@ The least-interop capability to *build*: string-keyed by `.inSession(id)`, build
 method-ref-only → that one test ([`SessionMemoryIntegrationTest`](src/test/java/com/gwgs/akkaagentic/chat/application/SessionMemoryIntegrationTest.java))
 is Java. A second testing limit: with `TestModelProvider` the mock is fed **only the current turn**,
 so multi-turn *recall* isn't offline-observable and is proven by a **live** smoke test instead.
+
+### Capability 8 — RAG-grounded Q&A · **Scala**
+(Caps 5–7 are covered in README interop §7–§9.) Real retrieval-augmented generation, Scala end-to-end.
+Two findings extend the story: **(a)** the whole in-process RAG stack (langchain4j + the all-MiniLM ONNX
+model, packaged in-jar) is **already in the SDK 3.6.0 dependency tree** — only a `runtime→compile` scope
+bump, no new version, fully offline. **(b)** the project's first **custom-dependency injection** —
+`KnowledgeStore` provided via `Bootstrap.createDependencyProvider()` and constructor-injected — is
+**Scala-clean**: `DependencyProvider` is `Class`-keyed (see the table row), so it lands on the friendly
+side of the wall alongside the Agent/AutonomousAgent/Task clients. And unlike cap-7's un-mockable
+delegation, **retrieval is deterministic → fully offline-testable**; only the generative half is mocked.
 
 ## The two crosscutting constraints (orthogonal to the wall)
 

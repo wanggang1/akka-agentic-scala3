@@ -68,6 +68,17 @@ src/main/scala/com/gwgs/akkaagentic/activities/api/         # ActivityEndpoint (
 # durable record (no Entity/Workflow). ActivityTasks/ActivitySuggestion are NOT components. See docs/
 # multi-agent-delegation-patterns.md.
 
+# Capability 8 — Scala (RAG: retrieval-augmented, grounded Q&A; see "Scala interop notes" §10)
+src/main/scala/com/gwgs/akkaagentic/docs/domain/      # Passage, KnowledgeCorpus (canned corpus), AskQuestion (validation)
+src/main/scala/com/gwgs/akkaagentic/docs/application/ # KnowledgeStore (in-process embeddings + in-memory vector store; NOT a component), DocsAgent (grounded/declines; Java-shaped Request, bare-String reply)
+src/main/scala/com/gwgs/akkaagentic/docs/api/         # DocsEndpoint (POST /ask, synchronous)
+# Note: real semantic retrieval on in-process embeddings — langchain4j all-minilm-l6-v2-q (ONNX model
+# packaged in-jar) + InMemoryEmbeddingStore, ALREADY in the SDK 3.6.0 dep tree (only a runtime->compile
+# scope bump). The endpoint retrieves top-k and hands passages to DocsAgent; citations are computed
+# endpoint-side from what was retrieved (ground truth, not model self-report). KnowledgeStore is a custom
+# dependency injected via Bootstrap's DependencyProvider (the project's first non-ComponentClient
+# injection — Scala-clean). Retrieval is deterministic → offline-testable; the answer is mocked. See §10.
+
 src/main/resources/application.conf                 # default model-provider config
 src/test/{scala,java}/com/gwgs/akkaagentic/...       # tests (TestModelProvider, no live model)
 ```
@@ -331,6 +342,54 @@ writing components in Scala needs explicit workarounds:
      choice) is a live/best-effort criterion. Both are logged TODOs (revisit on a newer SDK; use runtime
      notifications for ground-truth delegation records). See specs/009 research D1/D6/D9 and
      [`docs/multi-agent-delegation-patterns.md`](docs/multi-agent-delegation-patterns.md).
+
+10. **RAG is Scala-clean, the retrieval stack ships with the SDK, and — unlike delegation — retrieval is
+    fully offline-testable.** Capability 8 (the grounded Q&A agent, `com.gwgs.akkaagentic.docs.*`) does
+    real **retrieval-augmented generation**: it embeds a small canned corpus into an in-memory vector
+    store, retrieves the passages most **semantically** similar to a question, and has a `DocsAgent`
+    answer grounded **only** in them (or honestly decline). It is **Scala end-to-end, tests included**,
+    and surfaces four findings:
+
+    - **The in-process RAG stack is ALREADY in the SDK 3.6.0 dependency tree (research R1).**
+      `akka-javasdk` pulls langchain4j `1.15.0` (carrying `InMemoryEmbeddingStore` + the retrieval core)
+      and `langchain4j-embeddings-all-minilm-l6-v2-q:1.15.0-beta25` (the quantized all-MiniLM-L6-v2 ONNX
+      model). The **22 MB ONNX model is packaged in-jar** (`unzip -l` shows `all-minilm-l6-v2-q.onnx`), so
+      embedding is **fully offline — no network, no API key**, matching this sandbox's ethos. The only
+      `pom.xml` change is promoting two already-present artifacts `runtime → compile` at the **SDK-aligned
+      versions** (zero new version, zero conflict) so Scala source may reference them — the constitution's
+      dependency-justification gate satisfied by *reuse*, not a new stack. `KnowledgeStore` does the flat
+      `embed` + `store.search` directly (no `RetrievalAugmentor` plumbing — Simplicity).
+    - **Custom-dependency injection is Scala-clean — a new positive interop result (research R5).**
+      `KnowledgeStore` is a plain class (NOT a component), provided as a singleton via `Bootstrap`'s
+      `override def createDependencyProvider(): DependencyProvider` and **constructor-injected** into
+      `DocsEndpoint`. This is the project's **first injection of a dependency other than the SDK's
+      `ComponentClient`**, and it *just works* from Scala: `DependencyProvider` is `Class`-keyed
+      (`getDependency[T](cls: Class[T]): T`), so — like the Agent/AutonomousAgent/Task clients (§5, §7) and
+      unlike the Workflow/entity clients (§4, §6) — there is **no method-ref wall**. The store is built
+      **once, eagerly**, at startup (seeding embeddings; the ~22 MB model load is a one-time cost paid at
+      service/TestKit start, not per request). *Production would index via a Workflow* — Java-only (§4) — so
+      we **seed at bootstrap** to keep the capability Scala.
+    - **The two-mapper boundary holds, and citations are ground truth, not self-report (research R3/R4).**
+      Retrieval happens in the **endpoint**, once; it hands the passages to the agent as a **Java-shaped
+      `DocsAgent.Request`** (crosses the internal mapper, §3), and the agent replies with a **bare `String`**
+      (no Java-shaped result needed — the cap-4 shape). Citations are computed **endpoint-side from what was
+      actually retrieved** — so they are *ground truth*, directly sidestepping cap-7's D6 unreliability (the
+      model never authors the citation list). The model's only citation-affecting signal is a **decline
+      sentinel** (`DocsAgent.DontKnow`): on a decline the endpoint cites nothing (FR-005).
+    - **Retrieval is the clean counter-example to cap-7's D9 — it IS faithfully offline-testable
+      (research R6).** Because the in-process embeddings are **deterministic**, *which passages ground an
+      answer* is verified **offline with no model** (`KnowledgeStoreTest`: a paraphrased in-corpus query —
+      wording unlike the source — returns the right passage by meaning; two distinct queries return
+      different top passages). Only the **generative** half needs a model, mocked via `TestModelProvider`;
+      end-to-end grounding is proven **live**. So RAG splits cleanly: **retrieval half offline-provable,
+      generative half live/mocked** — the opposite of cap-7's un-mockable delegation.
+
+    A teaching detail the corpus surfaced: a *vague* "how does the assistant remember a conversation?"
+    slightly favors cap-6's passage (which also says "remembers the conversation") over cap-4's session
+    memory (0.778 vs 0.756) — naming the "session id" discriminates cleanly (0.828). That *is* semantic
+    retrieval: closely-worded passages compete, and specificity wins. No `pom.xml`/build change beyond the
+    two dependency pins. See specs/010 research R1/R3/R4/R5/R6 and
+    [`docs/http-endpoint-sdk-boundary.md`](docs/http-endpoint-sdk-boundary.md) (the endpoint-layer boundary).
 
 ## Build
 
@@ -857,6 +916,71 @@ curl -i -X POST http://localhost:9000/activities \
 > `location` returned `400`; an unknown task id `404`. An **unknown** location (e.g. "Atlantis") returned
 > `WeatherData`'s canned default — un-hallucinatable — confirming the weather specialist is genuinely
 > delegated to, not guessed.
+
+### Capability 8 — RAG-grounded Q&A (`POST /ask`, synchronous)
+
+Capability 8 answers a question using **retrieval-augmented generation**: it embeds a small local corpus
+into an in-memory vector store, retrieves the passages most **semantically** similar to the question, and
+has a `DocsAgent` answer grounded **only** in those passages — or honestly say *"I don't know"* when the
+corpus doesn't cover it. Everything runs **offline** (in-process ONNX embeddings, no API key), and the
+surface is **synchronous** like cap-4. The reply carries the answer plus the **cited source labels** of the
+passages that grounded it (computed from what was retrieved, not model self-report). (Scala end-to-end —
+see "Scala interop notes" §10: the RAG stack ships with the SDK, and custom-dependency DI is Scala-clean.)
+
+```shell
+# In-corpus question (paraphrased — no shared keywords) → grounded answer + correct citation
+curl -s -X POST http://localhost:9000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question":"what makes agent work survive a restart without me writing persistence code?"}'
+# {"answer":"An autonomous agent's task is durable — the runtime persists the task and the agent's
+#  process state as the loop runs and recovers them after a restart, so no wrapping workflow is needed.",
+#  "citedSources":["durability-tasks"]}
+```
+
+**Honest decline** — a question the corpus does not cover returns an explicit "I don't know" and cites
+nothing (no fabrication, no misleading citation):
+
+```shell
+curl -s -X POST http://localhost:9000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question":"what is the capital of France?"}'
+# {"answer":"I don't know","citedSources":[]}
+```
+
+**Semantic discrimination** — two differently-worded questions retrieve and cite *different* passages:
+
+```shell
+curl -s -X POST http://localhost:9000/ask -H "Content-Type: application/json" \
+  -d '{"question":"how does the coordinator pick which specialist to consult?"}'
+# {"answer":"...","citedSources":["cap-7-activity-coordinator"]}
+curl -s -X POST http://localhost:9000/ask -H "Content-Type: application/json" \
+  -d '{"question":"why can some components only be written in Java, not Scala?"}'
+# {"answer":"...","citedSources":["interop-method-ref-wall"]}
+```
+
+Same validation-first contract as the other capabilities: a blank/absent `question` or malformed JSON body
+is rejected with `400` **before** any retrieval or model call; an unknown extra property is tolerated.
+
+```shell
+curl -i -X POST http://localhost:9000/ask \
+  -H "Content-Type: application/json" -d '{"question":"  "}'
+# 400 Bad Request — question must not be blank   (no retrieval, no model call)
+```
+
+> **Where the knowledge lives, and why retrieval is offline-testable.** Nothing in `DocsAgent` persists or
+> retrieves anything — the endpoint retrieves top-k passages from a `KnowledgeStore` (in-process
+> all-MiniLM-L6-v2 embeddings + an `InMemoryEmbeddingStore`, seeded from a canned corpus at startup) and
+> hands them to the agent as grounding context. `KnowledgeStore` is a plain class provided via `Bootstrap`'s
+> `DependencyProvider` and constructor-injected — the project's first non-`ComponentClient` injection, and
+> Scala-clean (§10). Because the embeddings are **deterministic**, *which passages ground an answer* is
+> proven **offline with no model** ([`KnowledgeStoreTest`](src/test/scala/com/gwgs/akkaagentic/docs/application/KnowledgeStoreTest.scala));
+> only the generated answer is mocked in the endpoint test. This is the clean counter-example to cap-7's
+> un-mockable delegation: RAG's **retrieval half is fully offline-provable**, only the generative half needs
+> a live/mocked model.
+>
+> The corpus here is **self-referential** — passages describing capabilities 1–9 and the interop findings —
+> so in-corpus vs out-of-corpus questions are easy to construct. Swap
+> [`KnowledgeCorpus`](src/main/scala/com/gwgs/akkaagentic/docs/domain/KnowledgeCorpus.scala) for any domain.
 
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.
