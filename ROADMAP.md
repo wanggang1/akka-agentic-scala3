@@ -7,26 +7,26 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 ## Where we are
 
-> **You are here:** Feature 6 (Agent-to-agent delegation) — **🚧 in progress**
-> ([`specs/008-agent-to-agent`](specs/008-agent-to-agent/)). A personal assistant per username (persisted
-> chat history + to-do list) that **delegates** to another user's assistant by username. The headline is a
-> two-sided interop result: delegation is idiomatic **Scala** via agent `dynamicCall` (R1), but a per-user
-> mutable to-do list re-hits the entity method-ref wall and is quarantined into a Java `TodoEntity` +
-> tool-object seam (R2). Notably, this takes the SDK-**discouraged** "agent chaining" path on purpose
-> (Workflows would force Java and can't do dynamic by-username targeting — R7).
+> **You are here:** Feature 8 (RAG-grounded Q&A) — **🚧 in progress**
+> ([`specs/010-rag-grounded-qa`](specs/010-rag-grounded-qa/)). Real retrieval-augmented generation in
+> **Scala end-to-end**: a `DocsAgent` answers grounded ONLY in passages retrieved by semantic vector
+> similarity from a canned corpus, or honestly declines. Two headline findings: **(R1)** the whole
+> in-process RAG stack (langchain4j + the all-MiniLM ONNX model, packaged in-jar) is **already in the SDK
+> 3.6.0 dependency tree** — only a `runtime→compile` scope bump, no new version, fully offline; **(R5)** the
+> project's first **custom-dependency injection** (`KnowledgeStore` via `Bootstrap.createDependencyProvider()`,
+> constructor-injected) is **Scala-clean** — `DependencyProvider` is `Class`-keyed, no method-ref wall. And
+> unlike cap-7's un-mockable delegation, **retrieval is deterministic → fully offline-testable**.
 >
-> **⏭️ Committed next — Feature 7: AutonomousAgent delegation.** The *recommended* dynamic multi-agent
-> delegation primitive (`Delegation.to(...)`), the blessed counterpart to cap-6's hand-rolled request-based
-> chaining. It stays Scala (cap-3/5 finding: the `AutonomousAgent`/`Task` APIs have no method-ref wall), so
-> cap-7 will directly contrast "the recommended way" against cap-6's exploration of the discouraged way.
+> **⏭️ Committed next — Feature 9: MCP.** An `@McpEndpoint` exposing tools/resources/prompts to MCP clients
+> (server-side first, self-contained and testable via JSON-RPC); the client-side `.mcpTools()` consumption
+> of a remote server is a live-only follow-up.
 >
-> Capabilities 1–5 are **✅ done and merged**; 5 was an exploratory follow-up beyond the original four (the
-> `TaskClient` decision API has no method-ref wall — §7).
+> Capabilities 1–7 are **✅ done and merged**; 5–7 were exploratory follow-ups beyond the original four.
 >
-> **📄 Retrospective:** [`FINDINGS.md`](FINDINGS.md) consolidates what the first four capabilities taught
-> us — the single `dynamicCall` finding that explains every Scala-vs-Java outcome, plus the practical
-> rubric. Capability 5 extends that through-line: the wall is **client-specific**, and `TaskClient` is on
-> the Scala-friendly side of it.
+> **📄 Retrospective:** [`FINDINGS.md`](FINDINGS.md) consolidates the single `dynamicCall` finding that
+> explains every Scala-vs-Java outcome, plus the practical rubric. Caps 5–8 extend the through-line: the
+> wall is **client-specific**, and `TaskClient` (cap-5) *and* the custom `DependencyProvider` (cap-8) are
+> both on the Scala-friendly side of it.
 
 ## The path
 
@@ -38,8 +38,10 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 | 3 | **Autonomous Agent** — durable, model-driven help-desk agent with a typed task + knowledge-base tool; async start/poll HTTP. **Back in Scala** (see below) | [`specs/005-autonomous-agent`](specs/005-autonomous-agent/) | ✅ Done — merged (PR #10) |
 | 4 | **Session memory** — multi-turn chat; context replayed across requests via the SDK's `SessionMemoryEntity`, keyed by a caller-supplied session id; synchronous HTTP. **Scala** (see below) | [`specs/006-session-memory`](specs/006-session-memory/) | ✅ Done — merged (PR #11) |
 | 5 | **Human-in-the-loop approval gate** *(exploratory follow-up)* — a `DraftAgent` drafts a reply, an **unassigned approval task** gates it, a `PublishAgent` runs only on approval; the Autonomous Agent **external-input** pattern (a three-task dependency chain, no Workflow); async start/poll + a human decision endpoint. **Scala, tests included** (see below) | [`specs/007-human-approval-gate`](specs/007-human-approval-gate/) | ✅ Done — merged (PR #12) |
-| 6 | **Agent-to-agent delegation** *(exploratory)* — a personal assistant per username (persisted chat history + to-do list) that **delegates** to another user's assistant by username; request-based **agent chaining** — the SDK-discouraged path — proven idiomatic **Scala**, with the to-do store quarantined into Java; synchronous HTTP + a structural one-hop guard (see below) | [`specs/008-agent-to-agent`](specs/008-agent-to-agent/) | 🚧 In progress |
-| 7 | **AutonomousAgent delegation** *(committed next)* — the **recommended** dynamic multi-agent delegation primitive (`Delegation.to(...)`), the blessed counterpart to cap-6's hand-rolled chaining; stays Scala (cap-3/5 finding). Will contrast "recommended vs discouraged" delegation head-to-head | _spec TBD_ | 📋 Planned |
+| 6 | **Agent-to-agent delegation** *(exploratory)* — a personal assistant per username (persisted chat history + to-do list) that **delegates** to another user's assistant by username; request-based **agent chaining** — the SDK-discouraged path — proven idiomatic **Scala**, with the to-do store quarantined into Java; synchronous HTTP + a structural one-hop guard | [`specs/008-agent-to-agent`](specs/008-agent-to-agent/) | ✅ Done — merged |
+| 7 | **AutonomousAgent delegation** — the **recommended** dynamic multi-agent delegation primitive (`Delegation.to(...)`), the blessed counterpart to cap-6's hand-rolled chaining; stays Scala. Request-based delegation isn't faithfully mockable offline in SDK 3.6.0 (D9) → delegation proven live | [`specs/009-autonomous-delegation`](specs/009-autonomous-delegation/) | ✅ Done — merged |
+| 8 | **RAG-grounded Q&A** — a `DocsAgent` answers grounded only in passages retrieved by in-process semantic embeddings (all-MiniLM ONNX, in-jar, offline) from a canned corpus, or honestly declines; custom-dependency DI is Scala-clean; retrieval is deterministic → offline-testable; synchronous HTTP | [`specs/010-rag-grounded-qa`](specs/010-rag-grounded-qa/) | 🚧 In progress |
+| 9 | **MCP** *(committed next)* — an `@McpEndpoint` exposing tools/resources/prompts to MCP clients (server-side first, testable via JSON-RPC); client-side `.mcpTools()` a live-only follow-up | _spec TBD_ | 📋 Planned |
 
 **Status legend:** ✅ done · 📋 planned (spec written) · 🚧 in progress · ⬜ not started
 
