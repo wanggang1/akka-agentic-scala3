@@ -982,6 +982,31 @@ curl -i -X POST http://localhost:9000/ask \
 > so in-corpus vs out-of-corpus questions are easy to construct. Swap
 > [`KnowledgeCorpus`](src/main/scala/com/gwgs/akkaagentic/docs/domain/KnowledgeCorpus.scala) for any domain.
 
+> **Known tradeoff — citations reflect *retrieval*, not *usage* (and grounding is a soft constraint).**
+> `citedSources` lists the **top-K passages that were retrieved** and handed to the agent (ordered by
+> descending similarity), **not** the passages the answer actually drew on. The endpoint retrieves `TopK = 3`,
+> gives all three to the model as context, and cites all three — it never asks the model which it used. So a
+> question like *"what makes agent work survive a restart?"* can answer purely from `durability-tasks` yet
+> still cite `cap-3-help-desk` and `cap-4-session-memory` — they were the 2nd/3rd nearest passages (all three
+> are semantically about "state surviving without you writing persistence code") and so got offered as
+> context. This is **deliberate** (research R3/R4): retrieval-side citations are *ground truth of what was
+> retrieved* — un-fakeable, computed endpoint-side — which is exactly how cap-8 sidesteps cap-7's D6 (a model
+> that self-reports its sources is unreliable, especially small models). The cost is **over-citation**: we
+> sometimes cite more than the answer needed.
+>
+> A related, more fundamental point: the model is **instructed** to answer only from the supplied passages
+> (else reply with the `DontKnow` sentinel), but that is instruction-following — a **soft** constraint, not a
+> runtime guarantee. An LLM can ignore the context or blend in its own parametric knowledge; we lean on the
+> instruction plus the decline sentinel, we do not *prove* per-answer grounding.
+>
+> **Future work (if over-citation matters):**
+> - **Lower `TopK`** (1–2) — simplest, but risks dropping a genuinely relevant passage.
+> - **Score threshold** — cite only passages above a similarity cutoff, trimming the weak tail (the retrieved
+>   `score` is already available on `KnowledgeStore.Retrieved`).
+> - **Usage-accurate citations** — have the agent return *which* source labels it used (structured output).
+>   More honest about usage, but reintroduces the model-self-report unreliability (cap-7 D6) this design was
+>   built to avoid — a genuine tension, not a free upgrade.
+
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.
 
