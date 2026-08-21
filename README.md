@@ -1007,6 +1007,36 @@ curl -i -X POST http://localhost:9000/ask \
 >   More honest about usage, but reintroduces the model-self-report unreliability (cap-7 D6) this design was
 >   built to avoid — a genuine tension, not a free upgrade.
 
+> **Architecture fork — *how* retrieved passages reach the model: pre-retrieval vs retrieval-as-a-tool.**
+> Cap-8 uses **pre-retrieval, endpoint-orchestrated**: the endpoint retrieves top-K *before* the model runs,
+> once, and inlines the passages into the agent's (Java-shaped) `Request`. That is one of two supported shapes
+> — the SDK docs (`agents/extending.html.md`, `use-cases/rag-and-knowledge.html.md`) also support the other:
+>
+> - **Where in the prompt (minor axis):** the passages could sit in the **system message** (`.systemMessage`)
+>   instead of the user message, or be injected via langchain4j's `RetrievalAugmentor` / `ContentInjector`
+>   (the SDK's own `Knowledge.java` example) rather than our hand-rolled block. Presentation only — *who*
+>   retrieves doesn't change.
+> - **Who retrieves & when (the real axis):** expose `KnowledgeStore.retrieve` as a `@FunctionTool` (on the
+>   agent, or an external tool object via `.tools()`, or a View/Entity as a component-tool, or a remote **MCP**
+>   tool via `.mcpTools()` — cap-9 territory). Then the **model** decides whether to retrieve, with what query,
+>   and how many times — enabling query reformulation and multi-hop lookups ("agentic RAG").
+>
+> | | Pre-retrieval (cap-8) | Retrieval-as-a-tool |
+> |---|---|---|
+> | Who queries | endpoint, always, once | model, on demand, 0..N times |
+> | Multi-hop / query rewriting | no | yes |
+> | Latency / cost | 1 model call | extra round-trips per tool call |
+> | Skips retrieval when irrelevant | no (always top-K) | yes |
+>
+> **Why cap-8 chose pre-retrieval — it's a package deal with the citation guarantee above.** Because the
+> endpoint *owns* retrieval, citations are ground truth and retrieval is deterministically **offline-testable**
+> (R6 — the whole selling point). Move retrieval into a tool and both weaken: the retrieval now happens inside
+> the model loop, so to cite sources you must capture what each tool call returned (via runtime notifications /
+> interaction logs) and reconcile it — reintroducing exactly cap-7's D6 observability problem. So the fork is:
+> **pre-retrieval** = deterministic, ground-truth citations, offline-provable, but rigid (always top-K, no
+> multi-hop); **retrieval-as-tool** = flexible, model-driven, multi-hop, but citations and offline-testability
+> get harder. Cap-8 optimizes for the former on purpose; a tool-based variant is a natural future capability.
+
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.
 
