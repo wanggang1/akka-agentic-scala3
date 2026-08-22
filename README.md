@@ -79,6 +79,15 @@ src/main/scala/com/gwgs/akkaagentic/docs/api/         # DocsEndpoint (POST /ask,
 # dependency injected via Bootstrap's DependencyProvider (the project's first non-ComponentClient
 # injection — Scala-clean). Retrieval is deterministic → offline-testable; the answer is mocked. See §10.
 
+# Capability 9 — Scala (MCP server: expose cap-8 retrieval over the Model Context Protocol; see §11)
+src/main/scala/com/gwgs/akkaagentic/mcp/api/          # KnowledgeMcpEndpoint (@McpEndpoint at /mcp: `retrieve` @McpTool + corpus-sources @McpResource)
+# Note: an @McpEndpoint is an ENDPOINT (no @Component), invoked reflectively from JSON-RPC — no
+# ComponentClient method-ref, so it's Scala-clean (the wall is a *client* property; §11). New descriptor
+# key `mcp-endpoint`. Reuses cap-8's KnowledgeStore (same DI); a @McpTool MUST return String (result
+# rendered to JSON, errors via throw→isError); bare params work (scalac emits names). Fully offline-tested
+# over JSON-RPC (no MCP testkit). SDK-3.6.0 limit: no tunable maxResults → fixed top-K 3 (see
+# docs/sdk-3.6.0-limitations.md). Server-side only; the client (.mcpTools()) is cap-10.
+
 src/main/resources/application.conf                 # default model-provider config
 src/test/{scala,java}/com/gwgs/akkaagentic/...       # tests (TestModelProvider, no live model)
 ```
@@ -390,6 +399,57 @@ writing components in Scala needs explicit workarounds:
     retrieval: closely-worded passages compete, and specificity wins. No `pom.xml`/build change beyond the
     two dependency pins. See specs/010 research R1/R3/R4/R5/R6 and
     [`docs/http-endpoint-sdk-boundary.md`](docs/http-endpoint-sdk-boundary.md) (the endpoint-layer boundary).
+
+11. **An MCP server is Scala-clean — the wall is a *client* property, and MCP has no client to author.**
+    Capability 9 (the knowledge MCP server, `com.gwgs.akkaagentic.mcp.*`) exposes cap-8's semantic
+    retrieval over the **Model Context Protocol** — a `retrieve` **tool** and a corpus-sources **resource**,
+    served as JSON-RPC at `/mcp`. It is **Scala end-to-end, tests included**, and confirms the interop
+    verdict the whole series predicts:
+
+    - **`@McpEndpoint` is an *endpoint*, not a `@Component` — and it's Scala-clean (research R1).** Like an
+      HTTP endpoint it carries no `@Component`; a remote MCP client calls its `@McpTool`/`@McpResource`
+      methods over JSON-RPC and the SDK dispatches to them **reflectively from the request**. There is **no
+      `ComponentClient` method reference** for us to author, so none of the Workflow/entity method-ref wall
+      (§4, §6) applies — the wall is a *client* property, and an MCP endpoint has no client. New descriptor
+      key **`mcp-endpoint`** (confirmed from the SDK's `ComponentType` constant pool); `KnowledgeMcpEndpoint`
+      is added under it. **No `pom.xml` change** — the mixed build (§4) already compiles it.
+    - **Bare tool params work in Scala — a positive finding (research R2).** The SDK reflects each tool
+      *parameter* into a top-level JSON-Schema property **by its name**, and scalac emits parameter names in
+      this build (the mixed-build `-parameters` flag, §4). So `retrieve(question)` needs **no wrapper record
+      and no manual `inputSchema`** — the SDK's own tool shape. (A wrapper-record + manual-schema attempt
+      *failed* first, which is how this was pinned; see specs/011 R2's empirical correction.)
+    - **A `@McpTool` MUST return `String`, and throwing is its error channel (research R3).** The SDK rejects
+      any other tool return type at startup (*"MCP tool method must return String"*), so there is no
+      `Effect`/`Either`/typed-result return; the result is **rendered to a JSON string**. And a tool has no
+      typed error return either — **throwing** is the mechanism: the runtime converts a thrown exception into
+      a well-formed `{content:[{type:text,text:<msg>}], isError:true}` result the calling model sees. So the
+      domain stays pure — `AskQuestion.validate` returns `Either`, and the endpoint adapter throws on `Left`,
+      mirroring `DocsEndpoint`'s `Left → HttpResponses.badRequest`.
+    - **A zero-arg `@McpResource` is the simplest surface — Scala-clean, no friction (research R5).** The
+      corpus-sources resource is a zero-parameter method returning a JSON `String`: **no input schema, no
+      param-name/mapper concern**, so it carries none of the tool's parameter friction. `resources/list` +
+      `resources/read` round-trip in Scala with no snag.
+    - **Retrieval is reused, injected, and offline-testable (R4/R6).** `KnowledgeStore` is the **same**
+      cap-8 dependency, obtained by constructor injection via `Bootstrap`'s `DependencyProvider` (cap-8 R5,
+      Scala-clean) — no new retrieval logic. Because the embeddings are deterministic, the whole capability
+      is verified **offline over real JSON-RPC** (testkit `httpClient` + hand-crafted payloads — there is no
+      MCP-specific testkit): 8 tests incl. **SC-004 parity** (MCP results equal a direct
+      `KnowledgeStore.retrieve` for the same question) and the resource labels equal
+      `KnowledgeCorpus.passages.map(_.source)`. No model needed.
+    - **One SDK-3.6.0 limitation, not an interop wall — no tunable `maxResults`.** An optional numeric tool
+      arg cannot be expressed on 3.6.0: the doc-recommended `Optional[Integer]` bare param throws
+      *"Optional cannot be cast to Integer"* on a *supplied* value; a plain `Integer` is forced *required*; a
+      manual `inputSchema` on bare params breaks binding. So `retrieve` takes only `question` and returns a
+      **fixed top-K of 3**, exactly mirroring cap-8's `DocsEndpoint` — a faithful mirror, not a retrieval
+      loss. This is a version bug (revisit on upgrade), tracked in
+      [`docs/sdk-3.6.0-limitations.md`](docs/sdk-3.6.0-limitations.md); see specs/011 R2 (the three dead ends).
+    - **Server-side only; the client is cap-10.** This capability is the MCP *server*. Consuming a remote MCP
+      server from an agent (`.mcpTools(url)`) is a separate capability — deliberately split out (the cap-8
+      "retrieval-as-a-tool" fork anticipated it) so the server/client interop questions stay one-per-feature.
+
+    Takeaway: **MCP extends the "wall is a client property" through-line — an endpoint invoked reflectively
+    has no client, so it's Scala-clean like HTTP endpoints.** The only friction was a version-specific SDK
+    bug, not the language boundary. See specs/011 research R1–R6 and README's cap-9 usage section below.
 
 ## Build
 
@@ -1036,6 +1096,79 @@ curl -i -X POST http://localhost:9000/ask \
 > **pre-retrieval** = deterministic, ground-truth citations, offline-provable, but rigid (always top-K, no
 > multi-hop); **retrieval-as-tool** = flexible, model-driven, multi-hop, but citations and offline-testability
 > get harder. Cap-8 optimizes for the former on purpose; a tool-based variant is a natural future capability.
+
+### Capability 9 — MCP knowledge server (`/mcp`, JSON-RPC)
+
+Capability 9 exposes cap-8's semantic retrieval over the **Model Context Protocol** so any MCP client (an
+LLM host like Claude Desktop, the MCP Inspector, or another Akka agent via `.mcpTools()`) can use it. The
+server is an `@McpEndpoint` at **`/mcp`** speaking **JSON-RPC** over stateless Streamable HTTP — **no
+`initialize` handshake**, requests are a plain POST, and replies are a single `application/json` object.
+It offers a **`retrieve` tool** (semantic search → grounded passages) and a **corpus-sources resource**
+(the discoverable list of what the corpus covers). No new retrieval logic — it reuses cap-8's
+`KnowledgeStore` verbatim. (Scala end-to-end, tests included — an MCP endpoint has no client to author, so
+no method-ref wall; see "Scala interop notes" §11.)
+
+```shell
+# Discover the tools — advertises `retrieve` and its input schema (required `question`)
+curl -s -X POST http://localhost:9000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+# {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"retrieve","description":"Semantic search over the
+#  knowledge corpus; ...","inputSchema":{"type":"object","properties":{"question":{"type":"string",...}},
+#  "required":["question"]}}]}}
+```
+
+```shell
+# Call `retrieve` — grounded passages (fixed top-3), score-descending, as a JSON string in the tool result
+curl -s -X POST http://localhost:9000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"retrieve",
+       "arguments":{"question":"why must some components be written in Java instead of Scala?"}}}'
+# {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":
+#  "[{\"source\":\"interop-method-ref-wall\",\"score\":0.71,\"text\":\"...\"}, ...]"}],"isError":false}}
+```
+
+A **blank question** is a well-formed tool error (`isError: true`) with cap-8's validation message, and
+**no retrieval runs** — the same validation-first contract as every other capability:
+
+```shell
+curl -s -X POST http://localhost:9000/mcp \
+  -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"retrieve","arguments":{"question":"   "}}}'
+# {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"question must not be blank"}],"isError":true}}
+```
+
+**Discover the corpus** — `resources/list` advertises the sources resource, `resources/read` returns the
+source labels of every passage (a client's "table of contents" for what `retrieve` can ground on):
+
+```shell
+curl -s -X POST http://localhost:9000/mcp \
+  -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"knowledge://corpus/sources"}}'
+# {"jsonrpc":"2.0","id":4,"result":{"contents":[{"uri":"knowledge://corpus/sources",
+#  "mimeType":"application/json","text":"[\"cap-1-greeting\",\"cap-3-help-desk\",\"cap-4-session-memory\",
+#  \"cap-5-approval-gate\",\"cap-6-delegation\",\"cap-7-activity-coordinator\",\"interop-method-ref-wall\",
+#  \"interop-two-mapper\",\"durability-tasks\"]"}]}}
+```
+
+> **Where the knowledge lives, and one SDK caveat.** The MCP endpoint holds no state — it reuses cap-8's
+> `KnowledgeStore` (in-process all-MiniLM-L6-v2 embeddings, seeded at startup), injected the same way
+> (`Bootstrap`'s `DependencyProvider`). Because that retrieval is deterministic, the whole surface is
+> **offline-tested over real JSON-RPC** (`KnowledgeMcpEndpointIntegrationTest`, 8 tests, no model): tool
+> discovery, paraphrase→correct top source, **SC-004 parity** with a direct `KnowledgeStore.retrieve`,
+> out-of-corpus low-score, blank→error, and the resource labels.
+>
+> **SDK-3.6.0 caveat — the `retrieve` tool returns a fixed top-K (3), not a tunable count.** A designed
+> optional `maxResults` argument could not be expressed on SDK 3.6.0 (its optional-parameter mechanisms all
+> fail — see [`docs/sdk-3.6.0-limitations.md`](docs/sdk-3.6.0-limitations.md)), so the tool takes only
+> `question` and returns 3 passages, exactly mirroring cap-8's `DocsEndpoint`. To be restored on an SDK
+> upgrade.
+>
+> **Server-side only.** This is the MCP *server*. Consuming a remote MCP server from an agent
+> (`.mcpTools(url)`) is the next capability (cap-10), kept separate so the server and client interop
+> questions are explored one at a time.
 
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.
