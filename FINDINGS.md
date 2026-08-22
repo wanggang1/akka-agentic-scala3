@@ -117,3 +117,13 @@ restored (HTTP path binding), and `scala-maven-plugin` `sendJavaToScalac=false`.
 **Net:** idiomatic Scala on this SDK is very achievable, and the exact places it isn't are
 **predictable from one property** — whether the component's client offers a `dynamicCall` escape
 hatch.
+
+---
+
+## Not on this page: version-specific SDK bugs
+
+The findings above are **structural** — they follow from the SDK's design and hold across versions. A
+separate, smaller category is **version-specific SDK bugs** we hit on **3.6.0** (e.g. MCP tool optional
+params, request-based delegation offline-mocking, `readLast` history trimming). Those are worked around
+and tracked in [`docs/sdk-3.6.0-limitations.md`](docs/sdk-3.6.0-limitations.md) to re-check on an SDK
+upgrade — they are debt to clear, not lessons about the language boundary.
