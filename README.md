@@ -88,6 +88,19 @@ src/main/scala/com/gwgs/akkaagentic/mcp/api/          # KnowledgeMcpEndpoint (@M
 # over JSON-RPC (no MCP testkit). SDK-3.6.0 limit: no tunable maxResults → fixed top-K 3 (see
 # docs/sdk-3.6.0-limitations.md). Server-side only; the client (.mcpTools()) is cap-10.
 
+# Capability 10 — Scala (MCP client: agentic RAG via a remote MCP tool; see "Scala interop notes" §12)
+src/main/scala/com/gwgs/akkaagentic/mcpclient/application/ # McpClientAgent (Agent + .mcpTools(RemoteMcpTools.fromService) → cap-9's /mcp; Config-injected service name)
+src/main/scala/com/gwgs/akkaagentic/mcpclient/api/         # McpClientEndpoint (POST /grounded-ask, synchronous)
+# Note: a request-based agent that grounds by calling the REMOTE `retrieve` MCP tool of THIS service's own
+# cap-9 /mcp — the model decides whether/when to retrieve (agentic RAG), contrasting cap-8's endpoint
+# pre-retrieval. Closes the loop in-process (agent → MCP client → our MCP server → KnowledgeStore), fully
+# offline. Consuming a remote MCP server is Scala-clean: RemoteMcpTools is a URL-string builder, NO
+# method-ref wall (R1, bytecode-verified) — the wall is a *client* property and the MCP client isn't a
+# ComponentClient. No new domain (reuses cap-8's AskQuestion/KnowledgeStore); no citations (the model owns
+# retrieval — the cap-8-fork tradeoff). The tool loop IS faithfully offline-testable (TestModelProvider
+# scripts a real `retrieve` round-trip) — a positive contrast to cap-7's D9. Reuses cap-9's server; no
+# ACL edit needed (a same-service /mcp call passes the INTERNET-only ACL).
+
 src/main/resources/application.conf                 # default model-provider config
 src/test/{scala,java}/com/gwgs/akkaagentic/...       # tests (TestModelProvider, no live model)
 ```
@@ -450,6 +463,60 @@ writing components in Scala needs explicit workarounds:
     Takeaway: **MCP extends the "wall is a client property" through-line — an endpoint invoked reflectively
     has no client, so it's Scala-clean like HTTP endpoints.** The only friction was a version-specific SDK
     bug, not the language boundary. See specs/011 research R1–R6 and README's cap-9 usage section below.
+
+12. **Consuming a remote MCP server is Scala-clean too — the "wall is a client property" through-line, now
+    from the *outbound* side.** Capability 10 (the MCP client, `com.gwgs.akkaagentic.mcpclient.*`) is the
+    consuming counterpart to cap-9: a request-based `McpClientAgent` grounds its answers by calling the
+    **remote `retrieve` MCP tool** of this service's own cap-9 `/mcp` server, and the model decides
+    whether/when to retrieve — the "retrieval-as-a-tool / agentic RAG" fork cap-8 flagged, contrasting
+    cap-8's endpoint pre-retrieval. It closes the loop entirely in-process (agent → MCP client → our MCP
+    server → cap-8's `KnowledgeStore`), fully offline. **Scala end-to-end, tests included**, and it settles
+    the last MCP interop question:
+
+    - **`.mcpTools(RemoteMcpTools.fromService/fromServer(...))` is Scala-clean (R1, bytecode-verified).**
+      `RemoteMcpTools` is a **URL-string/config builder** — `fromServer(String)`/`fromService(String)` plus
+      `Predicate`/`Set`/`HttpHeader`/`Duration`/interceptor methods — with **no Java method reference
+      anywhere**. So the *consuming* side hits none of the Workflow/entity method-ref wall (§4/§6): the wall
+      is a `ComponentClient`-method-ref property, and the MCP client is **not** a `ComponentClient` (same
+      reason `.tools()` and the Agent/AutonomousAgent/Task/DI clients are Scala-clean). Cap-9 proved a *server*
+      endpoint has no client to author; cap-10 proves the one place there *is* an outbound call is configured
+      by a URL string, not a method ref. No `pom.xml` change (the mixed build already compiles it).
+    - **The self-call topology just works — no ACL edit, cap-9 untouched (R2/S1).**
+      `RemoteMcpTools.fromService(<service name>)` builds `http://<name>/mcp` (the `/mcp` path is **hardcoded**
+      in the factory — R2b) and routes to **this** service's own in-process `/mcp`; a service can address
+      itself by name. Cap-9's INTERNET-only `@Acl` **permits the self-service call unchanged** (a
+      same-service MCP call is not denied), so the anticipated ACL broadening proved unnecessary. The service
+      name is **config-overridable with an artifactId fallback** (`McpClientAgent` injects
+      `com.typesafe.config.Config`; precedence: `mcp-client.knowledge-service-name` → the SDK's resolved
+      `dev-mode.service-name` → the artifactId `akka-agentic-scala3`), so the self-call stays correct across
+      TestKit, local `exec:java`, and a differently-named deploy. Note the three easily-conflated names:
+      the **Akka service name** (`akka-agentic-scala3`, what `fromService` routes on) ≠ the **MCP protocol
+      `serverName`** (`akka-agentic-knowledge-mcp`, a handshake id) ≠ the **path** (`/mcp`).
+    - **The tool loop IS faithfully offline-testable — a positive contrast to cap-7's D9 (R3/S2).** Unlike
+      request-based *delegation* (un-mockable in 3.6.0 — cap-7 D9), a remote **MCP tool** is a normal
+      function-tool call returning a typed `String`, so `TestModelProvider` can script it end-to-end:
+      `whenUserMessage(...).reply(ToolInvocationRequest("retrieve", …))` then `whenToolResult(...).thenReply(…)`.
+      The SDK performs the **real** round-trip to the in-process `/mcp`, and the received `ToolResult` equals a
+      direct `KnowledgeStore.retrieve` (source labels + order) — so **SC-005 parity is proven offline**, no
+      live model. The 8-test `McpClientEndpointIntegrationTest` covers grounded answer + real round-trip
+      (SC-003), honest decline (SC-002), validation-first (SC-004), and the shared-store parity (SC-005).
+    - **Tool transport is invisible to the model — `@FunctionTool` and `@McpTool` are interchangeable at the
+      model layer (R6).** Every tool (local `@FunctionTool`, `.tools()` object, remote `@McpTool`) is presented
+      to the model as the same `{name, description, inputSchema}` in one flat namespace; the model calls by
+      **name** and the SDK hides whether dispatch is an in-process method or a JSON-RPC round-trip (our mock
+      drives the MCP tool with a `ToolInvocationRequest("retrieve", …)` *identically* to a `@FunctionTool`).
+      Below the model layer they differ — notably the tool's description the model sees comes from the
+      **server's** advertised `tools/list` (cap-9's `@McpTool`), not the client — so the agent's system prompt
+      needn't (and shouldn't) name the transport. **Tool-name uniqueness** is therefore scoped **per-agent-per-
+      request** (the tools one agent registers together must not collide), *not* application-global — two
+      different MCP servers may each expose a `retrieve` (`withAllowedToolNames`/`withToolNameFilter` filter
+      collisions). **Live-verified** on Ollama `qwen3:8b`: the in-corpus answer reconstructed the corpus's
+      method-ref-wall/two-mapper findings (un-hallucinatable → the tool genuinely ran), the out-of-corpus reply
+      declined citing *"the retrieved passages"*, and a blank question returned `400` with no call.
+
+    Takeaway: **the MCP through-line completes — server (cap-9) and client (cap-10) are both Scala-clean, for
+    the same reason: neither authors a `ComponentClient` method reference.** See specs/012 research R1–R6 and
+    README's cap-10 usage section below.
 
 ## Build
 
@@ -1169,6 +1236,60 @@ curl -s -X POST http://localhost:9000/mcp \
 > **Server-side only.** This is the MCP *server*. Consuming a remote MCP server from an agent
 > (`.mcpTools(url)`) is the next capability (cap-10), kept separate so the server and client interop
 > questions are explored one at a time.
+
+### Capability 10 — MCP-client agentic RAG (`POST /grounded-ask`, synchronous)
+
+Capability 10 is the **consuming** counterpart to cap-9: a request-based `McpClientAgent` answers a
+question by calling the **remote `retrieve` MCP tool** of this service's own cap-9 `/mcp` server. The
+model decides whether/when to retrieve — **agentic RAG** — contrasting cap-8's endpoint pre-retrieval.
+The whole loop is in-process and offline (agent → MCP client → our MCP server → cap-8's `KnowledgeStore`),
+and the surface is **synchronous** like cap-4/cap-8. The reply is just the answer — **no `citedSources`**,
+because the model (not the endpoint) owns retrieval here (the deliberate cap-8-fork tradeoff). (Scala
+end-to-end — consuming a remote MCP server has no method-ref wall; see "Scala interop notes" §12.)
+
+```shell
+# In-corpus question → the model calls `retrieve`, answers grounded in the returned passages
+curl -s -X POST http://localhost:9000/grounded-ask \
+  -H "Content-Type: application/json" \
+  -d '{"question":"why must some components be written in Java instead of Scala?"}'
+# {"answer":"Some components must use Java due to the \"method-reference wall,\" where clients like
+#  Workflow and event-sourced-entity rely on Java method references without dynamicCall; component
+#  payloads also use a non-Scala-aware mapper, requiring Java-shaped types."}
+```
+
+**Honest decline** — a question the corpus doesn't cover: the model retrieves, finds the passages
+insufficient, and says so rather than fabricating (no citation to fake, either):
+
+```shell
+curl -s -X POST http://localhost:9000/grounded-ask \
+  -H "Content-Type: application/json" \
+  -d '{"question":"what is the capital of France?"}'
+# {"answer":"The retrieved passages do not contain information about the capital of France. I don't
+#  know the answer based on the provided knowledge corpus."}
+```
+
+Same validation-first contract as every other capability — a blank/absent `question` or malformed body
+is rejected `400` **before** any model or tool call; an unknown extra property is tolerated:
+
+```shell
+curl -i -X POST http://localhost:9000/grounded-ask \
+  -H "Content-Type: application/json" -d '{"question":"  "}'
+# 400 Bad Request — question must not be blank   (no model, no retrieval)
+```
+
+> **How it points at itself, and why it's Scala-clean.** The agent uses
+> `RemoteMcpTools.fromService(<service name>)`, which builds `http://<name>/mcp` — routing to **this**
+> service's own `/mcp` (cap-9). The service name is resolved from config with an artifactId fallback
+> (`McpClientAgent` injects `com.typesafe.config.Config`), so it's correct in TestKit, local `exec:java`,
+> and a differently-named deploy alike; override it with `mcp-client.knowledge-service-name` (or the
+> `KNOWLEDGE_MCP_SERVICE_NAME` env var) if ever needed. Consuming a remote MCP server is **Scala-clean** —
+> `RemoteMcpTools` is a URL-string builder with no method reference — and cap-9's INTERNET-only ACL permits
+> the self-service call unchanged (no cap-9 edit). Because a remote MCP tool is a normal typed-`String`
+> function-tool call, the whole loop is **offline-tested** with `TestModelProvider` scripting a real
+> `retrieve` round-trip (`McpClientEndpointIntegrationTest`, 8 tests, no model), including **SC-005 parity**
+> against a direct `KnowledgeStore.retrieve`. *Verified live* (Ollama `qwen3:8b`): the in-corpus answer
+> reconstructed the corpus's own interop findings (un-hallucinatable → the tool genuinely ran), the
+> out-of-corpus reply declined citing *"the retrieved passages"*, and a blank question returned `400`.
 
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.

@@ -7,30 +7,32 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 ## Where we are
 
-> **You are here:** Feature 9 (MCP knowledge server) — **🚧 in progress**
-> ([`specs/011-mcp-knowledge-server`](specs/011-mcp-knowledge-server/)). An `@McpEndpoint` at `/mcp`
-> exposes cap-8's semantic retrieval over the **Model Context Protocol** — a `retrieve` **tool** and a
-> corpus-sources **resource**, served as JSON-RPC — **Scala end-to-end, tests included** (8 offline tests).
-> **Interop verdict (R1):** an MCP server is **Scala-clean** — an `@McpEndpoint` is an *endpoint* (no
-> `@Component`) invoked **reflectively** from JSON-RPC, so there is **no `ComponentClient` method reference**
-> to author and none of the method-ref wall applies (the wall is a *client* property, and MCP has no client).
-> New descriptor key `mcp-endpoint`; reuses cap-8's `KnowledgeStore` (same DI); no `pom.xml` change. Two
-> mechanics: a `@McpTool` **must return `String`** (errors via `throw` → `isError`), and bare params work
-> (scalac emits names). **One SDK-3.6.0 bug, not an interop wall:** an optional numeric tool arg can't be
-> expressed → `retrieve` ships a **fixed top-K 3** (see [`docs/sdk-3.6.0-limitations.md`](docs/sdk-3.6.0-limitations.md)).
-> Remaining: live smoke + final verify, then merge.
+> **You are here:** Feature 10 (MCP client) — **🚧 in progress**
+> ([`specs/012-mcp-client`](specs/012-mcp-client/)). A request-based `McpClientAgent` grounds its answers by
+> calling the **remote `retrieve` MCP tool** of this service's own cap-9 `/mcp` server — the model decides
+> whether/when to retrieve (**agentic RAG**), closing the loop in-process (agent → MCP client → our MCP
+> server → `KnowledgeStore`), fully offline. `POST /grounded-ask`, synchronous. **Scala end-to-end, tests
+> included** (8 offline tests + live smoke on Ollama `qwen3:8b`). **Interop verdict (R1):** consuming a remote
+> MCP server is **Scala-clean** — `.mcpTools(RemoteMcpTools.fromService/fromServer(...))` is a **URL-string
+> builder** with no method reference (bytecode-verified), so the *outbound* side hits no method-ref wall
+> either (the MCP client isn't a `ComponentClient`). No new domain (reuses cap-8's `AskQuestion`/
+> `KnowledgeStore`), **no `citedSources`** (the model owns retrieval — cap-8-fork tradeoff), no cap-9 ACL edit
+> (a same-service `/mcp` call passes the INTERNET-only ACL). **Positive testing result vs cap-7 D9:** a remote
+> MCP tool is a normal typed-`String` function-tool call, so `TestModelProvider` scripts a **real** `retrieve`
+> round-trip offline (SC-005 parity vs a direct `KnowledgeStore.retrieve`). Remaining: `/akka.analyze`, then
+> commit + PR.
 >
-> **⏭️ Committed next — Feature 10: MCP client.** An `Agent` consuming a remote MCP server via
-> `.mcpTools(url)` — pointed at cap-9's own `/mcp` to close the loop end-to-end (agent → MCP client → our
-> MCP server → `KnowledgeStore`). Fresh interop question: is `.mcpTools(url)` Scala-clean? And it's the
-> payoff of cap-8's "retrieval-as-a-tool" fork (agentic RAG vs cap-8's pre-retrieval).
+> **⏭️ Next:** roadmap open — caps 1–9 merged; the MCP server/client loop is closed. Candidate directions:
+> guardrails, evaluation/LLM-judge, streaming, or a Views/read-model capability.
 >
-> Capabilities 1–8 are **✅ done and merged**; 5–8 were exploratory follow-ups beyond the original four.
+> Capabilities 1–9 are **✅ done and merged**; 5–9 were exploratory follow-ups beyond the original four.
 >
 > **📄 Retrospective:** [`FINDINGS.md`](FINDINGS.md) consolidates the single `dynamicCall` finding that
-> explains every Scala-vs-Java outcome, plus the practical rubric. Caps 5–9 extend the through-line: the
-> wall is **client-specific** — `TaskClient` (cap-5), the custom `DependencyProvider` (cap-8), and an MCP
-> endpoint's reflective dispatch (cap-9, no client at all) are all on the Scala-friendly side of it.
+> explains every Scala-vs-Java outcome, plus the practical rubric. Caps 5–10 extend the through-line: the
+> wall is **client-specific** — `TaskClient` (cap-5), the custom `DependencyProvider` (cap-8), an MCP
+> endpoint's reflective dispatch (cap-9, no client at all), and `RemoteMcpTools`'s URL-string builder
+> (cap-10) are all on the Scala-friendly side of it. **The MCP through-line is complete: server and client
+> are both Scala-clean for the same reason — neither authors a `ComponentClient` method reference.**
 
 ## The path
 
@@ -45,8 +47,8 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 | 6 | **Agent-to-agent delegation** *(exploratory)* — a personal assistant per username (persisted chat history + to-do list) that **delegates** to another user's assistant by username; request-based **agent chaining** — the SDK-discouraged path — proven idiomatic **Scala**, with the to-do store quarantined into Java; synchronous HTTP + a structural one-hop guard | [`specs/008-agent-to-agent`](specs/008-agent-to-agent/) | ✅ Done — merged |
 | 7 | **AutonomousAgent delegation** — the **recommended** dynamic multi-agent delegation primitive (`Delegation.to(...)`), the blessed counterpart to cap-6's hand-rolled chaining; stays Scala. Request-based delegation isn't faithfully mockable offline in SDK 3.6.0 (D9) → delegation proven live | [`specs/009-autonomous-delegation`](specs/009-autonomous-delegation/) | ✅ Done — merged |
 | 8 | **RAG-grounded Q&A** — a `DocsAgent` answers grounded only in passages retrieved by in-process semantic embeddings (all-MiniLM ONNX, in-jar, offline) from a canned corpus, or honestly declines; custom-dependency DI is Scala-clean; retrieval is deterministic → offline-testable; synchronous HTTP | [`specs/010-rag-grounded-qa`](specs/010-rag-grounded-qa/) | ✅ Done — merged (PR #17) |
-| 9 | **MCP server** — an `@McpEndpoint` at `/mcp` exposes cap-8's retrieval as a JSON-RPC `retrieve` tool + a corpus-sources resource; **Scala-clean** (endpoint, reflective dispatch — no method-ref wall; new `mcp-endpoint` key); a `@McpTool` must return String (throw→isError); fixed top-K 3 (SDK-3.6.0 optional-param bug). Server-side only | [`specs/011-mcp-knowledge-server`](specs/011-mcp-knowledge-server/) | 🚧 In progress |
-| 10 | **MCP client** *(committed next)* — an `Agent` consuming a remote MCP server via `.mcpTools(url)`, pointed at cap-9's `/mcp` to close the loop; verifies whether the client builder is Scala-clean; the "retrieval-as-a-tool" payoff of cap-8's fork | _spec TBD_ | 📋 Planned |
+| 9 | **MCP server** — an `@McpEndpoint` at `/mcp` exposes cap-8's retrieval as a JSON-RPC `retrieve` tool + a corpus-sources resource; **Scala-clean** (endpoint, reflective dispatch — no method-ref wall; new `mcp-endpoint` key); a `@McpTool` must return String (throw→isError); fixed top-K 3 (SDK-3.6.0 optional-param bug). Server-side only | [`specs/011-mcp-knowledge-server`](specs/011-mcp-knowledge-server/) | ✅ Done — merged (PR #18) |
+| 10 | **MCP client** — a request-based `McpClientAgent` grounds via the **remote `retrieve` MCP tool** of this service's own cap-9 `/mcp` (agentic RAG — the model decides when to retrieve); closes the loop in-process, fully offline; `POST /grounded-ask`. **Scala-clean** — `.mcpTools(RemoteMcpTools.fromService(...))` is a URL-string builder, no method-ref wall; no cap-9 ACL edit; no citations (model owns retrieval). The tool loop **is** offline-testable (real `retrieve` round-trip via `TestModelProvider`) — a positive contrast to cap-7 D9 | [`specs/012-mcp-client`](specs/012-mcp-client/) | 🚧 In progress |
 
 **Status legend:** ✅ done · 📋 planned (spec written) · 🚧 in progress · ⬜ not started
 
