@@ -1,6 +1,6 @@
 package com.gwgs.akkaagentic.mcpclient.application
 
-import akka.javasdk.agent.{Agent, RemoteMcpTools}
+import akka.javasdk.agent.{Agent, MemoryProvider, RemoteMcpTools}
 import akka.javasdk.annotations.Component
 import com.typesafe.config.Config
 import org.slf4j.LoggerFactory
@@ -88,6 +88,12 @@ class McpClientAgent(config: Config) extends Agent:
   def ask(question: String): Agent.Effect[String] =
     effects()
       .systemMessage(SystemMessage)
+      // Stateless one-shot: the endpoint invokes this agent with a fresh random session id per request
+      // (no multi-turn recall is intended), so persist nothing. `MemoryProvider.none()` makes that
+      // explicit — without it the SDK default would write this throwaway turn to an orphaned
+      // SessionMemoryEntity that is never read back. Contrast cap-4/cap-6, which pass a *stable* id to
+      // get replay.
+      .memory(MemoryProvider.none())
       // Scala-clean: a URL-string builder, no method reference (cap-10 R1). Points at THIS service's
       // own cap-9 /mcp server; the model calls its `retrieve` tool to ground the answer.
       //
