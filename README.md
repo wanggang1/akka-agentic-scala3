@@ -1220,6 +1220,19 @@ curl -s -X POST http://localhost:9000/mcp \
 #  \"interop-two-mapper\",\"durability-tasks\"]"}]}}
 ```
 
+**The third MCP primitive** — MCP servers can expose **tools**, **resources**, *and* **prompts**. This
+server declares no prompts, but the SDK still answers `prompts/list` (a client may probe all three during
+discovery) — an empty list, not a "method not found" error:
+
+```shell
+curl -s -X POST http://localhost:9000/mcp \
+  -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":7,"method":"prompts/list"}'
+# {"jsonrpc":"2.0","id":7,"result":{"prompts":[]}}
+```
+
+(Akka exposes prompts via `@McpPrompt` methods; this capability declares none.)
+
 > **Where the knowledge lives, and one SDK caveat.** The MCP endpoint holds no state — it reuses cap-8's
 > `KnowledgeStore` (in-process all-MiniLM-L6-v2 embeddings, seeded at startup), injected the same way
 > (`Bootstrap`'s `DependencyProvider`). Because that retrieval is deterministic, the whole surface is
