@@ -128,6 +128,29 @@ Not on the four-capability path, captured so they're not forgotten:
   component-serialized **stays Java-shaped**. Consequence: capabilities 2–4 below can't use
   idiomatic `Option` wire types either — keep them Java-shaped. See README "Scala interop notes" §3.
 
+## Candidate next capabilities
+
+The roadmap is **open** — caps 1–10 are merged and the MCP server/client loop is closed. These are the
+leading candidates for cap-11, each framed by what it explores and the project's signature question:
+*is it Scala-clean, or does it hit the method-reference wall?* (See [`FINDINGS.md`](FINDINGS.md) for the
+wall — the single `dynamicCall` property that has predicted every Scala-vs-Java outcome so far.) None is
+specced yet; pick one and start via `/akka.specify`.
+
+| Candidate | What it explores | Fit in this sandbox | Interop bet |
+|---|---|---|---|
+| **Guardrails** | SDK-enforced constraints around a model call — input (reject/sanitize a prompt) and output (block/redact/rewrite a reply): moderation, PII filtering, jailbreak/injection detection, topic allow/deny, "must be grounded" | Harden an existing agent (e.g. cap-8 `DocsAgent` / cap-10 `McpClientAgent`) — block off-policy input, refuse ungrounded output | **Likely Scala-clean** (class/annotation-registered like tools) — verify it's not method-ref wired. Offline-testable via `TestModelProvider` scripting a violating reply |
+| **Evaluation / LLM-as-judge** | A second model call scores a first agent's output against criteria (relevance, groundedness, tone, correctness) — the automated quality-gate / regression-test pattern | A `JudgeAgent` scoring whether `DocsAgent`'s answer is *actually* grounded in retrieved passages — attacks cap-8's **soft-grounding** gap (we instruct grounding but don't prove it) | **Scala-clean** (just another `Agent`). Testing caveat: judgment is model-driven → offline only mocks the verdict, real judging is live (like cap-7's delegation) |
+| **Streaming** | Stream the reply token-by-token — `StreamEffect` instead of `Effect<T>`, endpoint emitting SSE / chunked responses (the "typing" UX) | A streaming variant of cap-4 chat or cap-10 grounded-ask | **Unknown — highest novelty.** Stresses the HTTP-endpoint-as-framework-boundary finding; Scala `Source`/stream interop with the SDK streaming API is the open question. Highest-risk, highest-learning pick |
+| **Views / read-model** | CQRS read-side: a `View` consumes an entity's events (or KVE state) into a queryable table — "list all X", "search by Y", history/audit, dashboards. **The one core Akka component family this project has never built** | A view over cap-6's `TodoEntity` (all to-dos / by status), or an interaction-history view | **Likely Java — extends the wall story.** The View client is method-reference-only (like entity/workflow clients), so a View + its caller probably land in Java — the CQRS-read counterpart to cap-2's workflow and cap-6's entity; fills the biggest component-coverage gap |
+
+**Two strongest picks for this project's theme (Scala-on-Java-SDK interop):** **Views** (closes the biggest
+component gap and gives the wall story its cleanest remaining data point) or **Streaming** (genuinely
+unknown interop territory). The other two harden/extend existing agents and are likely Scala-clean.
+
+Relevant docs already in-repo: `akka-context/sdk/agents/guardrails.html.md`,
+`akka-context/sdk/agents/llm_eval.html.md`, `akka-context/sdk/agents/streaming.html.md`,
+`akka-context/sdk/views.html.md`.
+
 ## Also merged along the way
 
 Small additions made outside the four-capability path, useful as reference:
