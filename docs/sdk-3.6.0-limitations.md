@@ -1,10 +1,23 @@
-# SDK 3.6.0 limitations — revisit on upgrade
+# SDK 3.6.x limitations — revisit on upgrade
 
-This project pins **`akka-javasdk-parent` 3.6.0**. A few capabilities hit **version-specific** SDK bugs
-or limitations — not design choices. Each was worked around and documented in its feature spec; this page
-is the **single consolidated "re-check on upgrade" list**.
+This project pins **`akka-javasdk-parent` 3.6.3** (bumped from 3.6.0 on 2026-08-28). A few capabilities
+hit **version-specific** SDK bugs or limitations — not design choices. Each was worked around and
+documented in its feature spec; this page is the **single consolidated "re-check on upgrade" list**.
 
-**When bumping the SDK** (the runtime has reported 3.6.1+ available), do it on its **own branch** with a
+> **Re-tested on 3.6.3 (2026-08-28): all three below are STILL PRESENT — none fixed.** Confirmed by
+> targeted spikes (#1 `Optional cannot be cast to Integer` on a supplied value; #2
+> `Could not deserialize [json.akka.io/object]`; #3 `MemoryHistoryUtils.trimToLastN` bytecode is still a
+> naive `subList(size−N, size)`). They almost certainly need **3.7+ / 3.15**, which is **gated behind a
+> paid Akka plan** — see the version-ceiling note below.
+>
+> **Version ceiling on a FREE Akka subscription = 3.6.3.** The secure Akka artifact repo
+> (`repo.akka.io/<token>/secure`) serves only **3.6.0–3.6.3** to a free-tier token; **3.6.4+ and all
+> 3.7+/3.15 return a clean 404** (entitlement, not a broken release — the parent *metadata* is public on
+> Central, so `versions:display-parent-updates` misleadingly advertises 3.15.19). So these items cannot be
+> revisited on this SDK line without a **paid subscription**. `langchain4j` is BOM-managed to **1.11.6** by
+> the 3.15.x parent (vs our pinned 1.15.0) — a conflict to reconcile *if/when* a paid plan unlocks 3.7+.
+
+**When bumping the SDK** (only possible past 3.6.3 with a paid plan), do it on its **own branch** with a
 full `mvn verify` across all capabilities plus live spot-checks — the bump touches every capability. For
 each item below, check whether the newer SDK fixes it and, if so, **restore the fuller behavior and its
 tests**, then remove that entry here. When the list is empty, delete this file.
@@ -24,6 +37,10 @@ three shapes fail — proven against the TestKit in feature 011 T006:
 
 This is an **SDK bug/limitation, not a Scala-interop wall** — the reflective bare-param path itself works
 (single `question` param is fine).
+
+**Re-tested on 3.6.3 (2026-08-28): STILL PRESENT.** A temporary `maxResults: Optional[Integer]` spike
+supplying `maxResults=2` threw the identical `java.util.Optional cannot be cast to java.lang.Integer`
+(omitted still returns 3). Unchanged.
 
 **Current workaround.** `KnowledgeMcpEndpoint.retrieve` takes only `question` and returns a **fixed
 top-K of 3**, exactly mirroring cap-8's `DocsEndpoint`. A faithful cap-8 mirror, not a loss of retrieval
@@ -47,6 +64,11 @@ delegation is unaffected** — the real runtime tags the payload with the worker
 **Current workaround.** cap-7's offline test uses a **direct** completion (no delegation mock); delegation
 itself is proven **live** (an unknown location returns `WeatherData`'s un-hallucinatable canned default).
 
+**Re-tested on 3.6.3 (2026-08-28): STILL PRESENT.** A spike scripting `delegateTo(WeatherSpecialist, …)`
+produced the identical `Could not deserialize message of type [json.akka.io/object] to type
+[java.lang.String]` in `WeatherSpecialist.report`, and `DelegationOrchestrator` logged
+`request-based delegation failed`. Unchanged.
+
 **Restore on upgrade.** Re-add a delegation mock to `ActivityCoordinatorIntegrationTest` (coordinator
 `delegateTo(...)` both specialists → each `fixedResponse` → coordinator `completeTask` on the "Continue
 working" turn) and confirm the workers deserialize (no `json.akka.io/object` WARN). Detail:
@@ -69,6 +91,11 @@ fixes it).
 
 **Current workaround.** `PersonalAssistantAgent` uses **full session history**
 (`MemoryProvider.limitedWindow()`, no `readLast`), accepting unbounded token growth on long sessions.
+
+**Re-tested on 3.6.3 (2026-08-28): STILL PRESENT.** Disassembling 3.6.3's
+`akka.javasdk.impl.agent.MemoryHistoryUtils.trimToLastN` shows it is still `subList(size−N, size)` with no
+tool-call/response pairing logic (no `ToolCall` references, no `dropWhile`/guard). Byte-for-byte the same
+as 3.6.0.
 
 **Restore on upgrade.** Check whether the SDK's trim became pair-aware; if so, `readLast(N)` can return as
 a bounded window. The proper general bound is **compaction** (summarize old turns without slicing pairs),
