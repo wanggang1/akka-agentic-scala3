@@ -66,6 +66,22 @@ curl -s -X POST http://localhost:9000/mcp -H "Content-Type: application/json" \
 # → the source labels of every corpus passage.
 ```
 
+## (optional) List prompts — the third MCP primitive
+
+The MCP spec defines three server primitives — **tools**, **resources**, and **prompts**. This server
+exposes tools and resources but **no prompts**, yet the SDK still answers `prompts/list` (a client may
+probe all three during discovery). It returns an empty list rather than a "method not found" error:
+
+```shell
+curl -s -X POST http://localhost:9000/mcp -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":7,"method":"prompts/list"}'
+# → {"jsonrpc":"2.0","id":7,"result":{"prompts":[]}}
+```
+
+(Akka exposes prompts via `@McpPrompt` methods — see `akka-context/sdk/mcp-endpoints.html.md`; this
+capability declares none.)
+
 ## Test (offline, no model)
 
 ```shell

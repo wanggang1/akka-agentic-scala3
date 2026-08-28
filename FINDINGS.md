@@ -23,6 +23,7 @@ only two of the four clients have one.
 | `WorkflowClient` | method-ref **only** | ❌ no |
 | `EventSourcedEntityClient` | method-ref **only** | ❌ no |
 | `DependencyProvider` (custom DI, cap-8) | `Class` key (`getDependency[T](Class[T])`) | ✅ yes |
+| `RemoteMcpTools` (MCP client, cap-10) | URL **string** (`fromService`/`fromServer`) | ✅ yes |
 
 **Any client keyed solely on a Java method reference is unreachable from Scala.** That is the whole
 story; everything below is a corollary. Crucially, the wall is a property of the *client*, not of
@@ -69,6 +70,21 @@ bump, no new version, fully offline. **(b)** the project's first **custom-depend
 **Scala-clean**: `DependencyProvider` is `Class`-keyed (see the table row), so it lands on the friendly
 side of the wall alongside the Agent/AutonomousAgent/Task clients. And unlike cap-7's un-mockable
 delegation, **retrieval is deterministic → fully offline-testable**; only the generative half is mocked.
+
+### Capabilities 9 & 10 — MCP server & client · **Scala** (both)
+(Caps 5–7 are covered in README interop §7–§9.) The Model Context Protocol closes the interop story from
+**both** sides, for the **same** reason — neither side authors a `ComponentClient` method reference.
+**(cap-9, server)** An `@McpEndpoint` is an *endpoint* (no `@Component`), invoked **reflectively** from
+JSON-RPC — there is no client to author, so it's Scala-clean like an HTTP endpoint (new descriptor key
+`mcp-endpoint`). **(cap-10, client)** The one place there *is* an outbound call — an agent consuming a
+remote MCP server via `.mcpTools(RemoteMcpTools.fromService/fromServer(...))` — is configured by a **URL
+string**, not a method ref (see the table row), so it's Scala-clean too. Cap-10 also lands a *positive*
+testing result opposite cap-7's D9: a remote **MCP tool** is a normal typed-`String` function-tool call,
+so `TestModelProvider` scripts a **real** `retrieve` round-trip to the in-process `/mcp` offline (SC-005
+parity vs a direct `KnowledgeStore.retrieve`). And tool transport is invisible to the model —
+`@FunctionTool` and `@McpTool` are interchangeable at the model layer (same flat `{name, description,
+inputSchema}` namespace; the MCP tool's description comes from the *server's* `tools/list`). **Verdict:
+the wall is a client-method-ref property end to end — every SDK surface that isn't one is Scala-friendly.**
 
 ## The two crosscutting constraints (orthogonal to the wall)
 
