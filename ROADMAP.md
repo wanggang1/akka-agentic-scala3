@@ -151,6 +151,19 @@ Relevant docs already in-repo: `akka-context/sdk/agents/guardrails.html.md`,
 `akka-context/sdk/agents/llm_eval.html.md`, `akka-context/sdk/agents/streaming.html.md`,
 `akka-context/sdk/views.html.md`.
 
+### Evaluated, not pursued (as an agent-safety capability)
+
+- **Scala 3 Capture Checking / tracked capabilities** ([Odersky, "Tracked Capabilities for Safer
+  Agents"](https://martinodersky.substack.com/p/tracked-capabilities-for-safer-agents)) — evaluated and
+  **declined as a capability**. It targets a different architecture (agents that *generate and run code*,
+  compiled with capture checking), whereas ours are **tool-calling** agents dispatched **reflectively by
+  the SDK** — there is no agent-generated Scala source to check, the SDK's reflective/Java-interop core is
+  exactly what the feature's "safe subset" disables, and we're on Scala 3.3.8 LTS (the article's form needs
+  3.7+ nightly). For the actual goal (agent safety on this SDK), **Guardrails** above is the pragmatic
+  lever. A narrow **pure-`domain`-layer capture-checking spike** is possible as a *Scala-3 feature*
+  demonstration only (explicitly not agent safety). Full evaluation + spike scope:
+  [`docs/capture-checking-evaluation.md`](docs/capture-checking-evaluation.md).
+
 ## Also merged along the way
 
 Small additions made outside the four-capability path, useful as reference:
