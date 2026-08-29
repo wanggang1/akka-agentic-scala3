@@ -116,14 +116,19 @@ than wholesale: the view-query test is Java (it holds the method ref), the endpo
   member of `V` with a synthesized no-arg constructor — exactly the Java `static class` shape. So the
   updater *must* live in the companion object. **Generalization: wherever the SDK reflects on a class rather
   than dispatching through a client, ask what shape it expects, not just what it is keyed on.**
-- **"Never Java→Scala" is a build constraint, not a style rule.** Verified by experiment: rewriting the view
-  row as a Jackson-annotated Scala case class fails with `cannot find symbol`, because **javac runs before
-  scalac** — `maven-compiler-plugin` comes from the parent POM and `scala-maven-plugin` from ours, and
-  parent-declared plugins run first within the `compile` phase. It is not freely reversible (moving scalac
-  earlier breaks the Scala→Java direction everything else needs; `sendJavaToScalac=true` drops
-  `-parameters`). **Consequence: the wall is contagious *downstream* through data types.** A Java caller
-  forces every type it touches to be Java too — so keep the Java quarantine at the edge and let it hold only
-  DTO-shaped types, never logic.
+- **A latent build defect, found in review — and the fix repealed "never Java→Scala".** Until cap-11,
+  `maven-compiler-plugin` (parent POM) ran before `scala-maven-plugin` (ours), so **javac ran before
+  scalac** and no Java class could reference a Scala one. Cap-11's Java endpoint *must* name the Scala
+  View to hold its method reference, so the capability **did not build from clean** — hidden throughout
+  development because incremental builds reused a `target/classes` that already held the Scala output.
+  **The IDE flagged it; the build did not, because the build was never run clean.** Fix: bind
+  `scala-maven-plugin` to `process-resources` / `process-test-resources` with `sendJavaToScalac=true`, so
+  scalac runs first (reading Java sources for signatures) and javac compiles last against its output.
+  `-parameters` **survives under this order** — it was lost before precisely because scalac ran *second*
+  and overwrote javac's class files. Both directions compile now, so **§8's language-of-consumer rule is
+  ergonomics guidance, not a mechanical law**. *Lesson worth more than the finding:* **run `mvn clean
+  verify` before calling a capability done** — an incremental build can mask a broken one indefinitely,
+  and "all tests green" is not the same claim as "this builds".
 
 Cap-11 is also the project's **first entirely model-free capability** — no `TestModelProvider`, mocked or
 live, anywhere in its tests — so its correctness is fully deterministic offline, with no live-only caveat
@@ -153,9 +158,12 @@ scanned, so the file is **hand-maintained** — **add every new Scala component*
 (`agent`, `autonomous-agent`, `http-endpoint`, …). The exception is runtime-registered components
 like `SessionMemoryEntity`: leave those **out**.
 
-Mixing the cap-2 Java sources into this Scala module needed three `pom.xml` settings: annotation
-processor off (`-proc:none`, so it can't overwrite the hand-maintained descriptor), `-parameters`
-restored (HTTP path binding), and `scala-maven-plugin` `sendJavaToScalac=false`.
+Mixing Java sources into this Scala module needs three `pom.xml` settings: annotation processor off
+(`-proc:none`, so it can't overwrite the hand-maintained descriptor), `-parameters` restored (HTTP path
+binding), and — **corrected in cap-11** — `scala-maven-plugin` bound to `process-resources` /
+`process-test-resources` with `sendJavaToScalac=true`, so scalac runs *before* javac. The original
+`sendJavaToScalac=false` setting left javac running first, which silently made Java→Scala references
+uncompilable.
 
 ## The practical rubric this leaves you
 
@@ -169,8 +177,13 @@ restored (HTTP path binding), and `scala-maven-plugin` `sendJavaToScalac=false`.
   updaters, and anything else built by `getDeclaredConstructor()`), Scala's inner-class form is
   unconstructable — put such classes in a **companion `object`** so they compile to `public static` with a
   no-arg constructor.
-- **Data types follow their consumer's language, and this build enforces it.** javac runs before scalac,
-  so a Java class can never reference a Scala one. Any type a Java caller touches must be Java.
+- **Run `mvn clean verify`, not just `mvn verify`, before declaring a capability done.** An incremental
+  build reuses `target/classes` and can hide a genuinely broken build (cap-11 shipped one). Tests passing
+  is not the same claim as the project compiling.
+- **Mixed-language compile order is load-bearing.** scalac is bound to `process-resources` with
+  `sendJavaToScalac=true` so it runs *before* javac; that is what makes both Scala→Java and Java→Scala
+  resolve, and what lets javac (running last) write the `-parameters` metadata HTTP path binding needs.
+  Changing plugin phases here breaks one direction or the other.
 - **Match the test language to the code under test.** Not stylistic: the wall applies to tests too. A
   Workflow-driving or entity-querying test *must* be Java; agent (`dynamicCall`), `httpClient`, and
   pure-domain tests stay Scala.

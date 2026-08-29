@@ -16,17 +16,18 @@ package com.gwgs.akkaagentic.todos.application;
  *       Java-<em>shaped</em>. On its own it would <strong>not</strong> force Java authorship: the
  *       project ships Java-shaped types written in Scala on this same path ({@code HelpAnswer},
  *       {@code GreetingAgent.Result} — Jackson-annotated case classes).
- *   <li><em>Its consumer is Java, and this build cannot compile Java&rarr;Scala.</em> The querying
- *       endpoint must be Java because {@code ViewClient} is method-reference-only (research R1). And
- *       {@code maven-compiler-plugin} (declared by the parent POM) runs <strong>before</strong>
- *       {@code scala-maven-plugin} (declared by ours) in the {@code compile} phase, so when javac
- *       runs no Scala class file exists yet. A Java class referencing a Scala one fails with
- *       {@code cannot find symbol} — <em>verified by experiment</em>, not assumed. This is what
- *       actually forces Java authorship.
+ *   <li><em>Its consumer is the Java endpoint.</em> The querying endpoint must be Java because
+ *       {@code ViewClient} is method-reference-only (research R1), and a Java record is the
+ *       least-ceremony way to be Java-shaped for it — no Jackson annotations needed at all.
  * </ol>
  *
- * <p>So README §8's "depend Scala&rarr;Java, never Java&rarr;Scala" is a mechanical property of the
- * build, not just a style preference — and it is not freely reversible (see research R3).
+ * <p><strong>Historical note.</strong> This was originally documented as <em>forced</em>, because the
+ * build could not compile a Java class against a Scala one: {@code maven-compiler-plugin} (parent POM)
+ * ran before {@code scala-maven-plugin} (ours), so javac ran first and no Scala class file existed yet.
+ * That was a latent build defect — cap-11's own endpoint references the Scala {@code TodoSummaryView},
+ * so the capability did not build from a clean tree. It is fixed: {@code scala-maven-plugin} is now
+ * bound to {@code process-resources} with {@code sendJavaToScalac=true}, so scalac runs first and javac
+ * last. Both directions compile, and this record is Java by preference, not by necessity (research R3).
  *
  * <p>This is a deliberate, documented deviation from AGENTS.md's "define the row as an inner record of
  * the View" convention: the View is Scala, so its rows cannot live inside it.

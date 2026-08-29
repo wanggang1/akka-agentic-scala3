@@ -122,53 +122,58 @@ the capability 100% Java and taught less.
    Same path as entity state and agent payloads. So the row must be Java-*shaped* — exactly like
    `GreetingAgent.Result`, `HelpAnswer`, and `TodoList`.
 
-2. **The build's compile order makes a Java→Scala dependency *impossible*, not merely discouraged.**
-   Reason 1 alone would permit a Scala row: the project already writes Java-shaped types *in Scala*
-   (`HelpAnswer`, `GreetingAgent.Result` — Jackson-annotated case classes on this same internal
-   serializer path). What actually forces Java authorship is the **consumer**: R1 puts the querying
-   endpoint in Java, and a Java class cannot reference a Scala one in this build.
+2. **The build could not compile Java→Scala at all — a latent defect cap-11 exposed and forced to be
+   fixed.** Reason 1 alone would permit a Scala row: the project already writes Java-shaped types *in
+   Scala* (`HelpAnswer`, `GreetingAgent.Result` — Jackson-annotated case classes on this same internal
+   serializer path). The obstacle was the **build order**.
 
    **Verified by experiment during implementation (2026-08-29).** The row was rewritten as a
-   Jackson-annotated Scala case class, everything else left untouched. It does not compile:
+   Jackson-annotated Scala case class, everything else left untouched. It did not compile:
 
    ```
    [ERROR] .../todos/api/TodoSummaryEndpoint.java:[9,46] cannot find symbol
    [ERROR]   symbol:   class TodoSummaryEntry
-   [ERROR]   location: package com.gwgs.akkaagentic.todos.application
    ```
 
-   Cause, from the build log — **javac runs before scalac**:
+   Cause, from the build log — **javac ran before scalac**, because `maven-compiler-plugin` is declared
+   by the **parent** POM (`akka-javasdk-parent`) and `scala-maven-plugin` by ours, and within the
+   `compile` phase parent-declared plugins run first.
 
-   ```
-   [INFO] --- compiler:3.13.0:compile (default-compile) ---
-   [INFO] Compiling 15 source files with javac [debug release 21] to target/classes
-   [INFO] --- scala:4.9.2:compile (scala-compile) ---
-   ```
+   **The conclusion first drawn from this was wrong, and the error was caught in PR review.** The
+   original write-up concluded the constraint was inherent and "not freely reversible", and treated the
+   row's Java authorship as forced. But cap-11's Java endpoint *must* name the Scala `TodoSummaryView`
+   to hold its `ViewClient` method reference — the same Java→Scala direction. So the capability **did
+   not build from clean at all**; `mvn clean compile` failed with `cannot find symbol: class
+   TodoSummaryView`. It went unnoticed because every `mvn verify` during development was incremental
+   and reused a `target/classes` that already contained the Scala output. The IDE flagged it correctly
+   and the build did not, because the build was never run clean.
 
-   `maven-compiler-plugin` is declared by the **parent** POM (`akka-javasdk-parent`) and
-   `scala-maven-plugin` by ours; within the `compile` phase, parent-declared plugins run first. So
-   when javac runs, no Scala class file exists yet. Scala→Java works (the Java classes are already
-   on disk); **Java→Scala cannot work at all**.
+   **Fix (pom.xml).** Bind `scala-maven-plugin`'s `compile` to **`process-resources`** and its
+   `testCompile` to **`process-test-resources`**, and set **`sendJavaToScalac=true`**. scalac then runs
+   first, reading the Java sources for signatures (so Scala→Java still resolves), and javac compiles the
+   Java last against scalac's output (so Java→Scala resolves too). Critically, `-parameters` **survives**
+   under this order — it was lost before precisely because scalac ran *second* and overwrote javac's
+   class files; now javac writes them last. Verified via the `MethodParameters` attribute on both a Java
+   endpoint (`request`, `componentClient`) and a Scala one (`username`), and by a green
+   `mvn clean verify` (105 unit + 101 integration). The hand-maintained descriptor is not regenerated
+   (`-proc:none` still applies; `target/classes/META-INF` holds exactly our one file).
 
-   This is a **correction to how README §8 has been stated**. §8 was written as a *style* rule
-   ("depend Scala→Java, never Java→Scala") justified by ergonomics — `MODULE$`, `Option` interop.
-   It is in fact a **mechanical constraint of the build**, and the ergonomic argument is a
-   side-issue. Nor is it freely fixable: binding `scala-maven-plugin` to an earlier phase would
-   reverse the constraint (breaking the Scala→Java direction this project depends on everywhere),
-   and `sendJavaToScalac=true` — the joint-compilation escape — is already ruled out because it
-   drops `-parameters` and breaks HTTP path binding (README §4). One direction is available, and
-   the project picked the right one.
+   **Consequence — README §8's "never Java→Scala" is repealed as a hard rule.** Both directions compile
+   now. The row records stay Java because a Java record is the least-ceremony way to be Java-*shaped*
+   (no Jackson annotations required), not because Scala is forbidden. The language-of-consumer rule
+   survives as **ergonomics guidance** — which is exactly what it claimed to be before this feature
+   briefly and wrongly promoted it to a mechanical law.
 
-**Note on what the experiment did *not* settle.** Because it failed at compile time, it never reached
-the serializer, so whether the internal mapper accepts a Jackson-annotated Scala case class *as a view
-row* remains untested. It does not matter here: R1 forces the endpoint to Java, which forces the row's
-consumer to Java, which — by the compile order above — forces the row itself to Java. The two findings
-compose into a genuine constraint, just not the one originally claimed.
+**Still untested:** whether the internal mapper accepts a Jackson-annotated Scala case class *as a view
+row*. The experiment failed at compile time before reaching the serializer, and once the build was fixed
+we did not re-run it — a Java record is the simpler way to be Java-shaped either way. Worth a follow-up
+if a future capability wants a Scala row.
 
 **Consequence — a deliberate, documented deviation from AGENTS.md.** AGENTS.md says a View's query
 parameter/reply should be an inner record of the View. Here they are **top-level Java records beside**
-the Scala View, because a Java endpoint cannot depend on types nested in a Scala class without
-violating §8. Recorded in plan.md's Complexity Tracking.
+the Scala View. (The original reason — a Java endpoint cannot reference a Scala type — no longer holds
+after the build fix above; the rows stay top-level Java records because that is the least-ceremony way
+to satisfy the Java-*shaped* serializer requirement.) Recorded in plan.md's Complexity Tracking.
 
 ---
 

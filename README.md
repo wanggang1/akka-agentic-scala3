@@ -194,8 +194,20 @@ writing components in Scala needs explicit workarounds:
    therefore Java, fully decoupled from the Scala capability 1 — which stays put and unchanged.
    Mixing Java into this Scala module needs three `pom.xml` settings (annotation processor off
    via `-proc:none` so it can't overwrite the hand-maintained descriptor; `-parameters` restored
-   for HTTP path binding; `scala-maven-plugin` `sendJavaToScalac=false` so scalac doesn't
-   joint-compile the Java without `-parameters`).
+   for HTTP path binding; and a **build order that lets each compiler see the other's sources**).
+
+   > **Superseded by capability 11 — the third setting was inverted.** This section originally
+   > prescribed `sendJavaToScalac=false`, on the reasoning that scalac would joint-compile the Java
+   > *without* `-parameters` and clobber maven-compiler-plugin's output. That was true only because
+   > scalac ran **after** javac (`maven-compiler-plugin` comes from the parent POM and so runs first
+   > within the `compile` phase). The cost was that **no Java class could reference a Scala one** —
+   > which cap-11 hit head-on, since a Java endpoint must name the Scala View class it queries. The
+   > build now binds `scala-maven-plugin` to **`process-resources`** (and `testCompile` to
+   > `process-test-resources`) with **`sendJavaToScalac=true`**, so scalac runs first and reads the
+   > Java sources for signatures, then javac compiles the Java against scalac's output *last* — which
+   > is exactly why `-parameters` now survives (javac writes the final class files, verified via the
+   > `MethodParameters` attribute on both Java and Scala classes). **Both directions now compile**,
+   > and `mvn clean verify` is green. See §13.
 
 5. **The Autonomous Agent has *no* method-reference wall — back to Scala.** Capability 3 (the
    autonomous help-desk agent, `com.gwgs.akkaagentic.assistant.*`) returns to **Scala**, because the
@@ -569,21 +581,30 @@ writing components in Scala needs explicit workarounds:
       `public static #14= #13 of #2; // Updater=...TodoSummaryView$Updater of class ...TodoSummaryView`,
       and `javap -p` shows a real `public TodoSummaryView$Updater()`. **Do not "simplify" the updater back
       into the class body.** Watch for this shape question wherever the SDK reflects rather than dispatches.
-    - **R3 — the row records are Java, and the reason is the *build*, not a style rule (corrected by
-      experiment).** View rows cross the SDK's **internal** serializer (`Serializer.toBytesAsJson` /
-      `fromBytes` / `registerTypeHints`) — the §3 two-mapper boundary — so they must be Java-*shaped*. That
-      alone would **not** force Java authorship: the project already ships Java-shaped types written in
-      Scala on this same path (`HelpAnswer`, `GreetingAgent.Result`). What forces it is the consumer. We
-      tested it: rewriting the row as a Jackson-annotated Scala case class fails with
-      `cannot find symbol: class TodoSummaryEntry`, because **javac runs before scalac** —
-      `maven-compiler-plugin` is declared by the *parent* POM and `scala-maven-plugin` by ours, and within
-      the `compile` phase parent-declared plugins run first. So **§8's "depend Scala→Java, never Java→Scala"
-      is a mechanical property of this build, not merely an ergonomic preference**, and it is not freely
-      reversible: moving scalac earlier would break the Scala→Java direction everything else relies on, and
-      `sendJavaToScalac=true` is already ruled out (it drops `-parameters` and breaks HTTP path binding,
-      §4). R1 forces the endpoint to Java → the row's consumer is Java → the build forbids Java→Scala →
-      the row is Java. A documented deviation from AGENTS.md's "row as an inner record of the View": the
-      rows are top-level Java records **beside** the Scala View.
+    - **R3 — the build could not compile Java→Scala at all, and cap-11 forced it to be fixed.** View rows
+      cross the SDK's **internal** serializer (`Serializer.toBytesAsJson` / `fromBytes` /
+      `registerTypeHints`) — the §3 two-mapper boundary — so they must be Java-*shaped*. That alone would
+      **not** force Java *authorship*: the project ships Java-shaped types written in Scala on this same
+      path (`HelpAnswer`, `GreetingAgent.Result`). The real obstacle was the **build order**: with
+      `maven-compiler-plugin` (parent POM) running before `scala-maven-plugin` (ours), **javac ran before
+      scalac**, so a Java class could never reference a Scala one — `cannot find symbol`.
+
+      **This was a latent defect, not just a constraint, and it was caught in review.** Cap-11's Java
+      endpoint *must* name the Scala `TodoSummaryView` to hold its method reference, so the build was
+      broken from clean the moment the capability was written — invisible during development because
+      incremental builds reused a `target/classes` that already held the Scala output. A `mvn clean
+      compile` failed. **Fix**: bind `scala-maven-plugin` to `process-resources` (and `testCompile` to
+      `process-test-resources`) with `sendJavaToScalac=true`, so scalac runs first reading Java sources for
+      signatures, and javac compiles last against scalac's output. `-parameters` survives *because* javac
+      now writes the final class files — the very thing the old ordering made impossible (§4).
+
+      **Consequence — README §8's "never Java→Scala" is repealed as a hard rule.** Both directions now
+      compile. The rows stay Java records because a Java record is the least-ceremony way to satisfy the
+      Java-*shaped* requirement (no Jackson annotations needed), not because Scala is forbidden. The
+      language-of-consumer guidance survives only as **ergonomics** — its original justification — which
+      is what it was always claimed to be before cap-11 mistakenly promoted it to a mechanical law.
+      A documented deviation from AGENTS.md's "row as an inner record of the View" remains: the rows are
+      top-level Java records **beside** the Scala View.
     - **R6 — a keyed single-row query returns `Optional`, empty on no match (settled empirically).** This
       was deliberately left **open with a decided fallback** rather than guessed, and resolved on the first
       run of the view integration test: `QueryEffect[Optional[TodoSummaryEntry]]` is supported on SDK

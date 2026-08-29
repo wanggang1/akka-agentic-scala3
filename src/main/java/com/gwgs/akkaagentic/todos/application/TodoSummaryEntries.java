@@ -12,8 +12,8 @@ import java.util.List;
  * <p>{@code entries} is empty, never null, when nothing matches — "no assistant has open work" is a
  * successful answer, not an error or a not-found.
  *
- * <p>Java for the same reason as {@link TodoSummaryEntry}: it crosses the SDK's internal serializer
- * <em>and</em> its consumer is the Java endpoint, which this build cannot compile against a Scala
- * type (javac runs before scalac — see {@code TodoSummaryEntry}'s javadoc and feature 013 research R3).
+ * <p>Java for the same reason as {@link TodoSummaryEntry}: it crosses the SDK's internal serializer, so
+ * it must be Java-shaped, and a Java record is the least-ceremony way to be so for its Java consumer
+ * (see {@code TodoSummaryEntry}'s javadoc and feature 013 research R3).
  */
 public record TodoSummaryEntries(List<TodoSummaryEntry> entries) {}
