@@ -7,32 +7,40 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 ## Where we are
 
-> **You are here:** Feature 10 (MCP client) — **✅ done and merged (PR #19)**
-> ([`specs/012-mcp-client`](specs/012-mcp-client/)). A request-based `McpClientAgent` grounds its answers by
-> calling the **remote `retrieve` MCP tool** of this service's own cap-9 `/mcp` server — the model decides
-> whether/when to retrieve (**agentic RAG**), closing the loop in-process (agent → MCP client → our MCP
-> server → `KnowledgeStore`), fully offline. `POST /grounded-ask`, synchronous. **Scala end-to-end, tests
-> included** (8 offline tests + live smoke on Ollama `qwen3:8b`; `McpClientAgent` uses `MemoryProvider.none()`
-> for its stateless one-shot). **Interop verdict (R1):** consuming a remote
-> MCP server is **Scala-clean** — `.mcpTools(RemoteMcpTools.fromService/fromServer(...))` is a **URL-string
-> builder** with no method reference (bytecode-verified), so the *outbound* side hits no method-ref wall
-> either (the MCP client isn't a `ComponentClient`). No new domain (reuses cap-8's `AskQuestion`/
-> `KnowledgeStore`), **no `citedSources`** (the model owns retrieval — cap-8-fork tradeoff), no cap-9 ACL edit
-> (a same-service `/mcp` call passes the INTERNET-only ACL). **Positive testing result vs cap-7 D9:** a remote
-> MCP tool is a normal typed-`String` function-tool call, so `TestModelProvider` scripts a **real** `retrieve`
-> round-trip offline (SC-005 parity vs a direct `KnowledgeStore.retrieve`).
+> **You are here:** Feature 11 (Views / read-model) — **✅ implemented, tests green; PR not yet opened**
+> ([`specs/013-views-read-model`](specs/013-views-read-model/)). The CQRS **read side** over cap-6's
+> per-username `TodoEntity`: a `View` projects every entity state change into one summary row per assistant
+> (`total`/`open`/`completed`), serving both a keyed lookup and the cross-user *"who still has open work?"*
+> query — the question an entity, addressable only by its own id, cannot answer. `GET /todo-summaries/...`,
+> **read-only** (to-dos are still written only through cap-6's assistant, which is untouched). The project's
+> **first entirely model-free capability**: no `TestModelProvider`, mocked or live, anywhere in its tests.
 >
-> **⏭️ Next:** roadmap open — caps 1–10 merged; the MCP server/client loop is closed. Candidate directions:
-> guardrails, evaluation/LLM-judge, streaming, or a Views/read-model capability.
+> **Interop verdict — the first capability split *across* the component/caller boundary.** Every previous
+> encounter with the method-ref wall pulled the **whole component** into Java (cap-2's Workflow, cap-6's
+> entity). Here the **View component stays Scala** and only the **caller** is Java, which sharpens the
+> through-line to: *the wall is a property of the client, and it travels no further than the class that holds
+> the method reference*. Three results: **(R1)** `ViewClient` is method-reference-only (no `dynamicCall`;
+> `akka.japi.function.Function` is `Serializable`) → the querying endpoint is Java. **(R2, new hazard class)**
+> the `TableUpdater` must live in the **companion `object`**, not as an inner class — the SDK instantiates
+> updaters via `getDeclaredClasses()` + a **zero-arg** `getDeclaredConstructor()`, and a Scala inner class has
+> only `U($outer)`. This is the first finding that turns on **bytecode shape** rather than on a `Class`- vs
+> method-ref-keyed API. **(R3, corrected by experiment)** the row records are Java because **javac runs before
+> scalac** in this build (parent-POM plugin ordering), so no Java class can reference a Scala one — README §8's
+> "never Java→Scala" is a *mechanical* build constraint, not a style preference. **(R6, settled empirically)**
+> a keyed query returns `Optional`, empty on no match, so `404` and an all-zero `200` stay distinguishable.
 >
-> Capabilities 1–10 are **✅ done and merged**; 5–10 were exploratory follow-ups beyond the original four.
+> **⏭️ Next:** open the cap-11 PR, then the roadmap is open again — remaining candidates: guardrails,
+> evaluation/LLM-judge, streaming.
+>
+> Capabilities 1–10 are **✅ done and merged**; 5–11 were exploratory follow-ups beyond the original four.
 >
 > **📄 Retrospective:** [`FINDINGS.md`](FINDINGS.md) consolidates the single `dynamicCall` finding that
-> explains every Scala-vs-Java outcome, plus the practical rubric. Caps 5–10 extend the through-line: the
+> explains every Scala-vs-Java outcome, plus the practical rubric. Caps 5–11 extend the through-line: the
 > wall is **client-specific** — `TaskClient` (cap-5), the custom `DependencyProvider` (cap-8), an MCP
 > endpoint's reflective dispatch (cap-9, no client at all), and `RemoteMcpTools`'s URL-string builder
-> (cap-10) are all on the Scala-friendly side of it. **The MCP through-line is complete: server and client
-> are both Scala-clean for the same reason — neither authors a `ComponentClient` method reference.**
+> (cap-10) are all on the Scala-friendly side of it; cap-11 shows the wall claiming a component's **caller
+> while the component itself stays Scala**, and adds a second, independent hazard axis: **reflected bytecode
+> shape**.
 
 ## The path
 
@@ -49,6 +57,7 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 | 8 | **RAG-grounded Q&A** — a `DocsAgent` answers grounded only in passages retrieved by in-process semantic embeddings (all-MiniLM ONNX, in-jar, offline) from a canned corpus, or honestly declines; custom-dependency DI is Scala-clean; retrieval is deterministic → offline-testable; synchronous HTTP | [`specs/010-rag-grounded-qa`](specs/010-rag-grounded-qa/) | ✅ Done — merged (PR #17) |
 | 9 | **MCP server** — an `@McpEndpoint` at `/mcp` exposes cap-8's retrieval as a JSON-RPC `retrieve` tool + a corpus-sources resource; **Scala-clean** (endpoint, reflective dispatch — no method-ref wall; new `mcp-endpoint` key); a `@McpTool` must return String (throw→isError); fixed top-K 3 (SDK-3.6.0 optional-param bug). Server-side only | [`specs/011-mcp-knowledge-server`](specs/011-mcp-knowledge-server/) | ✅ Done — merged (PR #18) |
 | 10 | **MCP client** — a request-based `McpClientAgent` grounds via the **remote `retrieve` MCP tool** of this service's own cap-9 `/mcp` (agentic RAG — the model decides when to retrieve); closes the loop in-process, fully offline; `POST /grounded-ask`. **Scala-clean** — `.mcpTools(RemoteMcpTools.fromService(...))` is a URL-string builder, no method-ref wall; no cap-9 ACL edit; no citations (model owns retrieval). The tool loop **is** offline-testable (real `retrieve` round-trip via `TestModelProvider`) — a positive contrast to cap-7 D9 | [`specs/012-mcp-client`](specs/012-mcp-client/) | ✅ Done — merged (PR #19) |
+| 11 | **Views / read-model** — a `View` projects cap-6's `TodoEntity` state into one summary row per username; keyed lookup + the cross-user "who has open work" query an entity can't answer; `GET /todo-summaries/...`, read-only, **no model anywhere** (first fully model-free capability). **First split across the component/caller boundary:** the View is **Scala** (its `TableUpdater` in the companion `object` — a **bytecode-shape** requirement, a new hazard class), only the querying endpoint + row records are Java (`ViewClient` is method-ref-only; javac runs before scalac). Keyed query returns `Optional`; new `view` descriptor key | [`specs/013-views-read-model`](specs/013-views-read-model/) | ✅ Implemented — PR pending |
 
 **Status legend:** ✅ done · 📋 planned (spec written) · 🚧 in progress · ⬜ not started
 
@@ -130,8 +139,9 @@ Not on the four-capability path, captured so they're not forgotten:
 
 ## Candidate next capabilities
 
-The roadmap is **open** — caps 1–10 are merged and the MCP server/client loop is closed. These are the
-leading candidates for cap-11, each framed by what it explores and the project's signature question:
+The roadmap is **open** — caps 1–10 are merged, the MCP server/client loop is closed, and cap-11 (Views)
+is implemented. These are the leading candidates for cap-12, each framed by what it explores and the
+project's signature question:
 *is it Scala-clean, or does it hit the method-reference wall?* (See [`FINDINGS.md`](FINDINGS.md) for the
 wall — the single `dynamicCall` property that has predicted every Scala-vs-Java outcome so far.) None is
 specced yet; pick one and start via `/akka.specify`.
@@ -141,11 +151,16 @@ specced yet; pick one and start via `/akka.specify`.
 | **Guardrails** | SDK-enforced constraints around a model call — input (reject/sanitize a prompt) and output (block/redact/rewrite a reply): moderation, PII filtering, jailbreak/injection detection, topic allow/deny, "must be grounded" | Harden an existing agent (e.g. cap-8 `DocsAgent` / cap-10 `McpClientAgent`) — block off-policy input, refuse ungrounded output | **Likely Scala-clean** (class/annotation-registered like tools) — verify it's not method-ref wired. Offline-testable via `TestModelProvider` scripting a violating reply |
 | **Evaluation / LLM-as-judge** | A second model call scores a first agent's output against criteria (relevance, groundedness, tone, correctness) — the automated quality-gate / regression-test pattern | A `JudgeAgent` scoring whether `DocsAgent`'s answer is *actually* grounded in retrieved passages — attacks cap-8's **soft-grounding** gap (we instruct grounding but don't prove it) | **Scala-clean** (just another `Agent`). Testing caveat: judgment is model-driven → offline only mocks the verdict, real judging is live (like cap-7's delegation) |
 | **Streaming** | Stream the reply token-by-token — `StreamEffect` instead of `Effect<T>`, endpoint emitting SSE / chunked responses (the "typing" UX) | A streaming variant of cap-4 chat or cap-10 grounded-ask | **Unknown — highest novelty.** Stresses the HTTP-endpoint-as-framework-boundary finding; Scala `Source`/stream interop with the SDK streaming API is the open question. Highest-risk, highest-learning pick |
-| **Views / read-model** | CQRS read-side: a `View` consumes an entity's events (or KVE state) into a queryable table — "list all X", "search by Y", history/audit, dashboards. **The one core Akka component family this project has never built** | A view over cap-6's `TodoEntity` (all to-dos / by status), or an interaction-history view | **Likely Java — extends the wall story.** The View client is method-reference-only (like entity/workflow clients), so a View + its caller probably land in Java — the CQRS-read counterpart to cap-2's workflow and cap-6's entity; fills the biggest component-coverage gap |
 
-**Two strongest picks for this project's theme (Scala-on-Java-SDK interop):** **Views** (closes the biggest
-component gap and gives the wall story its cleanest remaining data point) or **Streaming** (genuinely
-unknown interop territory). The other two harden/extend existing agents and are likely Scala-clean.
+**Views** is no longer a candidate — it was built as **capability 11** (see the path table above), and it
+closed the biggest component-coverage gap while overturning its own interop bet: the prediction was
+"likely Java", but only the *caller* turned out to be Java while the View component stayed Scala.
+
+**Strongest remaining pick for this project's theme (Scala-on-Java-SDK interop):** **guardrails** — it is
+the one candidate that wraps a model call with SDK-registered machinery, so it directly re-tests the
+"is it `Class`-keyed or method-ref-keyed?" question on a new surface. **Streaming** is the genuinely
+unknown interop territory; **guardrails** and **eval/LLM-judge** harden or extend existing agents and are
+likely Scala-clean.
 
 Relevant docs already in-repo: `akka-context/sdk/agents/guardrails.html.md`,
 `akka-context/sdk/agents/llm_eval.html.md`, `akka-context/sdk/agents/streaming.html.md`,

@@ -4,8 +4,9 @@
 
 All findings below are settled with **evidence** (JVM bytecode via `javap`, plus one compile spike),
 following the method established in specs/005 R2, specs/007 R1, specs/009 D1 and specs/012 R1. No
-item is carried into implementation as an assumption except R6, which is explicitly flagged with a
-decided fallback.
+item was carried into implementation as an assumption: R1–R5 were settled before coding, and R6 —
+deliberately left open with a decided fallback rather than guessed — was settled empirically during
+implementation (task T010; **Branch A** held, see below).
 
 ---
 
@@ -121,11 +122,48 @@ the capability 100% Java and taught less.
    Same path as entity state and agent payloads. So the row must be Java-*shaped* — exactly like
    `GreetingAgent.Result`, `HelpAnswer`, and `TodoList`.
 
-2. **The language-of-consumer rule (README §8) settles *authored in Java*, not merely Java-shaped.**
-   The project already writes Java-shaped types *in Scala* (Jackson-annotated case classes), so
-   reason 1 alone would permit a Scala row. But the row has **two** consumers: the Scala updater
-   (which builds it) and the **Java endpoint** (which receives it from the query). §8 forbids a
-   Java→Scala dependency. A Java record satisfies both consumers with no annotations at all.
+2. **The build's compile order makes a Java→Scala dependency *impossible*, not merely discouraged.**
+   Reason 1 alone would permit a Scala row: the project already writes Java-shaped types *in Scala*
+   (`HelpAnswer`, `GreetingAgent.Result` — Jackson-annotated case classes on this same internal
+   serializer path). What actually forces Java authorship is the **consumer**: R1 puts the querying
+   endpoint in Java, and a Java class cannot reference a Scala one in this build.
+
+   **Verified by experiment during implementation (2026-08-29).** The row was rewritten as a
+   Jackson-annotated Scala case class, everything else left untouched. It does not compile:
+
+   ```
+   [ERROR] .../todos/api/TodoSummaryEndpoint.java:[9,46] cannot find symbol
+   [ERROR]   symbol:   class TodoSummaryEntry
+   [ERROR]   location: package com.gwgs.akkaagentic.todos.application
+   ```
+
+   Cause, from the build log — **javac runs before scalac**:
+
+   ```
+   [INFO] --- compiler:3.13.0:compile (default-compile) ---
+   [INFO] Compiling 15 source files with javac [debug release 21] to target/classes
+   [INFO] --- scala:4.9.2:compile (scala-compile) ---
+   ```
+
+   `maven-compiler-plugin` is declared by the **parent** POM (`akka-javasdk-parent`) and
+   `scala-maven-plugin` by ours; within the `compile` phase, parent-declared plugins run first. So
+   when javac runs, no Scala class file exists yet. Scala→Java works (the Java classes are already
+   on disk); **Java→Scala cannot work at all**.
+
+   This is a **correction to how README §8 has been stated**. §8 was written as a *style* rule
+   ("depend Scala→Java, never Java→Scala") justified by ergonomics — `MODULE$`, `Option` interop.
+   It is in fact a **mechanical constraint of the build**, and the ergonomic argument is a
+   side-issue. Nor is it freely fixable: binding `scala-maven-plugin` to an earlier phase would
+   reverse the constraint (breaking the Scala→Java direction this project depends on everywhere),
+   and `sendJavaToScalac=true` — the joint-compilation escape — is already ruled out because it
+   drops `-parameters` and breaks HTTP path binding (README §4). One direction is available, and
+   the project picked the right one.
+
+**Note on what the experiment did *not* settle.** Because it failed at compile time, it never reached
+the serializer, so whether the internal mapper accepts a Jackson-annotated Scala case class *as a view
+row* remains untested. It does not matter here: R1 forces the endpoint to Java, which forces the row's
+consumer to Java, which — by the compile order above — forces the row itself to Java. The two findings
+compose into a genuine constraint, just not the one originally claimed.
 
 **Consequence — a deliberate, documented deviation from AGENTS.md.** AGENTS.md says a View's query
 parameter/reply should be an inner record of the View. Here they are **top-level Java records beside**
@@ -173,10 +211,10 @@ by R1. This is what lets the test suite split the same way the production code d
 
 ---
 
-## R6 — OPEN (with a decided fallback): what a keyed single-row query returns on no match
+## R6 — SETTLED (Branch A): a keyed single-row query returns `Optional`, empty on no match
 
-**Status**: not settled from bytecode or docs; **resolved by the first integration test**, not by
-guesswork.
+**Status**: **RESOLVED empirically at task T010** by the first run of
+`TodoSummaryViewIntegrationTest` (2026-08-29). It was left open on purpose rather than guessed.
 
 `View$QueryEffect<T>` is a marker interface and the client returns a bare `R`, so a no-match single-row
 query either returns `null` or throws. The docs in `akka-context/` say nothing about it, and
@@ -184,11 +222,34 @@ query either returns `null` or throws. The docs in `akka-context/` say nothing a
 may be supported — but "appears in the constant pool" is not proof, and this project does not ship
 guesses.
 
-**Plan**: implement the keyed query returning `Optional<TodoSummaryEntry>` and let the first run of
-the view integration test confirm it. **If unsupported, fall back** to giving the keyed query the same
-wrapper shape as the multi-row query (`SELECT * AS entries … WHERE username = :username`) and treating
-an empty list as not-found. The fallback is deterministic regardless of SDK behavior, so **FR-004 is
-satisfiable either way** and no requirement is at risk. Whichever holds gets recorded in the README.
+**Plan (as written before the experiment)**: implement the keyed query returning
+`Optional<TodoSummaryEntry>` and let the first run of the view integration test confirm it. **If
+unsupported, fall back** to giving the keyed query the same wrapper shape as the multi-row query
+(`SELECT * AS entries … WHERE username = :username`) and treating an empty list as not-found. The
+fallback is deterministic regardless of SDK behavior, so **FR-004 is satisfiable either way** and no
+requirement is at risk.
+
+### Outcome: **Branch A**, no fallback needed
+
+`QueryEffect[Optional[TodoSummaryEntry]]` is fully supported on SDK 3.6.3 — the runtime accepted the
+query at component discovery, and a lookup for a username the projection has never seen returns
+**`Optional.empty`**: not `null`, not a thrown exception, and not a zero-filled row. So a keyed view
+query has a first-class "no such row" answer, which the endpoint maps straight to `404`
+(`Optional.empty` &rarr; `HttpResponses.notFound()`), while an *emptied* list is a real row of
+`(0, 0, 0)` &rarr; `200`. The two are cleanly distinguishable, which is exactly what FR-004 needs.
+
+Shipped signature (`TodoSummaryView.scala`):
+
+```scala
+@Query("SELECT * FROM todo_summaries WHERE username = :username")
+def getByUsername(username: String): View.QueryEffect[Optional[TodoSummaryEntry]] =
+  queryResult()
+```
+
+Proof: `TodoSummaryViewIntegrationTest.anUnknownUsernameYieldsNotFound` asserts `isEmpty()` on an
+unknown username *after* awaiting a different user's row, so the assertion is about genuine absence
+rather than the projection not having caught up. The wrapper-shape fallback was never used, and the
+multi-row query keeps the `SELECT * AS entries` form only because it genuinely selects many rows.
 
 ---
 

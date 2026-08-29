@@ -22,6 +22,8 @@ only two of the four clients have one.
 | `AutonomousAgentClient` | `Class` + `Task` constants | ✅ yes |
 | `WorkflowClient` | method-ref **only** | ❌ no |
 | `EventSourcedEntityClient` | method-ref **only** | ❌ no |
+| `KeyValueEntityClient` | method-ref **only** | ❌ no |
+| `ViewClient` (cap-11) | method-ref **only** | ❌ no |
 | `DependencyProvider` (custom DI, cap-8) | `Class` key (`getDependency[T](Class[T])`) | ✅ yes |
 | `RemoteMcpTools` (MCP client, cap-10) | URL **string** (`fromService`/`fromServer`) | ✅ yes |
 
@@ -29,6 +31,18 @@ only two of the four clients have one.
 story; everything below is a corollary. Crucially, the wall is a property of the *client*, not of
 the *component kind* or of durable orchestration in general — the Autonomous Agent (cap 3) is a
 *more* capable durable primitive than the Workflow, yet is fully Scala-friendly.
+
+**Cap-11 sharpens this one step further.** Until then, every capability that hit the wall had its
+*whole component* pulled into Java (cap-2's Workflow, cap-6's entity), so "the wall is a client
+property" and "some components are Java" were indistinguishable in practice. A View separates them:
+`ViewClient` is method-ref-only, yet the **View component itself is Scala** and only the querying
+endpoint is Java. The precise statement is therefore:
+
+> **The wall is a property of the client, and it travels no further than the class that holds the
+> method reference.**
+
+Everything downstream of that class (the component, its logic, its domain) and everything upstream
+that doesn't hold a method ref (an `httpClient` test) stays Scala.
 
 ## Per-capability: why each landed where it did
 
@@ -86,6 +100,35 @@ parity vs a direct `KnowledgeStore.retrieve`). And tool transport is invisible t
 inputSchema}` namespace; the MCP tool's description comes from the *server's* `tools/list`). **Verdict:
 the wall is a client-method-ref property end to end — every SDK surface that isn't one is Scala-friendly.**
 
+### Capability 11 — Views / read-model · **Scala component, Java caller**
+The CQRS read side over cap-6's `TodoEntity`. `ViewClient` is method-ref-only (no `dynamicCall`), so the
+querying endpoint is Java — but the **View is Scala**, making this the first capability split *across* the
+component/caller boundary (see the sharpened statement above). Even the tests split along that line rather
+than wholesale: the view-query test is Java (it holds the method ref), the endpoint test is **Scala**
+(`httpClient` + a `Class`-keyed publisher hold none). Two findings that are *not* corollaries of the wall:
+
+- **A second, independent hazard axis: reflected bytecode shape.** Every prior finding turned on whether an
+  API was keyed on a `Class`/`String` (fine) or a Java method ref (impossible). This one turns on how Scala
+  *compiles*. The SDK finds `TableUpdater`s via `Class.getDeclaredClasses()` and builds them with a
+  **zero-arg** `getDeclaredConstructor()` + `newInstance()`. Scala's two nesting forms differ: an **inner**
+  class (`class V { class U }`) compiles to a non-static class with only `U($outer)` — **unconstructable, a
+  runtime failure**; a **companion-object** class (`object V { class U }`) compiles to a `public static`
+  member of `V` with a synthesized no-arg constructor — exactly the Java `static class` shape. So the
+  updater *must* live in the companion object. **Generalization: wherever the SDK reflects on a class rather
+  than dispatching through a client, ask what shape it expects, not just what it is keyed on.**
+- **"Never Java→Scala" is a build constraint, not a style rule.** Verified by experiment: rewriting the view
+  row as a Jackson-annotated Scala case class fails with `cannot find symbol`, because **javac runs before
+  scalac** — `maven-compiler-plugin` comes from the parent POM and `scala-maven-plugin` from ours, and
+  parent-declared plugins run first within the `compile` phase. It is not freely reversible (moving scalac
+  earlier breaks the Scala→Java direction everything else needs; `sendJavaToScalac=true` drops
+  `-parameters`). **Consequence: the wall is contagious *downstream* through data types.** A Java caller
+  forces every type it touches to be Java too — so keep the Java quarantine at the edge and let it hold only
+  DTO-shaped types, never logic.
+
+Cap-11 is also the project's **first entirely model-free capability** — no `TestModelProvider`, mocked or
+live, anywhere in its tests — so its correctness is fully deterministic offline, with no live-only caveat
+like cap-6's recall or cap-7's delegation.
+
 ## The two crosscutting constraints (orthogonal to the wall)
 
 1. **Two Jackson mappers** (cap 1 / feature 003). The public `JsonSupport` hook — where
@@ -118,9 +161,16 @@ restored (HTTP path binding), and `scala-maven-plugin` `sendJavaToScalac=false`.
 
 - **Reach for `AutonomousAgent` over `Workflow`** when a Scala capability needs the model to drive a
   durable loop — it's *the* Scala-friendly durable-orchestration primitive.
-- **Expect Java only when you must:** (a) author or invoke a Workflow, or (b) query an entity
-  directly. Everything else — agents, autonomous agents, HTTP endpoints, domain, validation — stays
-  idiomatic Scala.
+- **Expect Java only when you must:** (a) author or invoke a Workflow, (b) query an entity directly, or
+  (c) query a View. Everything else — agents, autonomous agents, HTTP endpoints, MCP endpoints, domain,
+  validation — stays idiomatic Scala. And keep the Java part **as small as the class holding the method
+  ref**: a Java caller does not imply a Java component.
+- **Check the reflected *shape*, not only the key type.** When the SDK reflects over a class (nested
+  updaters, and anything else built by `getDeclaredConstructor()`), Scala's inner-class form is
+  unconstructable — put such classes in a **companion `object`** so they compile to `public static` with a
+  no-arg constructor.
+- **Data types follow their consumer's language, and this build enforces it.** javac runs before scalac,
+  so a Java class can never reference a Scala one. Any type a Java caller touches must be Java.
 - **Match the test language to the code under test.** Not stylistic: the wall applies to tests too. A
   Workflow-driving or entity-querying test *must* be Java; agent (`dynamicCall`), `httpClient`, and
   pure-domain tests stay Scala.
