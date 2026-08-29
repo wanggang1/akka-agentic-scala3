@@ -53,6 +53,13 @@ Create one component and a corresponding test at a time, with user feedback in b
 4. **If user says "skip X"**, skip that step
 5. **Keep focused** - don't jump ahead, don't create multiple steps at once
 6. **Brief explanations** - what you did, not verbose details
+7. **Commit at each approved gate** - once the user approves a step and the build is green, commit
+   *that step's* work with a scoped message (e.g. `feat(013): cap-11 domain — TodoSummary derivation
+   + unit tests`), then move on. **Do not accumulate the whole capability into one large commit at
+   the end.** An approved gate is a coherent, compiling, test-green unit — exactly a commit. Batching
+   them makes the PR unreviewable per-step and defeats `git bisect`. Documentation updates
+   (README/ROADMAP/FINDINGS) are their own final commit. Squash-on-merge remains available if a
+   single commit on `main` is wanted.
 
 This approach enables early validation, catches issues before coding, and allows mid-course adjustments.
 
