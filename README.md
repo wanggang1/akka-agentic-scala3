@@ -104,14 +104,14 @@ src/main/scala/com/gwgs/akkaagentic/mcpclient/api/         # McpClientEndpoint (
 # Capability 11 — Scala View + Java caller (CQRS read model; see "Scala interop notes" §13)
 src/main/scala/com/gwgs/akkaagentic/todos/domain/       # TodoSummary (pure counts derivation)
 src/main/scala/com/gwgs/akkaagentic/todos/application/  # TodoSummaryView (View + companion-object TableUpdater)
-src/main/java/com/gwgs/akkaagentic/todos/application/    # TodoSummaryEntry, TodoSummaryEntries (row records)
+src/main/scala/com/gwgs/akkaagentic/todos/application/  # + TodoSummaryEntry, TodoSummaryEntries (Java-SHAPED rows)
 src/main/java/com/gwgs/akkaagentic/todos/api/            # TodoSummaryEndpoint (GET /todo-summaries/..., read-only)
 # Note: the first capability split across the COMPONENT/CALLER boundary. The View itself is SCALA — its
 # TableUpdater lives in the companion `object` so it compiles to the public-static, zero-arg nested class
 # the SDK's getDeclaredClasses()+getDeclaredConstructor() reflection needs (a bytecode-SHAPE requirement,
 # a new hazard class). Only the querying ENDPOINT is Java, because ViewClient is method-ref-only with no
-# dynamicCall (§13 R1); the row records follow it into Java because javac runs before scalac in this
-# build, so no Java class can reference a Scala one. Read side over cap-6's TodoEntity — cap-6 is
+# dynamicCall (§13 R1) — and it is the ONLY Java class here: the rows are Jackson-annotated Scala case
+# classes (Java-shaped for the internal serializer, not Java-authored). Read side over cap-6's TodoEntity — cap-6 is
 # untouched, and to-dos are still written ONLY through the assistant. NO model anywhere in this
 # capability: the project's first entirely model-free feature, tests included. New descriptor key `view`.
 
@@ -581,30 +581,31 @@ writing components in Scala needs explicit workarounds:
       `public static #14= #13 of #2; // Updater=...TodoSummaryView$Updater of class ...TodoSummaryView`,
       and `javap -p` shows a real `public TodoSummaryView$Updater()`. **Do not "simplify" the updater back
       into the class body.** Watch for this shape question wherever the SDK reflects rather than dispatches.
-    - **R3 — the build could not compile Java→Scala at all, and cap-11 forced it to be fixed.** View rows
-      cross the SDK's **internal** serializer (`Serializer.toBytesAsJson` / `fromBytes` /
-      `registerTypeHints`) — the §3 two-mapper boundary — so they must be Java-*shaped*. That alone would
-      **not** force Java *authorship*: the project ships Java-shaped types written in Scala on this same
-      path (`HelpAnswer`, `GreetingAgent.Result`). The real obstacle was the **build order**: with
-      `maven-compiler-plugin` (parent POM) running before `scala-maven-plugin` (ours), **javac ran before
-      scalac**, so a Java class could never reference a Scala one — `cannot find symbol`.
+    - **R3 — the "Java→Scala is impossible" claim was a *build defect*, and fixing it shrank the Java
+      quarantine to one class.** View rows cross the SDK's **internal** serializer — the §3 two-mapper
+      boundary — so they must be Java-*shaped*. This capability originally took that to mean
+      Java-*authored*, because a Java class could not reference a Scala one: with `maven-compiler-plugin`
+      (parent POM) running before `scala-maven-plugin` (ours), **javac ran before scalac**.
 
-      **This was a latent defect, not just a constraint, and it was caught in review.** Cap-11's Java
-      endpoint *must* name the Scala `TodoSummaryView` to hold its method reference, so the build was
-      broken from clean the moment the capability was written — invisible during development because
-      incremental builds reused a `target/classes` that already held the Scala output. A `mvn clean
-      compile` failed. **Fix**: bind `scala-maven-plugin` to `process-resources` (and `testCompile` to
-      `process-test-resources`) with `sendJavaToScalac=true`, so scalac runs first reading Java sources for
-      signatures, and javac compiles last against scalac's output. `-parameters` survives *because* javac
-      now writes the final class files — the very thing the old ordering made impossible (§4).
+      **That was a latent defect, not a language boundary, and it was caught in PR review.** Cap-11's Java
+      endpoint *must* name the Scala `TodoSummaryView` to hold its method reference, so the capability was
+      broken from clean the moment it was written — invisible during development because incremental builds
+      reused a `target/classes` that already held the Scala output. `mvn clean compile` failed; the IDE
+      flagged it and the build did not, because the build was never run clean. **Fix**: bind
+      `scala-maven-plugin` to `process-resources` / `process-test-resources` with `sendJavaToScalac=true`,
+      plus `javacArgs = -parameters` so the Java classes scalac joint-compiles carry parameter names too
+      (without that, a *clean* build passes and an *incremental* one ships `arg0` and breaks HTTP path
+      binding — the mirror-image bug, also fixed).
 
-      **Consequence — README §8's "never Java→Scala" is repealed as a hard rule.** Both directions now
-      compile. The rows stay Java records because a Java record is the least-ceremony way to satisfy the
-      Java-*shaped* requirement (no Jackson annotations needed), not because Scala is forbidden. The
-      language-of-consumer guidance survives only as **ergonomics** — its original justification — which
-      is what it was always claimed to be before cap-11 mistakenly promoted it to a mechanical law.
-      A documented deviation from AGENTS.md's "row as an inner record of the View" remains: the rows are
-      top-level Java records **beside** the Scala View.
+      **Consequence — the rows are Scala, and §8's "never Java→Scala" is repealed as a hard rule.** With
+      both directions compiling, `TodoSummaryEntry`/`TodoSummaryEntries` are Jackson-annotated **Scala**
+      case classes (the `HelpAnswer` shape), verified through the real serializer by all 13 cap-11
+      integration tests. So the Java quarantine is now **exactly one class** — `TodoSummaryEndpoint`, the
+      only place a `ViewClient` method reference is held — which is what makes this section's claim
+      *literal* rather than approximate. The language-of-consumer rule survives only as **ergonomics
+      guidance**, which is what it was always claimed to be before this feature briefly promoted it to a
+      mechanical law.
+
     - **R6 — a keyed single-row query returns `Optional`, empty on no match (settled empirically).** This
       was deliberately left **open with a decided fallback** rather than guessed, and resolved on the first
       run of the view integration test: `QueryEffect[Optional[TodoSummaryEntry]]` is supported on SDK
@@ -1479,8 +1480,9 @@ curl -i -s "http://localhost:9000/todo-summaries/by-user/%20%20"
 > — with its `TableUpdater` in the companion `object`, the one placement that compiles to the
 > public-static, zero-arg nested class the SDK's reflection can instantiate (§13 R2). Only the
 > **querying endpoint** is Java, because `ViewClient` is method-reference-only with no `dynamicCall`
-> (§13 R1), and the row records follow it into Java because javac runs before scalac in this build, so
-> no Java class can reference a Scala one (§13 R3). Even the *tests* split along that line rather than
+> (§13 R1) — and it is the **only** Java class in the capability: the row records are Jackson-annotated
+> Scala case classes, Java-*shaped* for the internal serializer but not Java-*authored* (§13 R3). Even
+> the *tests* split along that line rather than
 > wholesale: the view-query test is Java (it holds the method ref), while the endpoint test is **Scala**
 > (`httpClient` + a `Class`-keyed publisher involve no method reference). Capability 6 is untouched.
 >

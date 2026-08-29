@@ -102,10 +102,11 @@ the capability 100% Java and taught less.
 
 ---
 
-## R3 — Must the view row type be Java-shaped? **YES — and it must also be *authored* in Java.**
+## R3 — Must the view row type be Java-shaped? **YES — but NOT authored in Java.**
 
-**Decision**: The row record and the multi-row wrapper are **Java records** in
-`com.gwgs.akkaagentic.todos.application`.
+**Decision (revised during implementation)**: the row and the multi-row wrapper are **Jackson-annotated
+Scala case classes** in `com.gwgs.akkaagentic.todos.application`. They were initially Java records, on a
+belief about the build that turned out to be a defect — see reason 2 below.
 
 **Two independent reasons, one confirmed by bytecode and one by the project's own rules:**
 
@@ -158,22 +159,37 @@ the capability 100% Java and taught less.
    `mvn clean verify` (105 unit + 101 integration). The hand-maintained descriptor is not regenerated
    (`-proc:none` still applies; `target/classes/META-INF` holds exactly our one file).
 
-   **Consequence — README §8's "never Java→Scala" is repealed as a hard rule.** Both directions compile
-   now. The row records stay Java because a Java record is the least-ceremony way to be Java-*shaped*
-   (no Jackson annotations required), not because Scala is forbidden. The language-of-consumer rule
-   survives as **ergonomics guidance** — which is exactly what it claimed to be before this feature
-   briefly and wrongly promoted it to a mechanical law.
+   **Mirror-image bug, also fixed.** `sendJavaToScalac=true` makes scalac joint-compile the Java sources
+   and emit their `.class` files. On a *clean* build javac then recompiles and overwrites them; on an
+   *incremental* build javac sees scalac's fresh output as up to date, skips, and scalac's classes ship —
+   **without `-parameters`**, so HTTP path binding fails at startup with *"the parameter [username] …
+   does not match the method parameter name [arg0]"*. This is the failure README §4 originally blamed on
+   `sendJavaToScalac=true`: real, but caused by scalac's javac not receiving `-parameters`, not by the
+   setting. Fixed with `scala-maven-plugin` `<javacArgs>-parameters</javacArgs>`, so whichever compiler
+   writes the Java class files last, they carry parameter names. **Both `mvn clean verify` and
+   `mvn verify` are green** (105 unit + 101 integration), verified separately.
 
-**Still untested:** whether the internal mapper accepts a Jackson-annotated Scala case class *as a view
-row*. The experiment failed at compile time before reaching the serializer, and once the build was fixed
-we did not re-run it — a Java record is the simpler way to be Java-shaped either way. Worth a follow-up
-if a future capability wants a Scala row.
+   **Consequence — the rows moved to Scala, and README §8's "never Java→Scala" is repealed as a hard
+   rule.** With both directions compiling, the reason for Java-authored rows evaporated, so
+   `TodoSummaryEntry`/`TodoSummaryEntries` are now Jackson-annotated **Scala** case classes (the
+   `HelpAnswer`/`GreetingAgent.Result` shape). The Java quarantine is therefore **exactly one class** —
+   `TodoSummaryEndpoint`, the only holder of a `ViewClient` method reference — which is what makes R1's
+   claim literal rather than approximate. The language-of-consumer rule survives as **ergonomics
+   guidance**, which is what it claimed to be before this feature briefly promoted it to a mechanical law.
+
+**SETTLED — the internal mapper does accept a Jackson-annotated Scala case class as a view row.** The
+first attempt failed at compile time before ever reaching the serializer; after the build fix the
+experiment was re-run to completion. All 13 cap-11 integration tests pass with Scala rows, and they
+genuinely exercise the serializer end to end (the updater writes a row → it is stored → queried back →
+mapped to HTTP). Requirements: explicit `@JsonCreator`/`@JsonProperty`, and `java.util.List` rather than
+a Scala `List` for the multi-row wrapper — i.e. exactly the Java-*shaped* rules cap-3's `HelpAnswer`
+already follows. So "view rows must be Java-shaped" holds; "view rows must be Java-authored" does not.
 
 **Consequence — a deliberate, documented deviation from AGENTS.md.** AGENTS.md says a View's query
-parameter/reply should be an inner record of the View. Here they are **top-level Java records beside**
-the Scala View. (The original reason — a Java endpoint cannot reference a Scala type — no longer holds
-after the build fix above; the rows stay top-level Java records because that is the least-ceremony way
-to satisfy the Java-*shaped* serializer requirement.) Recorded in plan.md's Complexity Tracking.
+parameter/reply should be an inner record of the View. Here they are **top-level Scala case classes
+beside** the Scala View: they must be Java-*shaped* for the internal serializer (so `@JsonCreator` /
+`@JsonProperty`, `java.util.List`), and a Scala View cannot nest them as Java-shaped inner records the
+way a Java View would. Recorded in plan.md's Complexity Tracking.
 
 ---
 

@@ -100,10 +100,11 @@ parity vs a direct `KnowledgeStore.retrieve`). And tool transport is invisible t
 inputSchema}` namespace; the MCP tool's description comes from the *server's* `tools/list`). **Verdict:
 the wall is a client-method-ref property end to end — every SDK surface that isn't one is Scala-friendly.**
 
-### Capability 11 — Views / read-model · **Scala component, Java caller**
+### Capability 11 — Views / read-model · **Scala throughout except one Java caller**
 The CQRS read side over cap-6's `TodoEntity`. `ViewClient` is method-ref-only (no `dynamicCall`), so the
 querying endpoint is Java — but the **View is Scala**, making this the first capability split *across* the
-component/caller boundary (see the sharpened statement above). Even the tests split along that line rather
+component/caller boundary (see the sharpened statement above). After the build fix below, the Java part is
+**a single class**: the endpoint. Everything else, view rows included, is Scala. Even the tests split along that line rather
 than wholesale: the view-query test is Java (it holds the method ref), the endpoint test is **Scala**
 (`httpClient` + a `Class`-keyed publisher hold none). Two findings that are *not* corollaries of the wall:
 
@@ -116,7 +117,7 @@ than wholesale: the view-query test is Java (it holds the method ref), the endpo
   member of `V` with a synthesized no-arg constructor — exactly the Java `static class` shape. So the
   updater *must* live in the companion object. **Generalization: wherever the SDK reflects on a class rather
   than dispatching through a client, ask what shape it expects, not just what it is keyed on.**
-- **A latent build defect, found in review — and the fix repealed "never Java→Scala".** Until cap-11,
+- **A latent build defect, found in review — and the fix shrank the Java quarantine to ONE class.** Until cap-11,
   `maven-compiler-plugin` (parent POM) ran before `scala-maven-plugin` (ours), so **javac ran before
   scalac** and no Java class could reference a Scala one. Cap-11's Java endpoint *must* name the Scala
   View to hold its method reference, so the capability **did not build from clean** — hidden throughout
@@ -125,10 +126,15 @@ than wholesale: the view-query test is Java (it holds the method ref), the endpo
   `scala-maven-plugin` to `process-resources` / `process-test-resources` with `sendJavaToScalac=true`, so
   scalac runs first (reading Java sources for signatures) and javac compiles last against its output.
   `-parameters` **survives under this order** — it was lost before precisely because scalac ran *second*
-  and overwrote javac's class files. Both directions compile now, so **§8's language-of-consumer rule is
-  ergonomics guidance, not a mechanical law**. *Lesson worth more than the finding:* **run `mvn clean
-  verify` before calling a capability done** — an incremental build can mask a broken one indefinitely,
-  and "all tests green" is not the same claim as "this builds".
+  and overwrote javac's class files. (Plus its mirror image: scalac's joint-compiled Java classes needed
+  `-parameters` too, or a *clean* build passes while an *incremental* one ships `arg0` and breaks path
+  binding. Both directions of the build are now verified separately.) **Consequence:** with Java→Scala
+  compiling, the view rows moved to Jackson-annotated **Scala** case classes, so the Java quarantine is
+  now **exactly the one class holding the method reference** — making the through-line above literal
+  rather than approximate. §8's language-of-consumer rule is **ergonomics guidance, not a mechanical
+  law**. *Lesson worth more than the finding:* **run `mvn clean verify` before calling a capability
+  done** — an incremental build can mask a broken one indefinitely, and "all tests green" is not the same
+  claim as "this builds".
 
 Cap-11 is also the project's **first entirely model-free capability** — no `TestModelProvider`, mocked or
 live, anywhere in its tests — so its correctness is fully deterministic offline, with no live-only caveat
@@ -142,7 +148,9 @@ like cap-6's recall or cap-7's delegation.
    through a *separate internal* mapper the public hook can't reach. So HTTP DTOs can be idiomatic
    `Option` case classes, but **anything component-serialized stays Java-shaped** (Jackson-annotated,
    nullable). Trying to make a component payload an annotation-free `Option` type fails at runtime
-   with *"Cannot construct instance of `scala.Option`"*.
+   with *"Cannot construct instance of `scala.Option`"*. **Java-shaped is not Java-authored**: an
+   annotated Scala case class satisfies it, confirmed for agent results and task results (caps 1/3/5)
+   and — as of cap-11 — for **view rows** too. Use `java.util.List`, not a Scala `List`.
 
 2. **Gemini: tools vs. structured output** (cap 1). Gemini rejects function calling combined with a
    JSON response mime type (`500 INVALID_ARGUMENT`). Use `responseAs` + a system-prompt JSON
