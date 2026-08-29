@@ -205,6 +205,40 @@ uncompilable.
 **predictable from one property** — whether the component's client offers a `dynamicCall` escape
 hatch.
 
+## Platform note: Akka's two persistence models (not an interop finding)
+
+Orthogonal to everything above — it holds identically for the Java capabilities — but it came up
+often enough while reading the runtime to be worth recording. Full write-up:
+[`docs/akka-persistence-models.md`](docs/akka-persistence-models.md).
+
+Akka offers exactly **two** entity state models, chosen by base class, with **no per-entity storage
+configuration**: `EventSourcedEntity<State, Event>` (persist events, derive state, full audit trail,
+Views consume `onEvent`) and `KeyValueEntity<State>` (store the latest state, no history, Views
+consume `onUpdate`). This repo uses the Key Value model for cap-6's `TodoEntity` and has never
+authored an Event Sourced Entity of its own — the only one we touch is the runtime's
+`SessionMemoryEntity`.
+
+**The finding: both are backed by the same event journal.** A Key Value Entity is *not* implemented
+on Akka Persistence's durable-state store, despite the name and the conceptual docs. The runtime's
+own `reference.conf` (`akka-runtime-core_2.13-1.6.15.jar`, `akka.runtime.value-entity.cleanup`) says
+so outright:
+
+> Key Value Entity is implemented with event sourcing where each event contains the current state.
+> Older events are cleaned up by a background process…
+
+Confirmed two ways: `akka-runtime-core` contains **no** `DurableState*` classes (though
+`akka-persistence-r2dbc` ships a full durable-state store the SDK just doesn't use), and no runtime
+config sets a durable-state plugin — only `akka.persistence.r2dbc.journal` and `.snapshot`. Storage
+is Akka Persistence R2DBC on H2 locally, PostgreSQL deployed. Corroborating detail: the
+`value-entity` block has no snapshot setting while `eventsourced-entity` has `snapshot-every = 100` —
+it needs none, since every event is already a complete state.
+
+Three practical consequences: **(a)** cap-11's View over a Key Value Entity works because there
+genuinely *is* an event stream underneath — state-change subscription isn't a bolted-on extra;
+**(b)** that history is still not yours (24-hour retention, active cleanup), so "no history" remains
+the right mental model at the API level; **(c)** every Key Value update writes the whole state, so
+write cost scales with state size, not change size.
+
 ---
 
 ## Not on this page: version-specific SDK bugs

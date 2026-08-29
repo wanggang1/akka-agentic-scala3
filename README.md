@@ -1071,7 +1071,10 @@ curl -i -X POST http://localhost:9000/request/alice \
 > **Where durability lives — session memory + a to-do entity, none of it in the agent.** The assistant is
 > stateless and short-lived; each turn the runtime replays the last N messages from the runtime-owned
 > `SessionMemoryEntity` (keyed by username) and the to-dos live in a `TodoEntity` (`KeyValueEntity`, keyed
-> by username). Neither is persisted by our code. To observe history/to-dos surviving a **local** restart,
+> by username). Neither is persisted by our code. Note the two entities use the **two different state
+> models** — `SessionMemoryEntity` is event sourced, `TodoEntity` is key/value; see
+> [`docs/akka-persistence-models.md`](docs/akka-persistence-models.md) for how to choose between them and
+> what actually backs each. To observe history/to-dos surviving a **local** restart,
 > enable the on-disk store (as with cap-3/cap-5):
 >
 > ```shell
