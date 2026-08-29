@@ -61,13 +61,20 @@
                       binding. cap-1 (Scala) and cap-2 (Java) have no cross-references, so scalac
                       never needs the Java sources — leave Java entirely to maven-compiler-plugin.
                     -->
-                    <sendJavaToScalac>false</sendJavaToScalac>
+                    <sendJavaToScalac>true</sendJavaToScalac>
                 </configuration>
                 <executions>
                     <execution>
                         <id>scala-compile</id>
+                        <phase>process-resources</phase>
                         <goals>
                             <goal>compile</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>scala-test-compile</id>
+                        <phase>process-test-resources</phase>
+                        <goals>
                             <goal>testCompile</goal>
                         </goals>
                     </execution>
