@@ -1,10 +1,10 @@
 # Findings — Scala 3 on the Java-first Akka SDK
 
-What building **four agentic capabilities** in Scala 3 on the Java-first Akka SDK taught us,
+What building **eleven capabilities** in Scala 3 on the Java-first Akka SDK taught us,
 consolidated into one page. The per-capability design detail lives in [`specs/`](specs/); the
-day-to-day interop workarounds live in [`README.md`](README.md) "Scala interop notes" §1–6; the
+day-to-day interop workarounds live in [`README.md`](README.md) "Scala interop notes" §1–13; the
 status table lives in [`ROADMAP.md`](ROADMAP.md). **This page is the synthesis** — the single
-finding that explains all four outcomes, and the rubric it yields.
+finding that explains every outcome, and the rubric it yields.
 
 ## The one finding that explains everything: the `dynamicCall` escape hatch
 
@@ -13,8 +13,10 @@ distinction predicted the language of every capability.
 
 A Scala lambda compiles to a synthetic `$anonfun$N`. The SDK's `impl.client.MethodRefResolver`
 needs a `Serializable` lambda whose `implMethodName` **equals the target method name**, so a Scala
-lambda never resolves. The only workaround is a **string-keyed `dynamicCall(id)`** overload — and
-only two of the four clients have one.
+lambda never resolves. The escape hatch is a **string-keyed `dynamicCall(id)`** overload — and a
+jar-wide sweep (cap-11 R1) finds exactly **one** client that has it: the agent client. Every other
+Scala-callable row below is friendly for a *different* reason — its API was never keyed on a method
+reference in the first place (`Class` references, `Task` constants, a URL string).
 
 | Client | Resolves target by | Scala-callable? |
 |--------|--------------------|-----------------|
