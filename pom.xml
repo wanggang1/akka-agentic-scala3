@@ -62,6 +62,17 @@
                       never needs the Java sources — leave Java entirely to maven-compiler-plugin.
                     -->
                     <sendJavaToScalac>true</sendJavaToScalac>
+                    <!--
+                      scalac joint-compiles the Java sources and emits their .class files too. Those
+                      must ALSO carry -parameters, because on an INCREMENTAL build javac sees
+                      scalac's fresh output as up to date, skips recompiling, and scalac's classes are
+                      what ship. Without this, `mvn verify` (no clean) fails at startup with
+                      "path expression [/x/{id}] does not match the method parameter name [arg0]"
+                      while `mvn clean verify` passes — see specs/013 research R3.
+                    -->
+                    <javacArgs>
+                        <javacArg>-parameters</javacArg>
+                    </javacArgs>
                 </configuration>
                 <executions>
                     <execution>
