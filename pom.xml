@@ -61,13 +61,31 @@
                       binding. cap-1 (Scala) and cap-2 (Java) have no cross-references, so scalac
                       never needs the Java sources — leave Java entirely to maven-compiler-plugin.
                     -->
-                    <sendJavaToScalac>false</sendJavaToScalac>
+                    <sendJavaToScalac>true</sendJavaToScalac>
+                    <!--
+                      scalac joint-compiles the Java sources and emits their .class files too. Those
+                      must ALSO carry -parameters, because on an INCREMENTAL build javac sees
+                      scalac's fresh output as up to date, skips recompiling, and scalac's classes are
+                      what ship. Without this, `mvn verify` (no clean) fails at startup with
+                      "path expression [/x/{id}] does not match the method parameter name [arg0]"
+                      while `mvn clean verify` passes — see specs/013 research R3.
+                    -->
+                    <javacArgs>
+                        <javacArg>-parameters</javacArg>
+                    </javacArgs>
                 </configuration>
                 <executions>
                     <execution>
                         <id>scala-compile</id>
+                        <phase>process-resources</phase>
                         <goals>
                             <goal>compile</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>scala-test-compile</id>
+                        <phase>process-test-resources</phase>
+                        <goals>
                             <goal>testCompile</goal>
                         </goals>
                     </execution>

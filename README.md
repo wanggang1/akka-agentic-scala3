@@ -101,6 +101,20 @@ src/main/scala/com/gwgs/akkaagentic/mcpclient/api/         # McpClientEndpoint (
 # scripts a real `retrieve` round-trip) — a positive contrast to cap-7's D9. Reuses cap-9's server; no
 # ACL edit needed (a same-service /mcp call passes the INTERNET-only ACL).
 
+# Capability 11 — Scala View + Java caller (CQRS read model; see "Scala interop notes" §13)
+src/main/scala/com/gwgs/akkaagentic/todos/domain/       # TodoSummary (pure counts derivation)
+src/main/scala/com/gwgs/akkaagentic/todos/application/  # TodoSummaryView (View + companion-object TableUpdater)
+src/main/scala/com/gwgs/akkaagentic/todos/application/  # + TodoSummaryEntry, TodoSummaryEntries (Java-SHAPED rows)
+src/main/java/com/gwgs/akkaagentic/todos/api/            # TodoSummaryEndpoint (GET /todo-summaries/..., read-only)
+# Note: the first capability split across the COMPONENT/CALLER boundary. The View itself is SCALA — its
+# TableUpdater lives in the companion `object` so it compiles to the public-static, zero-arg nested class
+# the SDK's getDeclaredClasses()+getDeclaredConstructor() reflection needs (a bytecode-SHAPE requirement,
+# a new hazard class). Only the querying ENDPOINT is Java, because ViewClient is method-ref-only with no
+# dynamicCall (§13 R1) — and it is the ONLY Java class here: the rows are Jackson-annotated Scala case
+# classes (Java-shaped for the internal serializer, not Java-authored). Read side over cap-6's TodoEntity — cap-6 is
+# untouched, and to-dos are still written ONLY through the assistant. NO model anywhere in this
+# capability: the project's first entirely model-free feature, tests included. New descriptor key `view`.
+
 src/main/resources/application.conf                 # default model-provider config
 src/test/{scala,java}/com/gwgs/akkaagentic/...       # tests (TestModelProvider, no live model)
 ```
@@ -180,8 +194,20 @@ writing components in Scala needs explicit workarounds:
    therefore Java, fully decoupled from the Scala capability 1 — which stays put and unchanged.
    Mixing Java into this Scala module needs three `pom.xml` settings (annotation processor off
    via `-proc:none` so it can't overwrite the hand-maintained descriptor; `-parameters` restored
-   for HTTP path binding; `scala-maven-plugin` `sendJavaToScalac=false` so scalac doesn't
-   joint-compile the Java without `-parameters`).
+   for HTTP path binding; and a **build order that lets each compiler see the other's sources**).
+
+   > **Superseded by capability 11 — the third setting was inverted.** This section originally
+   > prescribed `sendJavaToScalac=false`, on the reasoning that scalac would joint-compile the Java
+   > *without* `-parameters` and clobber maven-compiler-plugin's output. That was true only because
+   > scalac ran **after** javac (`maven-compiler-plugin` comes from the parent POM and so runs first
+   > within the `compile` phase). The cost was that **no Java class could reference a Scala one** —
+   > which cap-11 hit head-on, since a Java endpoint must name the Scala View class it queries. The
+   > build now binds `scala-maven-plugin` to **`process-resources`** (and `testCompile` to
+   > `process-test-resources`) with **`sendJavaToScalac=true`**, so scalac runs first and reads the
+   > Java sources for signatures, then javac compiles the Java against scalac's output *last* — which
+   > is exactly why `-parameters` now survives (javac writes the final class files, verified via the
+   > `MethodParameters` attribute on both Java and Scala classes). **Both directions now compile**,
+   > and `mvn clean verify` is green. See §13.
 
 5. **The Autonomous Agent has *no* method-reference wall — back to Scala.** Capability 3 (the
    autonomous help-desk agent, `com.gwgs.akkaagentic.assistant.*`) returns to **Scala**, because the
@@ -518,6 +544,86 @@ writing components in Scala needs explicit workarounds:
     the same reason: neither authors a `ComponentClient` method reference.** See specs/012 research R1–R6 and
     README's cap-10 usage section below.
 
+13. **A View is the first capability split *across* the component/caller boundary — the component stays
+    Scala, only the caller is Java.** Capability 11 (the to-do read model,
+    `com.gwgs.akkaagentic.todos.*`) is the CQRS **read side** over cap-6's per-username `TodoEntity`: one
+    summary row per assistant, refreshed by the runtime on every state change, answering the cross-user
+    question the write side cannot ("who still has open work?"). Every previous encounter with the
+    method-ref wall pulled the **whole component** into Java (cap-2's Workflow, cap-6's entity). Here it
+    takes only the caller — which sharpens the through-line from "some components are Java" to the more
+    precise **"the wall is a property of the *client*, and it travels no further than the class that holds
+    the method reference."** Five findings:
+
+    - **R1 — `ViewClient` is method-reference-only, so the querying endpoint is Java (bytecode-verified).**
+      It exposes only `method(akka.japi.function.Function<T, QueryEffect<R>>)` / `Function2` overloads and
+      their `stream` twins, with **no `dynamicCall`** and no String/query-name form — structurally identical
+      to `KeyValueEntityClient`, and `akka.japi.function.Function extends java.io.Serializable`, so
+      resolution goes through `SerializedLambda`. A Scala lambda compiles to a synthetic `$anonfun` and
+      never resolves. A jar-wide sweep confirms `dynamicCall(String)` exists on **`AgentClientInSession`
+      only** — the Agent/AutonomousAgent clients remain the sole escape hatch. So
+      [`TodoSummaryEndpoint`](src/main/java/com/gwgs/akkaagentic/todos/api/TodoSummaryEndpoint.java) is
+      Java, exactly like cap-2's workflow caller and cap-6's `TodoTools`.
+    - **R2 — the NEW result, and a new *class* of hazard: the View stays Scala, but the `TableUpdater`
+      must live in the companion `object`.** Every earlier finding turned on whether an API was keyed on a
+      `Class`/`String` (Scala-fine) or a Java method reference (Scala-impossible). This one turns on
+      **bytecode shape**. The SDK finds updaters with `Class.getDeclaredClasses()` and builds them with
+      `getDeclaredConstructor()` (verified in `ViewDescriptorFactory$UpdateHandlerImpl` as
+      `iconst_0; anewarray Class` — i.e. *zero-arg*) + `newInstance()`. Scala's two nesting forms compile
+      differently, and only one fits:
+
+      | | `class V { class U }` (inner) | `object V { class U }` (companion) |
+      |---|---|---|
+      | Found by `getDeclaredClasses()` | yes | yes — **`public static`** |
+      | Constructor | `U(V)` + a `private final $outer` field | **`U()`**, no-arg |
+      | Verdict | **unconstructable → runtime failure** | matches the Java `static class` shape |
+
+      Confirmed in the shipped artifact, not only in the spike — `javap -v TodoSummaryView.class` reports
+      `public static #14= #13 of #2; // Updater=...TodoSummaryView$Updater of class ...TodoSummaryView`,
+      and `javap -p` shows a real `public TodoSummaryView$Updater()`. **Do not "simplify" the updater back
+      into the class body.** Watch for this shape question wherever the SDK reflects rather than dispatches.
+    - **R3 — the "Java→Scala is impossible" claim was a *build defect*, and fixing it shrank the Java
+      quarantine to one class.** View rows cross the SDK's **internal** serializer — the §3 two-mapper
+      boundary — so they must be Java-*shaped*. This capability originally took that to mean
+      Java-*authored*, because a Java class could not reference a Scala one: with `maven-compiler-plugin`
+      (parent POM) running before `scala-maven-plugin` (ours), **javac ran before scalac**.
+
+      **That was a latent defect, not a language boundary, and it was caught in PR review.** Cap-11's Java
+      endpoint *must* name the Scala `TodoSummaryView` to hold its method reference, so the capability was
+      broken from clean the moment it was written — invisible during development because incremental builds
+      reused a `target/classes` that already held the Scala output. `mvn clean compile` failed; the IDE
+      flagged it and the build did not, because the build was never run clean. **Fix**: bind
+      `scala-maven-plugin` to `process-resources` / `process-test-resources` with `sendJavaToScalac=true`,
+      plus `javacArgs = -parameters` so the Java classes scalac joint-compiles carry parameter names too
+      (without that, a *clean* build passes and an *incremental* one ships `arg0` and breaks HTTP path
+      binding — the mirror-image bug, also fixed).
+
+      **Consequence — the rows are Scala, and §8's "never Java→Scala" is repealed as a hard rule.** With
+      both directions compiling, `TodoSummaryEntry`/`TodoSummaryEntries` are Jackson-annotated **Scala**
+      case classes (the `HelpAnswer` shape), verified through the real serializer by all 13 cap-11
+      integration tests. So the Java quarantine is now **exactly one class** — `TodoSummaryEndpoint`, the
+      only place a `ViewClient` method reference is held — which is what makes this section's claim
+      *literal* rather than approximate. The language-of-consumer rule survives only as **ergonomics
+      guidance**, which is what it was always claimed to be before this feature briefly promoted it to a
+      mechanical law.
+
+    - **R6 — a keyed single-row query returns `Optional`, empty on no match (settled empirically).** This
+      was deliberately left **open with a decided fallback** rather than guessed, and resolved on the first
+      run of the view integration test: `QueryEffect[Optional[TodoSummaryEntry]]` is supported on SDK
+      3.6.3, and an unknown key yields `Optional.empty` — not `null`, not a throw. So `404` (no row) and
+      `200 {0,0,0}` (a user who deleted everything) stay cleanly distinguishable. The wrapper-shape
+      fallback was never needed. (Descriptor key is **`view`**, from `ComponentType$`'s constant pool.)
+    - **The test surface is *not* claimed by the wall — and this capability needs no model at all.** Only
+      the test that holds a `ViewClient` method ref is Java
+      ([`TodoSummaryViewIntegrationTest`](src/test/java/com/gwgs/akkaagentic/todos/application/TodoSummaryViewIntegrationTest.java));
+      the endpoint test stays **Scala**, because `httpClient` plus the `Class`-keyed
+      `withKeyValueEntityIncomingMessages` publisher involve no method reference — a sharper outcome than
+      cap-4, where the test *itself* was forced into Java. And cap-11 is the project's **first entirely
+      model-free capability**: no `TestModelProvider`, mocked or live, anywhere in its tests. The
+      projection is driven by publishing entity state directly, so correctness is fully deterministic
+      offline — no live-only caveat, unlike cap-6's recall or cap-7's delegation.
+
+    No `pom.xml` change was needed. See specs/013 research R1–R6.
+
 ## Build
 
 ```shell
@@ -526,6 +632,42 @@ mvn compile
 
 The build compiles Scala 3 via the `scala-maven-plugin` configured in `pom.xml`.
 
+**Compile order is load-bearing.** `scala-maven-plugin` is bound to `process-resources` (and its
+`testCompile` to `process-test-resources`) with `sendJavaToScalac=true`, so **scalac runs before javac**:
+scalac reads the Java sources for signatures, then javac compiles the Java against scalac's output. That
+is what makes *both* directions resolve — Scala→Java and Java→Scala. It also carries `-parameters` twice
+over (on `maven-compiler-plugin` *and* in `scala-maven-plugin`'s `javacArgs`), because whichever compiler
+writes a Java class file last must emit parameter names or the SDK's HTTP path binding fails at startup
+with *"does not match the method parameter name [arg0]"*. Changing these phases or flags breaks one
+direction or the other — see "Scala interop notes" §13 R3.
+
+### Working in VS Code (Metals) — `mvn clean` wipes Metals' compiled output
+
+Metals compiles this project with Bloop, and Bloop's `classesDir` is **`target/classes`** — the same
+directory Maven uses. So **`mvn clean` (or `mvn clean verify`, `mvn clean install`) deletes Metals'
+output from under it.** Bloop's incremental analysis still believes those class files exist, so until it
+recompiles you can see stale or bogus errors in the editor on code that builds perfectly from the command
+line.
+
+It is harmless and self-correcting — but if the editor disagrees with a green `mvn verify` right after a
+clean build, that's usually why. To resync, trigger a recompile: save a file in the affected module, or
+run **`Metals: Restart build server`** / **`Metals: Import build`** from the command palette
+(`Cmd+Shift+P`). Nothing needs deleting.
+
+Two things worth knowing before you go cache-hunting, both learned the hard way:
+
+- **A persistent IDE error on code that `mvn verify` accepts is worth investigating, not dismissing.**
+  Capability 11 shipped a build that failed `mvn clean compile` while every incremental `mvn verify`
+  passed — the editor was right and the build was wrong. **Verify with `mvn clean verify`, not just
+  `mvn verify`**, before trusting a green run: an incremental build reuses `target/classes` and can mask
+  a genuinely broken one.
+- **Check which language server is talking.** A Java language server that doesn't understand Scala (e.g.
+  the Oracle `Java` extension) will report `cannot find symbol` on every Java file that references a
+  Scala class — here, the one Java endpoint that names the Scala View — because it never compiles
+  `src/main/scala`. Metals handles both languages in this module, so disabling such an extension for this
+  workspace resolves it. Error wording tells them apart: `cannot find symbol` / `symbol: variable` is
+  **javac**; *"X cannot be resolved"* is the **Eclipse** compiler.
+
 ## Test
 
 ```shell
@@ -533,7 +675,9 @@ mvn verify
 ```
 
 Tests register a `TestModelProvider`, so **no API key or network is required** — results are
-deterministic.
+deterministic. Capability 11 uses no model at all, mocked or live.
+
+Prefer **`mvn clean verify`** as the final check before calling work done (see the note above).
 
 ## Run locally
 
@@ -927,7 +1071,10 @@ curl -i -X POST http://localhost:9000/request/alice \
 > **Where durability lives — session memory + a to-do entity, none of it in the agent.** The assistant is
 > stateless and short-lived; each turn the runtime replays the last N messages from the runtime-owned
 > `SessionMemoryEntity` (keyed by username) and the to-dos live in a `TodoEntity` (`KeyValueEntity`, keyed
-> by username). Neither is persisted by our code. To observe history/to-dos surviving a **local** restart,
+> by username). Neither is persisted by our code. Note the two entities use the **two different state
+> models** — `SessionMemoryEntity` is event sourced, `TodoEntity` is key/value; see
+> [`docs/akka-persistence-models.md`](docs/akka-persistence-models.md) for how to choose between them and
+> what actually backs each. To observe history/to-dos surviving a **local** restart,
 > enable the on-disk store (as with cap-3/cap-5):
 >
 > ```shell
@@ -1303,6 +1450,92 @@ curl -i -X POST http://localhost:9000/grounded-ask \
 > against a direct `KnowledgeStore.retrieve`. *Verified live* (Ollama `qwen3:8b`): the in-corpus answer
 > reconstructed the corpus's own interop findings (un-hallucinatable → the tool genuinely ran), the
 > out-of-corpus reply declined citing *"the retrieved passages"*, and a blank question returned `400`.
+
+### Capability 11 — to-do read model (`GET /todo-summaries/...`, read-only)
+
+Capability 11 is the CQRS **read side** over capability 6's to-do lists. Each assistant's `TodoEntity`
+holds one user's list and — being an entity — is reachable only by its own id, so *"across all
+assistants, who still has open work?"* is a question the write side simply cannot answer. A **View**
+projects every entity state change into one summary row per username, which makes both a keyed lookup
+and the cross-user query a single indexed read.
+
+**Nothing here writes.** To-dos are still created and completed **only** through cap-6's assistant
+(`POST /request/{username}`); this surface is `GET`-only by design. It is also the project's first
+capability with **no model in the request path at all** — no LLM is involved in reading, and its entire
+test suite runs with no `TestModelProvider`, mocked or live.
+
+```shell
+# Seed through the assistant — the only write path (needs a running Ollama; see "Run locally")
+curl -s -X POST http://localhost:9000/request/alice \
+  -H "Content-Type: application/json" -d '{"message":"add a to-do to buy milk"}'
+curl -s -X POST http://localhost:9000/request/alice \
+  -H "Content-Type: application/json" -d '{"message":"add a to-do to call the dentist"}'
+curl -s -X POST http://localhost:9000/request/alice \
+  -H "Content-Type: application/json" -d '{"message":"mark to-do 2 as done"}'
+```
+
+**Keyed lookup** — one assistant's standing:
+
+```shell
+curl -s http://localhost:9000/todo-summaries/by-user/alice
+# {"username":"alice","total":2,"open":1,"completed":1}
+```
+
+**Cross-user query** — every assistant still holding open work. This is the one the entity cannot
+answer. Users whose items are all completed are absent; row order is unspecified (no `ORDER BY`):
+
+```shell
+curl -s http://localhost:9000/todo-summaries/with-open-work
+# {"summaries":[{"username":"alice","total":2,"open":1,"completed":1},
+#               {"username":"bob","total":1,"open":1,"completed":0}]}
+```
+
+An empty result is a **success**, not a `404` — "nobody has open work" is a valid answer:
+
+```shell
+curl -i -s http://localhost:9000/todo-summaries/with-open-work
+# 200 OK — {"summaries":[]}
+```
+
+**Three distinct answers on the keyed lookup**, which must not be collapsed:
+
+```shell
+curl -i -s http://localhost:9000/todo-summaries/by-user/nobody
+# 404 Not Found            — no such assistant
+
+curl -s http://localhost:9000/todo-summaries/by-user/carol
+# 200 {"username":"carol","total":0,"open":0,"completed":0}
+#                          — a real assistant who deleted everything: "nothing to do" != "no such user"
+
+curl -i -s "http://localhost:9000/todo-summaries/by-user/%20%20"
+# 400 Bad Request          — username must not be blank (no query runs)
+```
+
+> **Eventual consistency — read-after-write may briefly lag.** A View is a projection, not a synchronous
+> read of the entity: a query issued immediately after a change may still return the previous counts (or
+> no row yet) for a short window before converging. This is inherent to the read side, not a defect —
+> retry, or poll, rather than treating the first response as final. Every cap-11 test wraps its
+> assertions in `Awaitility` for exactly this reason.
+>
+> **Where the interop line falls, and how little the wall took.** The **View component itself is Scala**
+> — with its `TableUpdater` in the companion `object`, the one placement that compiles to the
+> public-static, zero-arg nested class the SDK's reflection can instantiate (§13 R2). Only the
+> **querying endpoint** is Java, because `ViewClient` is method-reference-only with no `dynamicCall`
+> (§13 R1) — and it is the **only** Java class in the capability: the row records are Jackson-annotated
+> Scala case classes, Java-*shaped* for the internal serializer but not Java-*authored* (§13 R3). Even
+> the *tests* split along that line rather than
+> wholesale: the view-query test is Java (it holds the method ref), while the endpoint test is **Scala**
+> (`httpClient` + a `Class`-keyed publisher involve no method reference). Capability 6 is untouched.
+>
+> *Verified live* (Ollama `qwen3:8b`), the whole flow end to end. Seeding **only** through the assistant:
+> `qs-alice` got two to-dos with the second completed, `qs-bob` one, `qs-carol` one. The keyed lookup then
+> returned `{"username":"qs-alice","total":2,"open":1,"completed":1}` and `/with-open-work` listed all
+> three. Completing carol's only item and deleting bob's produced exactly the distinctions this section
+> claims: carol `200 {total:1,open:0,completed:1}` — **still findable by key but absent from
+> `/with-open-work`**; bob `200 {0,0,0}` — an emptied list, **not** `404`; an unknown `qs-nobody` `404`;
+> a whitespace username `400 username must not be blank`. The open-work query then correctly narrowed to
+> alice alone. Confirms the projection tracks adds, completions **and** deletions, and that "nothing to
+> do", "no such user" and "malformed request" stay three separate answers.
 
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.
