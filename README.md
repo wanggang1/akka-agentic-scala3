@@ -632,6 +632,42 @@ mvn compile
 
 The build compiles Scala 3 via the `scala-maven-plugin` configured in `pom.xml`.
 
+**Compile order is load-bearing.** `scala-maven-plugin` is bound to `process-resources` (and its
+`testCompile` to `process-test-resources`) with `sendJavaToScalac=true`, so **scalac runs before javac**:
+scalac reads the Java sources for signatures, then javac compiles the Java against scalac's output. That
+is what makes *both* directions resolve — Scala→Java and Java→Scala. It also carries `-parameters` twice
+over (on `maven-compiler-plugin` *and* in `scala-maven-plugin`'s `javacArgs`), because whichever compiler
+writes a Java class file last must emit parameter names or the SDK's HTTP path binding fails at startup
+with *"does not match the method parameter name [arg0]"*. Changing these phases or flags breaks one
+direction or the other — see "Scala interop notes" §13 R3.
+
+### Working in VS Code (Metals) — `mvn clean` wipes Metals' compiled output
+
+Metals compiles this project with Bloop, and Bloop's `classesDir` is **`target/classes`** — the same
+directory Maven uses. So **`mvn clean` (or `mvn clean verify`, `mvn clean install`) deletes Metals'
+output from under it.** Bloop's incremental analysis still believes those class files exist, so until it
+recompiles you can see stale or bogus errors in the editor on code that builds perfectly from the command
+line.
+
+It is harmless and self-correcting — but if the editor disagrees with a green `mvn verify` right after a
+clean build, that's usually why. To resync, trigger a recompile: save a file in the affected module, or
+run **`Metals: Restart build server`** / **`Metals: Import build`** from the command palette
+(`Cmd+Shift+P`). Nothing needs deleting.
+
+Two things worth knowing before you go cache-hunting, both learned the hard way:
+
+- **A persistent IDE error on code that `mvn verify` accepts is worth investigating, not dismissing.**
+  Capability 11 shipped a build that failed `mvn clean compile` while every incremental `mvn verify`
+  passed — the editor was right and the build was wrong. **Verify with `mvn clean verify`, not just
+  `mvn verify`**, before trusting a green run: an incremental build reuses `target/classes` and can mask
+  a genuinely broken one.
+- **Check which language server is talking.** A Java language server that doesn't understand Scala (e.g.
+  the Oracle `Java` extension) will report `cannot find symbol` on every Java file that references a
+  Scala class — here, the one Java endpoint that names the Scala View — because it never compiles
+  `src/main/scala`. Metals handles both languages in this module, so disabling such an extension for this
+  workspace resolves it. Error wording tells them apart: `cannot find symbol` / `symbol: variable` is
+  **javac**; *"X cannot be resolved"* is the **Eclipse** compiler.
+
 ## Test
 
 ```shell
@@ -639,7 +675,9 @@ mvn verify
 ```
 
 Tests register a `TestModelProvider`, so **no API key or network is required** — results are
-deterministic.
+deterministic. Capability 11 uses no model at all, mocked or live.
+
+Prefer **`mvn clean verify`** as the final check before calling work done (see the note above).
 
 ## Run locally
 
