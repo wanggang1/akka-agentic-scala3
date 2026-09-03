@@ -7,7 +7,7 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 ## Where we are
 
-> **You are here:** Feature 11 (Views / read-model) — **✅ implemented, tests green; PR not yet opened**
+> **You are here:** Feature 11 (Views / read-model) — **✅ merged to `main` 2026-08-29 (PR #23)**
 > ([`specs/013-views-read-model`](specs/013-views-read-model/)). The CQRS **read side** over cap-6's
 > per-username `TodoEntity`: a `View` projects every entity state change into one summary row per assistant
 > (`total`/`open`/`completed`), serving both a keyed lookup and the cross-user *"who still has open work?"*
@@ -24,13 +24,23 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 > the `TableUpdater` must live in the **companion `object`**, not as an inner class — the SDK instantiates
 > updaters via `getDeclaredClasses()` + a **zero-arg** `getDeclaredConstructor()`, and a Scala inner class has
 > only `U($outer)`. This is the first finding that turns on **bytecode shape** rather than on a `Class`- vs
-> method-ref-keyed API. **(R3, corrected by experiment)** the row records are Java because **javac runs before
-> scalac** in this build (parent-POM plugin ordering), so no Java class can reference a Scala one — README §8's
-> "never Java→Scala" is a *mechanical* build constraint, not a style preference. **(R6, settled empirically)**
+> method-ref-keyed API. **(R3, corrected in PR review)** "Java can't reference
+> Scala" was a **latent build defect**, not a language boundary: `maven-compiler-plugin` (parent POM) ran
+> before `scala-maven-plugin` (ours), so javac ran first and the capability **did not build from clean** —
+> masked throughout development by incremental builds reusing a `target/classes` that already held the Scala
+> output. Fix: bind `scala-maven-plugin` to `process-resources` / `process-test-resources` with
+> `sendJavaToScalac=true`, so scalac runs first and javac compiles last against its output (which is also why
+> `-parameters` now survives). **Both directions compile**, the view rows are Jackson-annotated **Scala** case
+> classes, and the Java quarantine is **exactly one class** — the endpoint holding the method reference. README
+> §8's "never Java→Scala" is repealed as a mechanical law and survives only as ergonomics guidance.
+> **(R6, settled empirically)**
 > a keyed query returns `Optional`, empty on no match, so `404` and an all-zero `200` stay distinguishable.
 >
-> **⏭️ Next:** open the cap-11 PR, then the roadmap is open again — remaining candidates: guardrails,
-> evaluation/LLM-judge, streaming.
+> **⏭️ Next:** undecided — the roadmap is open again. Remaining candidates: **guardrails** (wraps a model
+> call in SDK-registered machinery, so it re-tests "`Class`-keyed or method-ref-keyed?" on a new surface),
+> **evaluation / LLM-judge** (attacks cap-8's soft-grounding gap, but likely Scala-clean → low interop
+> novelty), **streaming** (highest novelty *and* risk — `StreamEffect` / Scala `Source` interop is genuinely
+> unknown).
 >
 > Capabilities 1–10 are **✅ done and merged**; 5–11 were exploratory follow-ups beyond the original four.
 >
@@ -57,7 +67,7 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 | 8 | **RAG-grounded Q&A** — a `DocsAgent` answers grounded only in passages retrieved by in-process semantic embeddings (all-MiniLM ONNX, in-jar, offline) from a canned corpus, or honestly declines; custom-dependency DI is Scala-clean; retrieval is deterministic → offline-testable; synchronous HTTP | [`specs/010-rag-grounded-qa`](specs/010-rag-grounded-qa/) | ✅ Done — merged (PR #17) |
 | 9 | **MCP server** — an `@McpEndpoint` at `/mcp` exposes cap-8's retrieval as a JSON-RPC `retrieve` tool + a corpus-sources resource; **Scala-clean** (endpoint, reflective dispatch — no method-ref wall; new `mcp-endpoint` key); a `@McpTool` must return String (throw→isError); fixed top-K 3 (SDK-3.6.0 optional-param bug). Server-side only | [`specs/011-mcp-knowledge-server`](specs/011-mcp-knowledge-server/) | ✅ Done — merged (PR #18) |
 | 10 | **MCP client** — a request-based `McpClientAgent` grounds via the **remote `retrieve` MCP tool** of this service's own cap-9 `/mcp` (agentic RAG — the model decides when to retrieve); closes the loop in-process, fully offline; `POST /grounded-ask`. **Scala-clean** — `.mcpTools(RemoteMcpTools.fromService(...))` is a URL-string builder, no method-ref wall; no cap-9 ACL edit; no citations (model owns retrieval). The tool loop **is** offline-testable (real `retrieve` round-trip via `TestModelProvider`) — a positive contrast to cap-7 D9 | [`specs/012-mcp-client`](specs/012-mcp-client/) | ✅ Done — merged (PR #19) |
-| 11 | **Views / read-model** — a `View` projects cap-6's `TodoEntity` state into one summary row per username; keyed lookup + the cross-user "who has open work" query an entity can't answer; `GET /todo-summaries/...`, read-only, **no model anywhere** (first fully model-free capability). **First split across the component/caller boundary:** the View is **Scala** (its `TableUpdater` in the companion `object` — a **bytecode-shape** requirement, a new hazard class), only the querying endpoint + row records are Java (`ViewClient` is method-ref-only; javac runs before scalac). Keyed query returns `Optional`; new `view` descriptor key | [`specs/013-views-read-model`](specs/013-views-read-model/) | ✅ Implemented — PR pending |
+| 11 | **Views / read-model** — a `View` projects cap-6's `TodoEntity` state into one summary row per username; keyed lookup + the cross-user "who has open work" query an entity can't answer; `GET /todo-summaries/...`, read-only, **no model anywhere** (first fully model-free capability). **First split across the component/caller boundary:** the View is **Scala** (its `TableUpdater` in the companion `object` — a **bytecode-shape** requirement, a new hazard class), only the querying **endpoint** is Java (`ViewClient` is method-ref-only) — the rows are Jackson-annotated **Scala** case classes, once a build-order fix made Java→Scala references compile. Keyed query returns `Optional`; new `view` descriptor key | [`specs/013-views-read-model`](specs/013-views-read-model/) | ✅ Done — merged (PR #23) |
 
 **Status legend:** ✅ done · 📋 planned (spec written) · 🚧 in progress · ⬜ not started
 

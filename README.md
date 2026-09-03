@@ -347,6 +347,11 @@ writing components in Scala needs explicit workarounds:
      clean. Verified empirically that Scala→Java compiles cleanly in this mixed build. The two-mapper
      boundary (§3) still holds: the agent's `Request` is Java-shaped (crosses the internal mapper), the HTTP
      body is idiomatic `Option`-typed Scala.
+
+     > **Softened by capability 11 — "never Java→Scala" was a build defect, not a rule.** Java *could* not
+     > reference Scala here only because javac ran before scalac; cap-11 fixed the plugin ordering and both
+     > directions now compile (§13 R3). The language-of-consumer rule survives as **ergonomics guidance** —
+     > which is all it was ever claimed to be — not as a mechanical constraint.
    - **This is the SDK-"discouraged" agent-chaining path, taken deliberately (research R7).** The docs steer
      multi-agent flows toward Workflows — but a Workflow would force the whole capability into Java (§4) and
      couldn't do **dynamic by-username targeting** (the target is a runtime string, not a compile-time
