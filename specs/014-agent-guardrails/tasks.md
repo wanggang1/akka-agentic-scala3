@@ -61,12 +61,12 @@ rule's explanation, and no scripted model response is consumed.
 
 ### Tests for User Story 1
 
-- [ ] T008 [P] [US1] Write `src/test/scala/com/gwgs/akkaagentic/docs/api/GuardrailBlockingIntegrationTest.scala` with the request-side cases: a jailbreak-style question returns `422` with `blocked = true` and the SDK rule's explanation, and `rule`/`category` of `"unknown"` — SC-001 as relaxed on 2026-09-04, because the SDK never hands the rule's name or category to application code (research divergence #4), and **no `TestModelProvider` response is scripted** so any model call would fail the test (FR-001)
-- [ ] T009 [P] [US1] Extend `src/test/scala/com/gwgs/akkaagentic/docs/api/DocsEndpointIntegrationTest.scala` with the regression guard: an ordinary in-corpus question still returns `200` with the same answer and `citedSources`, and a blank question still returns `400` before any rule runs (SC-002, FR-009)
+- [x] T008 [P] [US1] Write `src/test/scala/com/gwgs/akkaagentic/docs/api/GuardrailBlockingIntegrationTest.scala` with the request-side cases: a jailbreak-style question returns `422` with `blocked = true` and the SDK rule's explanation, and `rule`/`category` of `"unknown"` — SC-001 as relaxed on 2026-09-04, because the SDK never hands the rule's name or category to application code (research divergence #4), and **no `TestModelProvider` response is scripted** so any model call would fail the test (FR-001)
+- [x] T009 [P] [US1] Extend `src/test/scala/com/gwgs/akkaagentic/docs/api/DocsEndpointIntegrationTest.scala` with the regression guard: an ordinary in-corpus question still returns `200` with the same answer and `citedSources`, and a blank question still returns `400` before any rule runs (SC-002, FR-009)
 
 ### Implementation for User Story 1
 
-- [ ] T010 [US1] Enable the SDK's pre-declared rule in `src/main/resources/application.conf` with the single override `akka.javasdk.agent.guardrails."default jailbreak".agents = ["docs-agent"]` — do **not** copy the block (research R2)
+- [x] T010 [US1] Enable the SDK's pre-declared rule in `src/main/resources/application.conf` with the single override `akka.javasdk.agent.guardrails."default jailbreak".agents = ["docs-agent"]` — do **not** copy the block (research R2)
 - [ ] T011 [US1] Verify the log line for a blocked request carries name, category and explanation (FR-003, SC-007) and note the observed explanation text in `specs/014-agent-guardrails/research.md`
 
 **Checkpoint**: MVP — governance is enforced with zero production code written. Commit this gate.

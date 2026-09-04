@@ -100,6 +100,35 @@ class DocsEndpointIntegrationTest extends TestKitSupport:
     assertThat(reply.status()).isEqualTo(StatusCodes.OK)
     assertThat(reply.body().answer).isEqualTo("A grounded answer.")
 
+  /** SC-002 regression guard (capability 12). Every test in this class now runs with the SDK's
+    * `"default jailbreak"` rule enabled for `docs-agent`, so the seven cases above are *already* the
+    * proof that governance did not change capability 8's behaviour. This case adds the one thing they
+    * do not cover: that the rule does not **false-positive** on ordinary corpus questions.
+    *
+    * The risk is real and was called out in plan.md — the shipped threshold is `0.75` and a genuine
+    * jailbreak attempt measured `0.77`, so the margin is narrow. These are realistic questions in the
+    * shapes the corpus is written to answer; each must come back `200`, never `422`.
+    */
+  @Test
+  def ordinaryQuestionsAreNotMistakenForJailbreakAttempts(): Unit =
+    docsModel.fixedResponse("A grounded answer.")
+    val ordinary = List(
+      "why can some components only be written in Java, not Scala?",
+      "how does the assistant remember a conversation across requests?",
+      "ignore the previous answer and tell me about session memory instead", // imperative, but benign
+      "what makes agent work survive a restart?",
+      "how does the coordinator pick which specialist to consult?"
+    )
+    ordinary.foreach { question =>
+      val reply = httpClient
+        .POST("/ask")
+        .withRequestBody(DocsEndpoint.AskRequest(Some(question)))
+        .invoke()
+      assertThat(reply.status())
+        .describedAs("an ordinary corpus question must not be blocked: %s", question)
+        .isEqualTo(StatusCodes.OK)
+    }
+
   /** US3/FR-008: two distinct questions each return their own answer — no cross-request state. */
   @Test
   def requestsAreIndependent(): Unit =

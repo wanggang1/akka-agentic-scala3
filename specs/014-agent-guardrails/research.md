@@ -428,3 +428,50 @@ cap-8's behaviour is unchanged for everything that is not a block.
 **Interop note**: neither divergence is Scala-specific. A Java agent would hit both identically. They
 belong to the "what the platform tells you" axis, not the language-boundary axis — worth stating,
 since this project's habit is to suspect the language first.
+
+---
+
+## R2-CONFIRMED — the jailbreak rule, enabled and measured (T008–T010, 2026-09-04)
+
+R2 predicted the MVP would need **one configuration key and no code**. It does. The whole of user
+story 1 is this, merged over the SDK's own `reference.conf` declaration:
+
+```hocon
+akka.javasdk.agent.guardrails."default jailbreak".agents = ["docs-agent"]
+```
+
+No class, no threshold, no examples directory, no dependency, and **no change to the hand-maintained
+`META-INF` descriptor** — the first direct evidence for R5 (a guardrail is not a component). Zero
+lines of production Scala were written for this user story.
+
+### The observed block
+
+A DAN-style prompt in the shape of the SDK's bundled examples produces:
+
+```json
+{"blocked":true,"rule":"unknown","category":"unknown",
+ "explanation":"Content similarity [0.77] exceeds threshold [0.75]"}
+```
+
+Three things this pins down:
+
+1. **The rule really ran offline.** `SimilarityGuard` is evaluated by the runtime against the 10
+   in-jar example prompts using the quantized all-MiniLM ONNX model already on the classpath from
+   cap-8. No network, no API key.
+2. **No model was called.** The test class scripts **no** `TestModelProvider` response at all, so a
+   model call would fail the test rather than silently pass it. The `422` is therefore proof of
+   FR-001, not just of a rule firing.
+3. **`rule`/`category` read `unknown`,** exactly as divergence #4 predicts for a rule the SDK owns —
+   now asserted by a test (`anSdkOwnedRuleCannotIdentifyItselfToTheCaller`) so that if a later SDK
+   starts supplying the identity, the suite fails and the finding gets revisited rather than quietly
+   rotting.
+
+### The margin is narrow, and that is worth stating
+
+A genuine jailbreak attempt scored **0.77** against a threshold of **0.75** — two hundredths of
+headroom. So the false-positive risk plan.md flagged is not theoretical. It is now covered by a
+regression case in `DocsEndpointIntegrationTest`
+(`ordinaryQuestionsAreNotMistakenForJailbreakAttempts`) over five realistic corpus questions,
+including a deliberately imperative near-miss — *"ignore the previous answer and tell me about session
+memory instead"* — which passes as an ordinary `200`. Raising the threshold remains a configuration
+change if a real corpus ever trips it.
