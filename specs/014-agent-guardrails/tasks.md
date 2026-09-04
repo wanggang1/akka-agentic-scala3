@@ -27,8 +27,8 @@ This capability lives entirely inside the existing `docs` package (plan.md, Stru
 
 **Purpose**: Establish the regression baseline this capability must not break.
 
-- [ ] T001 Run `mvn clean verify` and record the passing test count in `specs/014-agent-guardrails/research.md` as the pre-change baseline (SC-002 is "cap-8's tests pass unchanged", which needs a number to compare against)
-- [ ] T002 [P] Record the current `POST /ask` responses for one in-corpus and one out-of-corpus question in `specs/014-agent-guardrails/research.md`, from the existing `src/test/scala/com/gwgs/akkaagentic/docs/api/DocsEndpointIntegrationTest.scala` expectations — the answer/decline shapes that must remain byte-identical
+- [x] T001 Run `mvn clean verify` and record the passing test count in `specs/014-agent-guardrails/research.md` as the pre-change baseline (SC-002 is "cap-8's tests pass unchanged", which needs a number to compare against)
+- [x] T002 [P] Record the current `POST /ask` responses for one in-corpus and one out-of-corpus question in `specs/014-agent-guardrails/research.md`, from the existing `src/test/scala/com/gwgs/akkaagentic/docs/api/DocsEndpointIntegrationTest.scala` expectations — the answer/decline shapes that must remain byte-identical
 
 **Checkpoint**: Baseline captured; any later deviation is a regression, not a surprise.
 
@@ -41,11 +41,11 @@ the block-surfacing path that **both** P1 stories depend on.
 
 **⚠️ CRITICAL**: T003 gates everything. Do not write production code before it reports.
 
-- [ ] T003 Write the discovery test `src/test/scala/com/gwgs/akkaagentic/docs/application/GuardrailProbeIntegrationTest.scala`: declare a trivially-always-failing `TextGuardrail` via `TestKit.Settings.withAdditionalConfig`, call `docs-agent`, and record **three** facts — (a) does the TestKit engage guardrails at all, (b) does a block arrive as a thrown `Guardrail.GuardrailException`, (c) does cap-8's `.onFailure(_ => DontKnow)` swallow it into the sentinel. Write the findings into `specs/014-agent-guardrails/research.md` under R3 before proceeding
-- [ ] T004 [P] Write failing unit tests in `src/test/scala/com/gwgs/akkaagentic/docs/domain/AnswerRulesTest.scala` for both pure predicates: external-reference detection (positive, negative, empty/blank, the `"I don't know"` sentinel) and sentence counting (under, at, over the limit)
-- [ ] T005 [P] Create `src/main/scala/com/gwgs/akkaagentic/docs/domain/AnswerRules.scala` — pure functions only, **no Akka import** (Constitution II): `containsExternalReference(text, markers)` and `sentenceCount(text)`. Shared file serving US2 and US3, which is why it is foundational rather than per-story
-- [ ] T006 Add `BlockedReply(blocked, rule, category, explanation)` to `src/main/scala/com/gwgs/akkaagentic/docs/api/DocsEndpoint.scala` and map a guardrail block to `422` per [contracts/ask-endpoint.md](contracts/ask-endpoint.md), leaving the `200` answer, `200` decline and `400` validation paths untouched (depends on T003)
-- [ ] T007 Narrow `.onFailure` in `src/main/scala/com/gwgs/akkaagentic/docs/application/DocsAgent.scala` so a `Guardrail.GuardrailException` propagates while ordinary model failures still degrade to the `DontKnow` sentinel (depends on T003 — **skip entirely if T003 shows blocks do not travel that path**)
+- [x] T003 Write the discovery test `src/test/scala/com/gwgs/akkaagentic/docs/application/GuardrailProbeIntegrationTest.scala`: declare a trivially-always-failing `TextGuardrail` via `TestKit.Settings.withAdditionalConfig`, call `docs-agent`, and record **three** facts — (a) does the TestKit engage guardrails at all, (b) does a block arrive as a thrown `Guardrail.GuardrailException`, (c) does cap-8's `.onFailure(_ => DontKnow)` swallow it into the sentinel. Write the findings into `specs/014-agent-guardrails/research.md` under R3 before proceeding
+- [x] T004 [P] Write failing unit tests in `src/test/scala/com/gwgs/akkaagentic/docs/domain/AnswerRulesTest.scala` for both pure predicates: external-reference detection (positive, negative, empty/blank, the `"I don't know"` sentinel) and sentence counting (under, at, over the limit)
+- [x] T005 [P] Create `src/main/scala/com/gwgs/akkaagentic/docs/domain/AnswerRules.scala` — pure functions only, **no Akka import** (Constitution II): `firstExternalReferenceMarker(text, markers)` (returns the marker rather than a `Boolean`, because FR-003's explanation must name what it found) and `sentenceCount(text)`. Shared file serving US2 and US3, which is why it is foundational rather than per-story
+- [x] T006 Add `BlockedReply(blocked, rule, category, explanation)` to `src/main/scala/com/gwgs/akkaagentic/docs/api/DocsEndpoint.scala` and map a guardrail block to `422` per [contracts/ask-endpoint.md](contracts/ask-endpoint.md), leaving the `200` answer, `200` decline and `400` validation paths untouched (depends on T003)
+- [x] T007 Narrow `.onFailure` in `src/main/scala/com/gwgs/akkaagentic/docs/application/DocsAgent.scala` so a `Guardrail.GuardrailException` propagates while ordinary model failures still degrade to the `DontKnow` sentinel (depends on T003 — **skip entirely if T003 shows blocks do not travel that path**)
 
 **Checkpoint**: The three-outcome contract exists and is provable; user stories can now proceed.
 

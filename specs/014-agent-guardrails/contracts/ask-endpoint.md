@@ -38,11 +38,19 @@ A decline is **never** reported as a block (SC-003).
 ```json
 {
   "blocked": true,
-  "rule": "default jailbreak",
-  "category": "JAILBREAK",
+  "rule": "unknown",
+  "category": "unknown",
   "explanation": "Content similarity [0.83] exceeds threshold [0.75]"
 }
 ```
+
+> **`rule` and `category` are best-effort, and measurement is why.** SDK 3.6.3 hands application code
+> the rule's **explanation and nothing else** — the composed audit line naming the rule and category
+> exists only on an SPI-internal exception that reaches logs and traces (research divergence #4). A
+> rule *we* author names itself inside its own explanation (`GuardrailAudit`, below), so its block is
+> fully identified. The SDK's own `SimilarityGuard` cannot, so the jailbreak block reports
+> `"unknown"` for both while still carrying the SDK's explanation. The `422` itself never depends on
+> this.
 
 Same shape whether the rule fired on the way in (before any model call) or on the way out
 (before delivery) — the caller learns *which* rule and *why*, not *where* in the pipeline:
@@ -68,7 +76,7 @@ question must not be blank
 |---|---|---|
 | Answer | 200 | `answer` present, not the sentinel |
 | Decline | 200 | `answer` == `"I don't know"`, `citedSources` empty |
-| Blocked | 422 | `blocked: true` + `rule` + `category` |
+| Blocked | 422 | `blocked: true` (+ `rule`/`category` when the rule self-identifies) |
 | Invalid | 400 | plain-text message |
 
 A record-only rule produces **no** caller-visible change: the answer is delivered as a normal `200`

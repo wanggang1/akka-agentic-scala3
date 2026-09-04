@@ -305,3 +305,126 @@ Both are the kind of thing this project records in `docs/` rather than in the co
 | R6 | Blocked ⇒ `422` with `{blocked, rule, category, explanation}`; answer and decline stay `200`; validation stays `400` |
 | R7 | Offline throughout; the report-only switch is demonstrated by config override in a second test class |
 | R8 | Attach by agent id; no `@AgentRole` in this capability |
+
+---
+
+## B1 — Pre-change baseline (T001/T002, captured 2026-09-04)
+
+`mvn clean verify` on `014-agent-guardrails` at `291daae` (design-only commit; no source or config
+change yet) — **BUILD SUCCESS**, no failures, no errors, nothing skipped:
+
+| Phase | Tests | Result |
+|---|---|---|
+| surefire (unit, 21 classes) | **105** | 0 failures / 0 errors / 0 skipped |
+| failsafe (integration, 21 classes) | **101** | 0 failures / 0 errors / 0 skipped |
+| **total** | **206** | green |
+
+SC-002 ("capability 8's tests pass unchanged") is measured against this: the cap-8 classes are
+`docs.domain.AskQuestionTest` (4), `docs.domain.KnowledgeCorpusTest` (3),
+`docs.application.KnowledgeStoreTest` (4) and `docs.api.DocsEndpointIntegrationTest` (**7**) — 18
+tests that must still pass, with the same assertions, after guardrails are added.
+
+### The `POST /ask` shapes that must stay byte-identical (T002)
+
+Read off the existing `DocsEndpointIntegrationTest` expectations, which are the contract of record:
+
+| Case | Request | Status | Body |
+|---|---|---|---|
+| In-corpus | `{"question":"what makes agent work survive a restart without writing persistence code?"}` | `200` | `{"answer":<the mocked grounded text>,"citedSources":[…"durability-tasks"…]}` — non-empty, contains the top retrieved source |
+| Out-of-corpus (decline) | `{"question":"what is the capital of France?"}` | `200` | `{"answer":"I don't know","citedSources":[]}` — the sentinel, citing nothing |
+| Blank | `{"question":"   "}` | `400` | validation message, no retrieval, no model call |
+| Absent field | `{}` | `400` | same |
+| Malformed JSON | `{ "question":` | `400` | SDK boundary rejection |
+| Unknown extra property | `{"question":…,"surprise":"ignored"}` | `200` | tolerated |
+| Two distinct questions | — | `200`,`200` | each cites its own retrieval (`cap-7-activity-coordinator`, `interop-method-ref-wall`) |
+
+Note the shape collision this table makes concrete: **the decline is a `200` whose body carries the
+`"I don't know"` sentinel**. A guardrail block must therefore be distinguishable from row 2 by
+*status*, not by inspecting the answer text — which is exactly why the contract puts a block at `422`
+(R6) and why R3's `onFailure` question has to be settled before any production edit (T003).
+
+---
+
+## R3-RESOLVED — T003 discovery result (run 2026-09-04)
+
+R3's hypothesis was written as a hypothesis on purpose. It has now been **run**
+(`GuardrailProbeIntegrationTest`, an always-failing `TextGuardrail` declared through
+`TestKit.Settings.withAdditionalConfig` and pointed at `docs-agent` with `use-for = ["model-request"]`).
+All three questions are settled, and one of them the wrong way round from what the docs imply.
+
+| # | Question | Answer | Evidence |
+|---|---|---|---|
+| a | Does the TestKit engage guardrails at all? | **Yes** | The scripted `TestModelProvider` reply (`"UNGUARDED-MODEL-ANSWER"`) was **never returned** — the rule ran and stopped the interaction before the model. FR-012's offline claim holds; no live runtime is needed to prove governance. |
+| b | Does a block reach the agent's effect pipeline as a throwable? | **Yes** | The interaction ended on the failure path. |
+| c | Does cap-8's `.onFailure(_ => DontKnow)` swallow it? | **Yes — the collision is real** | Probe verdict: `C-SWALLOWED: the block was absorbed by onFailure into the honest-decline sentinel`. The caller received `"I don't know"`, i.e. **a governance block was reported as an honest decline**, exactly the failure FR-005 forbids. |
+
+So **T007 is required, not optional** — the conditional "skip entirely if T003 shows blocks do not
+travel that path" does not apply.
+
+### The exception type a handler can discriminate on
+
+`AgentImpl.convert$1` (invoked from `mapSpiAgentException`, which wraps the user's `onFailure`
+function, so the conversion happens **before** our handler sees anything) maps each SPI failure
+reason to a public SDK exception:
+
+| `SpiAgent.FailureReason` | SDK exception handed to `onFailure` |
+|---|---|
+| `ModelFailure` | `akka.javasdk.agent.ModelException` |
+| `RateLimitFailure` | `RateLimitException` |
+| `TimeoutFailure` | `ModelTimeoutException` |
+| `ToolCallExecutionFailure` | `ToolCallExecutionException` |
+| **`GuardrailFailure`** | **`akka.javasdk.agent.Guardrail.GuardrailException(failure.explanation)`** |
+| `OutputParsingFailure` | the underlying cause |
+
+This **corrects R3's caveat** that "nothing in the SDK jar throws `GuardrailException`". Nothing
+*raises* it — but the SDK jar *constructs* it, in `AgentImpl`, from the runtime's `GuardrailFailure`.
+`onFailure` therefore receives a genuine `Guardrail.GuardrailException`, and narrowing on that type is
+sound rather than speculative.
+
+### Divergence #4 — the block's identity never reaches application code
+
+A first reading of the bytecode suggested the rule name and category were carried in the exception
+message and merely needed parsing. **Running it disproved that**, and the corrected finding is
+sharper — and more limiting.
+
+Three different strings are involved, and only the weakest one is public:
+
+| Carrier | Content | Who can see it |
+|---|---|---|
+| `SpiAgent.AgentException` (SPI-internal) | `Request guardrail blocked, category [FORMAT], name [probe always fail]: <explanation>` — the full audit line | the runtime: logs, metrics, traces |
+| `SpiAgent.GuardrailFailure` | one field, `explanation` — the rule's own text, nothing else | internal |
+| **`Guardrail.GuardrailException`** (public) | **the bare `explanation`**, no name, no category, **no cause** | our `onFailure` |
+
+Observed verbatim in the runtime's own warning during the probe run:
+
+```text
+AK-01203 Agent [docs-agent] Failure mapping error […]:
+  akka.javasdk.agent.Guardrail$GuardrailException: probe guard 'probe always fail' always fails,
+  with original cause: akka.runtime.sdk.spi.SpiAgent$AgentException:
+    Request guardrail blocked, category [FORMAT], name [probe always fail]: probe guard … always fails
+```
+
+**Consequence**: on SDK 3.6.3 an application cannot learn *which* rule fired or in *what* category —
+only *what it said*. A rule we author can compensate by naming itself in its own explanation
+(`domain/GuardrailAudit`, `[name/CATEGORY] …`); the SDK's own `SimilarityGuard` cannot, so a jailbreak
+block is reported with `rule`/`category` of `"unknown"`. That asymmetry is not a workaround failure —
+it is the honest shape of the platform's contract, and it is recorded rather than papered over.
+
+### Divergence #5 — rethrowing from `onFailure` is not a channel
+
+The natural design — let the `GuardrailException` propagate and have the endpoint catch it — **does
+not work**, and the probe is what showed it. Throwing from inside the `onFailure` function is caught
+by the SDK as a *"Failure mapping error"* (`AK-01203`); the caller receives an opaque
+`kalix.runtime.CorrelatedRuntimeException` carrying only the message. The exception **type is gone by
+the time it crosses the component client**, so an endpoint cannot distinguish governance from any
+other failure by catching.
+
+Capability 12 therefore carries a block on the **reply channel**, behind `DocsAgent.BlockedPrefix` —
+the same sentinel technique cap-8 already uses for `DontKnow`, shared as a constant so the agent and
+the endpoint cannot drift. `DocsAgent.onFailure` maps a `Guardrail.GuardrailException` to
+`BlockedPrefix + explanation` and leaves every other throwable degrading to the decline sentinel, so
+cap-8's behaviour is unchanged for everything that is not a block.
+
+**Interop note**: neither divergence is Scala-specific. A Java agent would hit both identically. They
+belong to the "what the platform tells you" axis, not the language-boundary axis — worth stating,
+since this project's habit is to suspect the language first.
