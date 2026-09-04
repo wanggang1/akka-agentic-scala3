@@ -105,13 +105,13 @@ enforcing returns `422` — with no source change between the two runs.
 
 ### Tests for User Story 3
 
-- [ ] T016 [P] [US3] Write `src/test/scala/com/gwgs/akkaagentic/docs/api/GuardrailReportOnlyIntegrationTest.scala`: an over-long scripted answer is delivered as a normal `200` with its citations (SC-004), proving a record-only rule is caller-invisible
-- [ ] T017 [US3] Add the SC-005 pair to the same file: a second TestKit configuration that flips **only** `report-only` to `false` via `TestKit.Settings.withAdditionalConfig`, asserting the same input now yields `422` — the zero-code-change claim demonstrated by the suite, not by prose
+- [x] T016 [P] [US3] Write `src/test/scala/com/gwgs/akkaagentic/docs/api/GuardrailReportOnlyIntegrationTest.scala`: an over-long scripted answer is delivered as a normal `200` with its citations (SC-004), proving a record-only rule is caller-invisible
+- [x] T017 [US3] Add the SC-005 pair to the same file: a second TestKit configuration that flips **only** `report-only` to `false` via `TestKit.Settings.withAdditionalConfig`, asserting the same input now yields `422` — the zero-code-change claim demonstrated by the suite, not by prose
 
 ### Implementation for User Story 3
 
-- [ ] T018 [US3] Create `src/main/scala/com/gwgs/akkaagentic/docs/application/AnswerLengthGuard.scala` — a top-level Scala class with **no constructor parameters** (the loader's second attempt), threshold as a class constant, delegating to `AnswerRules.sentenceCount`. The no-arg shape is deliberate and load-bearing for the finding (research R1)
-- [ ] T019 [US3] Declare it in `src/main/resources/application.conf` with `category = FORMAT`, `use-for = ["model-response"]`, `report-only = true`
+- [x] T018 [US3] Create `src/main/scala/com/gwgs/akkaagentic/docs/application/AnswerLengthGuard.scala` — a top-level Scala class with **no constructor parameters** (the loader's second attempt), threshold as a class constant, delegating to `AnswerRules.sentenceCount`. The no-arg shape is deliberate and load-bearing for the finding (research R1)
+- [x] T019 [US3] Declare it in `src/main/resources/application.conf` with `category = FORMAT`, `use-for = ["model-response"]`, `report-only = true`
 
 **Checkpoint**: Both governance modes demonstrated. Commit this gate.
 

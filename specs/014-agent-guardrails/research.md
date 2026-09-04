@@ -580,3 +580,58 @@ Four things this settles beyond "it works":
 something it *can* decide: does the answer point outside the corpus? Sound **here** because this
 corpus contains no links; it would not transfer unexamined to a corpus that did. Stated in the class's
 own scaladoc so the limitation travels with the code rather than living only in the spec.
+
+---
+
+## R1 — second empirical result: the zero-arg form loads too, at a price (T018/T019, 2026-09-04)
+
+`AnswerLengthGuard` is a top-level Scala `class` with **no constructor parameters** — the loader's
+second attempt, which the published documentation does not mention. It loads and runs. Two of R1's
+three rows are now measurements:
+
+| Form | Predicted | Result |
+|---|---|---|
+| `class G(ctx: GuardrailContext)` | loads on attempt 1 | ✅ confirmed (T014) |
+| `class G` (no-arg) | loads on attempt 2 | ✅ **confirmed** |
+| `object G` | fails both attempts | pending — the negative probe (T022) |
+
+### The trade between the two forms is not the one the docs imply
+
+The documentation frames `GuardrailContext` as optional — take it *if* your rule needs settings. In
+practice the no-arg form gives up more than settings:
+
+| | `(GuardrailContext)` | no-arg |
+|---|---|---|
+| Read its own config section | ✅ | ❌ |
+| Know the name it was declared under | ✅ `ctx.name` | ❌ |
+| Self-identify in the caller-facing block | ✅ truthfully | only by **duplicating** the name as a constant |
+
+Because SDK 3.6.3 gives application code no channel for a rule's identity other than the explanation
+(divergence #4), a zero-arg rule that wants to be named must hard-code its own name and category and
+keep them in step with `application.conf` **by hand** — nothing can check that they agree. That is a
+real maintenance hazard, and it is the honest reason to prefer the `(GuardrailContext)` form unless a
+rule genuinely has nothing to configure.
+
+Recorded in `AnswerLengthGuard`'s own scaladoc as well as here, so the caveat travels with the code.
+
+## R7-CONFIRMED — `report-only` proven by configuration, not prose (T016/T017)
+
+SC-005 asks that switching a rule between enforcing and record-only change the caller-visible outcome
+with **zero lines of code changed**. Two test classes over a shared fixture demonstrate it:
+
+| Class | Configuration | Same input → |
+|---|---|---|
+| `GuardrailReportOnlyIntegrationTest` | none — `application.conf` exactly as shipped (`report-only = true`) | `200`, answer delivered verbatim with citations |
+| `GuardrailEnforcingOverrideIntegrationTest` | one override: `…"answer length guard".report-only = false` | `422`, `rule: "answer length guard"`, `category: FORMAT` |
+
+Same guardrail class, same declaration, same scripted answer, same assertions' subject. The only
+difference is one key. Each class also carries a short-answer control case, so the pair is known to be
+exercising the rule's violating branch rather than a rule that never fires.
+
+### What a record-only test can honestly assert
+
+A `report-only` rule does not fail the interaction, so it never reaches `DocsAgent.onFailure` and
+**application code sees nothing at all** — no exception, no altered reply. Its violations are recorded
+only by the runtime's instrumentation, which test code cannot reach (R-AUDIT). So the record-only test
+asserts the **absence** of a caller-visible change, which is exactly what SC-004 claims; the recording
+itself lives in traces. Stating the boundary matters more than pretending to test across it.
