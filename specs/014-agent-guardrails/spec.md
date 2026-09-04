@@ -264,7 +264,18 @@ that changing which agents a rule covers is a configuration-only edit.
 ### Measurable Outcomes
 
 - **SC-001**: A jailbreak-style question is refused without any model call, in 100% of the scripted
-  attempts in the test suite.
+  attempts in the test suite, and the caller receives the governance outcome carrying the rule's
+  explanation.
+
+  > **Relaxed 2026-09-04, on measurement.** This criterion originally required the caller-facing
+  > response to *name* the rule (`default jailbreak`) and its category. That is not achievable on
+  > Akka SDK 3.6.3: application code receives the rule's **explanation and nothing else**. The
+  > composed audit line naming the rule and category lives on an SPI-internal exception and reaches
+  > logs, metrics and traces only (research divergence #4). The `rule` and `category` fields stay in
+  > the response — a rule *we* author names itself in its own explanation — but for the SDK's own
+  > `SimilarityGuard` they read `unknown`. What SC-001 asserts is therefore the part that is real:
+  > the refusal happened, no model ran, and the caller can tell a block from a decline. Attribution
+  > by name remains guaranteed in the service's output, which is what FR-003 and SC-007 require.
 - **SC-002**: An ordinary in-corpus question returns the same answer and the same cited sources as
   before this capability — capability 8's existing tests pass unchanged.
 - **SC-003**: An out-of-corpus question still returns the honest decline, and that decline is never
@@ -276,7 +287,8 @@ that changing which agents a rule covers is a configuration-only edit.
 - **SC-006**: The guarded agent's source contains **zero** references to any rule, name, or
   category.
 - **SC-007**: Every blocked or recorded evaluation is attributable: its name, category and
-  explanation are recoverable from the service's output.
+  explanation are recoverable from the service's output. (Note: for a rule the SDK owns, the
+  service's *output* is the only place they are recoverable — see SC-001.)
 - **SC-008**: The whole suite runs with no network access and no API key, and completes as part of
   the project's ordinary verification command.
 - **SC-009**: The capability publishes a documented, evidence-backed answer to the interop question:

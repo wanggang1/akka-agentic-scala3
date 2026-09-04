@@ -53,14 +53,15 @@ the block-surfacing path that **both** P1 stories depend on.
 
 ## Phase 3: User Story 1 — A hostile prompt never reaches the model (Priority: P1) 🎯 MVP
 
-**Goal**: A jailbreak-style question is refused before any model call, with an auditable name and category.
+**Goal**: A jailbreak-style question is refused before any model call, attributable by name and
+category in the service's output (the caller sees the block and its explanation — SC-001, relaxed).
 
-**Independent Test**: `POST /ask` with a jailbreak-style question returns `422` naming the
-`default jailbreak` rule, and no scripted model response is consumed.
+**Independent Test**: `POST /ask` with a jailbreak-style question returns `422` carrying the
+rule's explanation, and no scripted model response is consumed.
 
 ### Tests for User Story 1
 
-- [ ] T008 [P] [US1] Write `src/test/scala/com/gwgs/akkaagentic/docs/api/GuardrailBlockingIntegrationTest.scala` with the request-side cases: a jailbreak-style question returns `422` with `rule = "default jailbreak"` and `category = JAILBREAK` (SC-001), and **no `TestModelProvider` response is scripted** so any model call would fail the test (FR-001)
+- [ ] T008 [P] [US1] Write `src/test/scala/com/gwgs/akkaagentic/docs/api/GuardrailBlockingIntegrationTest.scala` with the request-side cases: a jailbreak-style question returns `422` with `blocked = true` and the SDK rule's explanation, and `rule`/`category` of `"unknown"` — SC-001 as relaxed on 2026-09-04, because the SDK never hands the rule's name or category to application code (research divergence #4), and **no `TestModelProvider` response is scripted** so any model call would fail the test (FR-001)
 - [ ] T009 [P] [US1] Extend `src/test/scala/com/gwgs/akkaagentic/docs/api/DocsEndpointIntegrationTest.scala` with the regression guard: an ordinary in-corpus question still returns `200` with the same answer and `citedSources`, and a blank question still returns `400` before any rule runs (SC-002, FR-009)
 
 ### Implementation for User Story 1
