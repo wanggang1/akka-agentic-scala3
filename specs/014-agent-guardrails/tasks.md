@@ -148,12 +148,12 @@ because they serve the project's research goal, not a user journey.
 
 ## Phase 8: Polish & Documentation
 
-- [ ] T027 Run `mvn clean verify` (clean, not incremental — cap-11's lesson) and confirm the count exceeds the T001 baseline with no failures
-- [ ] T028 [P] Add README "Scala interop notes" **§14** covering: the reflective config-driven loading path, which Scala class forms load and which do not, the pre-declared `"default jailbreak"` discovery, and the block-vs-decline collision with cap-8's `onFailure`
-- [ ] T029 [P] Add the README **Capability 12** usage section with the curl walkthrough from [quickstart.md](quickstart.md)
-- [ ] T030 [P] Add the cap-12 row and update "Where we are" in `ROADMAP.md`
-- [ ] T031 [P] Add the cap-12 findings to `FINDINGS.md`, extending the through-line: the wall is a *client* property, and this is the **second** hazard axis — reflected bytecode shape — now confirmed on a mechanism unrelated to Views
-- [ ] T032 [P] Record the two documentation divergences (`TextGuardrail.Result` does not exist; the undocumented zero-arg constructor path) in `docs/sdk-3.6.0-limitations.md` or a new `docs/` note
+- [x] T027 Run `mvn clean verify` (clean, not incremental — cap-11's lesson) and confirm the count exceeds the T001 baseline with no failures
+- [x] T028 [P] Add README "Scala interop notes" **§14** covering: the reflective config-driven loading path, which Scala class forms load and which do not, the pre-declared `"default jailbreak"` discovery, and the block-vs-decline collision with cap-8's `onFailure`
+- [x] T029 [P] Add the README **Capability 12** usage section with the curl walkthrough from [quickstart.md](quickstart.md)
+- [x] T030 [P] Add the cap-12 row and update "Where we are" in `ROADMAP.md`
+- [x] T031 [P] Add the cap-12 findings to `FINDINGS.md`, extending the through-line: the wall is a *client* property, and this is the **second** hazard axis — reflected bytecode shape — now confirmed on a mechanism unrelated to Views
+- [x] T032 [P] Record the two documentation divergences (`TextGuardrail.Result` does not exist; the undocumented zero-arg constructor path) in `docs/sdk-3.6.0-limitations.md` or a new `docs/` note
 - [ ] T033 Live smoke test against Ollama `qwen3:8b` following `quickstart.md`, and add the verified transcript to the README cap-12 section
 
 ---

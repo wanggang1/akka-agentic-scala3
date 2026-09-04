@@ -101,3 +101,40 @@ as 3.6.0.
 a bounded window. The proper general bound is **compaction** (summarize old turns without slicing pairs),
 which is worth doing regardless of the SDK — a separate future-work item. Detail: cap-6 "Live caveat" in
 README §8 and `specs/008-*/`.
+
+---
+
+## 4. Guardrails: documentation diverges from the jar in six places (cap-12, feature 014)
+
+Capability 12's design was derived from the SDK jars and then **run**. Six statements in the published
+documentation or the SDK's own `reference.conf` did not survive contact with the running system. None
+of them is Scala-specific — a Java agent hits every one of them identically.
+
+| # | Documented / implied | Actually |
+|---|---|---|
+| 1 | The result type is `TextGuardrail.Result` | **That type does not exist.** It is `Guardrail.Result` — a record `(boolean passed, String explanation)` with a static `OK`. |
+| 2 | A guardrail optionally takes a `GuardrailContext` constructor parameter | True, and there is a **second, undocumented** path: a **zero-arg** constructor, tried if the first match fails. |
+| 3 | `SimilarityGuard` is a guardrail implementation | It is a **config holder**. Its `evaluate` throws `IllegalStateException("Not expected to be called")`; the runtime special-cases the type and evaluates it itself. |
+| 4 | A block is *"aborted by throwing `Guardrail.GuardrailException`"*, implying an application can catch it | The exception is real and is handed to the agent's `onFailure` — but **rethrowing it does not reach the caller**. The SDK catches it as a *"Failure mapping error"* (`AK-01203`) and the caller receives an opaque `kalix.runtime.CorrelatedRuntimeException`; the type is erased crossing the component client. |
+| 5 | The result is *"tracked in logs, metrics and traces"* — implying the rule's identity is recoverable from logs | The composed audit line (`… guardrail blocked, category [X], name [Y]: …`) lives on an **SPI-internal** `AgentException` and reaches **traces and metrics only**. `kalix.runtime.agent.AgentGuardrailInteractions` contains **no logger at all**. The public `GuardrailException` carries the **bare explanation** — no name, no category, no cause. |
+| 6 | The class "must … be **public** and have a **public** constructor" | **Neither is enforced.** Akka's `ReflectiveDynamicAccess` does `getDeclaredConstructor → setAccessible(true) → newInstance`, so a `private` constructor loads fine — which is why a Scala `object` works despite the prediction that it could not. |
+
+**Workarounds in this project.**
+
+- #4 → a block travels the **reply channel** behind `DocsAgent.BlockedPrefix`, the same sentinel technique
+  cap-8 uses for its decline sentinel, shared as a constant so the agent and endpoint cannot drift.
+- #5 → rules we author **name themselves inside their own explanation**
+  (`docs/domain/GuardrailAudit`: `[name/CATEGORY] …`), so their blocks are fully identified in the `422`.
+  The SDK's own `SimilarityGuard` cannot, and is reported as `rule: "unknown"` — an asymmetry the tests
+  assert explicitly, so that if a later SDK starts supplying the identity the suite fails and this note
+  gets revisited rather than quietly rotting.
+- #6 → guardrails are still authored as **top-level classes**. The `object` form works, but by a scalac
+  implementation detail (object fields compile to `static` fields, so the runtime's *fresh* instance
+  shares all state with `MODULE$`), not by anything the SDK promises.
+
+**Not a limitation, recorded because it is easy to fear:** a misspelled `class` value fails the service
+**at startup** — construction is eager, so there is no window in which an agent is silently unguarded.
+
+**Re-test on upgrade.** #1 and #2 are documentation fixes; #4 and #5 are the ones that would change this
+project's design if the SDK ever surfaced a typed, identified block to application code. Detail:
+`specs/014-agent-guardrails/research.md` (R1-FINAL, R3-RESOLVED, R-AUDIT) and README §14.
