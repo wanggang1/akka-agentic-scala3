@@ -124,8 +124,8 @@ enforcing returns `422` — with no source change between the two runs.
 **Independent Test**: The agent source contains no guardrail reference, and a rule does not fire for
 an agent it does not name.
 
-- [ ] T020 [P] [US4] Assert SC-006 mechanically: a test (or a documented `grep` in `specs/014-agent-guardrails/research.md`) showing `src/main/scala/com/gwgs/akkaagentic/docs/application/DocsAgent.scala` contains **zero** occurrences of `Guardrail`, any rule name, or any category
-- [ ] T021 [US4] Add a negative-attachment case in `src/test/scala/com/gwgs/akkaagentic/docs/application/GuardrailProbeIntegrationTest.scala`: exercise another existing agent (e.g. `chat-agent`) with input that would trip a `docs-agent` rule and assert it is unaffected
+- [x] T020 [P] [US4] Assert SC-006 mechanically: `AgentDeclaresNoGuardrailsTest` reads `DocsAgent.scala` and asserts it contains no rule name, category, guardrail class or config path — and pins the two permitted `Guardrail` lines exactly (the exception type is a reference to the *mechanism*, not to a rule; see R8)
+- [x] T021 [US4] Add a negative-attachment case in `src/test/scala/com/gwgs/akkaagentic/docs/application/GuardrailProbeIntegrationTest.scala`: exercise another existing agent (e.g. `chat-agent`) with input that would trip a `docs-agent` rule and assert it is unaffected
 
 **Checkpoint**: The attachment mechanism is proven, not asserted.
 

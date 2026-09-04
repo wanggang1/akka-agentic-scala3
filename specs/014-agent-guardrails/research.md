@@ -635,3 +635,47 @@ A `report-only` rule does not fail the interaction, so it never reaches `DocsAge
 only by the runtime's instrumentation, which test code cannot reach (R-AUDIT). So the record-only test
 asserts the **absence** of a caller-visible change, which is exactly what SC-004 claims; the recording
 itself lives in traces. Stating the boundary matters more than pretending to test across it.
+
+---
+
+## R8-CONFIRMED — attachment is scoped, and the agent stays ignorant (T020/T021, 2026-09-04)
+
+### SC-006 is a test, not a claim
+
+`AgentDeclaresNoGuardrailsTest` reads `DocsAgent.scala` and asserts it contains none of: the three
+rule names as declared, the categories `JAILBREAK`/`HALLUCINATED`, the three guardrail implementation
+classes, `TextGuardrail`, the `akka.javasdk.agent.guardrails` config path, or the `agents =`
+attachment key. A prose claim like *"the agent names no rule"* decays the first time someone adds a
+quick check; a test fails instead.
+
+**The one permitted reference is pinned rather than waved through.** `DocsAgent` does import
+`akka.javasdk.agent.Guardrail`, on exactly two non-comment lines:
+
+```scala
+import akka.javasdk.agent.{Agent, Guardrail}
+case block: Guardrail.GuardrailException =>
+```
+
+That is a reference to the **mechanism**, not to any rule — the distinction R8 anticipated — and it is
+what lets the agent stay ignorant of which rules exist while still not lying to the caller about why
+it refused. The test asserts those two lines *exactly*, so the exception cannot quietly grow into
+rule-specific logic.
+
+### The negative attachment case
+
+Three rules name `agents = ["docs-agent"]`. `chat-agent` is in none of them, so the identical
+jailbreak text sent to capability 4's `POST /chat/{sessionId}` returns a normal `200` with the
+scripted reply, while the same text on `docs-agent` comes back behind `BlockedPrefix` — the two cases
+sit side by side so the negative is known to be proving *attachment scoping* rather than merely that
+the text is harmless.
+
+`ChatAgent` is a deliberately good probe: it has **no `onFailure`**, so a guardrail firing there could
+not be silently absorbed into a fallback reply. It would fail the interaction and the test would
+break.
+
+### `@AgentRole` remains available and unexercised
+
+Attachment by role was considered and declined (R8). This service has one agent worth guarding;
+adding a role annotation to exercise a mechanism we would not otherwise use is the speculative
+generality the constitution forbids. Recorded as a known, untested alternative rather than silently
+skipped.
