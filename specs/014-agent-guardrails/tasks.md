@@ -78,17 +78,18 @@ rule's explanation, and no scripted model response is consumed.
 **Goal**: An answer pointing at an external web source is blocked rather than delivered.
 
 **Independent Test**: Script the model to return a linked answer; the caller gets `422` naming
-`linked answer guard`, not the answer.
+`linked answer guard` (a rule we author self-tags, so unlike the SDK's rule it *can* be named — see
+research divergence #4), not the answer.
 
 ### Tests for User Story 2
 
-- [ ] T012 [P] [US2] Add response-side cases to `src/test/scala/com/gwgs/akkaagentic/docs/api/GuardrailBlockingIntegrationTest.scala`: a scripted answer containing a link returns `422` with `category = HALLUCINATED` and the answer text is absent from the response body
-- [ ] T013 [P] [US2] Add the pass-through cases to the same file: an ordinary grounded answer is delivered unchanged with its citations, and the `"I don't know"` sentinel is delivered as a `200` decline — never as a block (SC-003)
+- [x] T012 [P] [US2] Add response-side cases to `src/test/scala/com/gwgs/akkaagentic/docs/api/GuardrailBlockingIntegrationTest.scala`: a scripted answer containing a link returns `422` with `category = HALLUCINATED` and the answer text is absent from the response body
+- [x] T013 [P] [US2] Add the pass-through cases to the same file: an ordinary grounded answer is delivered unchanged with its citations, and the `"I don't know"` sentinel is delivered as a `200` decline — never as a block (SC-003)
 
 ### Implementation for User Story 2
 
-- [ ] T014 [US2] Create `src/main/scala/com/gwgs/akkaagentic/docs/application/LinkedAnswerGuard.scala` — a **top-level Scala class** with a single plain `(ctx: GuardrailContext)` parameter list (no curried, no `using`), reading `link-markers` from `ctx.config` and delegating the decision to `AnswerRules.containsExternalReference` (research R1)
-- [ ] T015 [US2] Declare the rule in `src/main/resources/application.conf` per [contracts/guardrail-config.md](contracts/guardrail-config.md): `class`, `agents = ["docs-agent"]`, `category = HALLUCINATED`, `use-for = ["model-response"]`, `report-only = false`, `link-markers`
+- [x] T014 [US2] Create `src/main/scala/com/gwgs/akkaagentic/docs/application/LinkedAnswerGuard.scala` — a **top-level Scala class** with a single plain `(ctx: GuardrailContext)` parameter list (no curried, no `using`), reading `link-markers` from `ctx.config` and delegating the decision to `AnswerRules.containsExternalReference` (research R1)
+- [x] T015 [US2] Declare the rule in `src/main/resources/application.conf` per [contracts/guardrail-config.md](contracts/guardrail-config.md): `class`, `agents = ["docs-agent"]`, `category = HALLUCINATED`, `use-for = ["model-response"]`, `report-only = false`, `link-markers`
 
 **Checkpoint**: Both enforcement sides work. Commit this gate.
 

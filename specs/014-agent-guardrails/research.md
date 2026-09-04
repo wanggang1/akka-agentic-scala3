@@ -531,3 +531,52 @@ recorded exclusively by the runtime's instrumentation. Phase 5's tests must ther
 **absence** of a caller-visible change (SC-004: the answer is delivered normally) rather than trying to
 observe the recorded violation from test code, which is not reachable. Noted here before T016 so the
 test design does not start from a false assumption.
+
+---
+
+## R1 — first empirical result: the `(GuardrailContext)` form loads (T014/T015, 2026-09-04)
+
+R1's table was a **prediction derived from bytecode**. The first row is now a **measurement**.
+
+`LinkedAnswerGuard` — a top-level Scala `class` with a single, plain `(ctx: GuardrailContext)`
+parameter list — is named in `application.conf` by class-name string only, and the runtime constructed
+it and ran it. Observed block:
+
+```json
+{"blocked":true,"rule":"linked answer guard","category":"HALLUCINATED",
+ "explanation":"Answer contains an external reference marker 'http'"}
+```
+
+| Form | Predicted | Result |
+|---|---|---|
+| `class G(ctx: GuardrailContext)` | loads on attempt 1 | ✅ **confirmed** |
+| `class G` (no-arg) | loads on attempt 2 | pending — US3's `AnswerLengthGuard` |
+| `object G` | fails both attempts | pending — the negative probe (T022) |
+
+Four things this settles beyond "it works":
+
+1. **A Scala class satisfies `DynamicAccess.createInstanceFor`.** Scala 3 emits a public
+   `<init>(GuardrailContext)` that matches by exact declared parameter type. No Java shim, no wrapper.
+2. **No descriptor entry, and the suite is green.** `META-INF/akka-javasdk-components_…conf` is
+   untouched across the whole capability — R5 confirmed by construction rather than by argument.
+3. **`GuardrailContext.config` really is the rule's own section.** `link-markers` and `category` are
+   read by plain relative key, and the observed explanation names the marker that was configured, not
+   a hard-coded one — FR-007 satisfied by construction.
+4. **A rule we author can identify itself; a rule the SDK owns cannot.** Compare the two blocks from
+   the same test class:
+
+   ```json
+   {"rule":"linked answer guard","category":"HALLUCINATED", …}   ← ours, self-tagged
+   {"rule":"unknown","category":"unknown", …}                     ← the SDK's SimilarityGuard
+   ```
+
+   That asymmetry is a property of **who owns the rule**, not of the language, and it is the practical
+   consequence of divergence #4 rather than a restatement of it.
+
+### The proxy is honest about being a proxy
+
+`TextGuardrail.evaluate` receives the answer text alone — no question, no retrieved passages — so
+"is this answer grounded?" is not a question this interface can be asked. The rule therefore checks
+something it *can* decide: does the answer point outside the corpus? Sound **here** because this
+corpus contains no links; it would not transfer unexamined to a corpus that did. Stated in the class's
+own scaladoc so the limitation travels with the code rather than living only in the spec.

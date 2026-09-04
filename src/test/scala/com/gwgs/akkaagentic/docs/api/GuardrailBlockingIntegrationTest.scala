@@ -8,15 +8,20 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.{BeforeEach, Test}
 import org.slf4j.LoggerFactory
 
-/** US1 — a hostile prompt never reaches the model.
+/** Enforcement on both sides of the model call.
   *
-  * The rule under test is the SDK's own pre-declared `"default jailbreak"`, enabled for `docs-agent`
-  * by a single key in `application.conf` and evaluated by the runtime with the same in-process
-  * quantized all-MiniLM ONNX model capability 8 already uses — so this whole class runs offline.
+  * **US1 (request side)** — the rule is the SDK's own pre-declared `"default jailbreak"`, enabled for
+  * `docs-agent` by a single key in `application.conf` and evaluated by the runtime with the same
+  * in-process quantized all-MiniLM ONNX model capability 8 already uses.
   *
-  * **No model response is scripted anywhere in this class.** `TestModelProvider` fails a call it has
-  * no answer for, so if a guardrail ever stopped stopping a jailbreak attempt, the test would not
-  * quietly pass — it would fail on the model call it was supposed to prevent (FR-001).
+  * **US2 (response side)** — the rule is our own `LinkedAnswerGuard`, the first custom guardrail in
+  * the project and the live test of the loader's `(GuardrailContext)` constructor form (research R1).
+  *
+  * The whole class runs offline. Note the deliberate asymmetry in how the two halves use the mock:
+  * the **request-side tests script no model response at all**, so a model call would fail the test
+  * rather than pass it quietly — that is what makes the `422` evidence for FR-001 rather than merely
+  * evidence that a rule fired. The response-side tests must script an answer, because a response rule
+  * has nothing to judge until the model has spoken.
   */
 class GuardrailBlockingIntegrationTest extends TestKitSupport:
 
@@ -86,3 +91,71 @@ class GuardrailBlockingIntegrationTest extends TestKitSupport:
   @Test
   def validationStillPrecedesEveryRule(): Unit =
     assertThat(ask("   ").status()).isEqualTo(StatusCodes.BAD_REQUEST)
+
+  // ---- US2: response side (LinkedAnswerGuard) ----
+
+  /** A question the corpus genuinely covers, so only the *answer* is under test here. */
+  private val InCorpusQuestion = "why can some components only be written in Java, not Scala?"
+
+  /** SC-004/FR-002: an answer pointing at an external source is blocked before delivery. This is also
+    * the first proof that a **custom Scala guardrail loads at all** — the runtime constructed
+    * `LinkedAnswerGuard` from a class-name string through its `(GuardrailContext)` constructor. */
+  @Test
+  def anAnswerWithAnExternalLinkIsBlockedBeforeDelivery(): Unit =
+    val linked = "See the full guide at https://doc.akka.io/sdk/agents.html for the details."
+    docsModel.fixedResponse(linked)
+
+    val response = ask(InCorpusQuestion)
+    assertThat(response.status()).isEqualTo(StatusCodes.UNPROCESSABLE_ENTITY)
+
+    val body = response.body().utf8String
+    logger.info("US2 blocked body >>> {}", body)
+    assertThat(body).contains("\"blocked\":true")
+    // The offending answer must not leak through the block that suppressed it.
+    assertThat(body).doesNotContain("doc.akka.io")
+    assertThat(body).doesNotContain("See the full guide")
+
+  /** A rule we author CAN name itself, unlike the SDK's `SimilarityGuard` — `GuardrailAudit.tag`
+    * carries the identity in the explanation, the only channel SDK 3.6.3 gives application code
+    * (research divergence #4). This is the positive half of that asymmetry. */
+  @Test
+  def aRuleWeAuthorIdentifiesItselfToTheCaller(): Unit =
+    docsModel.fixedResponse("Full details at www.example.com/akka.")
+    val body = ask(InCorpusQuestion).body().utf8String
+    assertThat(body).contains("\"rule\":\"linked answer guard\"")
+    assertThat(body).contains("\"category\":\"HALLUCINATED\"")
+    assertThat(body).contains("external reference marker 'www.'")
+
+  /** SC-002 pass-through: an ordinary grounded answer is delivered unchanged, with its citations —
+    * the response-side rule is invisible when nothing violates it. */
+  @Test
+  def anOrdinaryGroundedAnswerPassesThroughUnchanged(): Unit =
+    val grounded = "Some components must be Java because their client is keyed on a Java method reference."
+    docsModel.fixedResponse(grounded)
+
+    val reply = httpClient
+      .POST("/ask")
+      .withRequestBody(DocsEndpoint.AskRequest(Some(InCorpusQuestion)))
+      .responseBodyAs(classOf[DocsEndpoint.AskReply])
+      .invoke()
+
+    assertThat(reply.status()).isEqualTo(StatusCodes.OK)
+    assertThat(reply.body().answer).isEqualTo(grounded)
+    assertThat(reply.body().citedSources.contains("interop-method-ref-wall")).isTrue()
+
+  /** SC-003, the criterion this capability most easily could have broken: an honest decline is a
+    * `200` decline, **never** a governance block. The sentinel contains no marker, so the rule passes
+    * it — asserted end-to-end here, not only as a unit test of the predicate. */
+  @Test
+  def theDeclineSentinelIsDeliveredAsADeclineNotABlock(): Unit =
+    docsModel.fixedResponse(DocsAgent.DontKnow)
+
+    val reply = httpClient
+      .POST("/ask")
+      .withRequestBody(DocsEndpoint.AskRequest(Some("what is the capital of France?")))
+      .responseBodyAs(classOf[DocsEndpoint.AskReply])
+      .invoke()
+
+    assertThat(reply.status()).isEqualTo(StatusCodes.OK)
+    assertThat(reply.body().answer).isEqualTo(DocsAgent.DontKnow)
+    assertThat(reply.body().citedSources.isEmpty).isTrue()
