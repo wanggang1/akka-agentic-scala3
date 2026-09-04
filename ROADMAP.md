@@ -7,8 +7,8 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 ## Where we are
 
-> **You are here:** Feature 12 (Agent guardrails) — **🚧 implemented on `014-agent-guardrails`, all
-> phases green, PR not yet opened** ([`specs/014-agent-guardrails`](specs/014-agent-guardrails/)).
+> **You are here:** Feature 12 (Agent guardrails) — **✅ merged to `main` 2026-09-04 (PR #25)**
+> ([`specs/014-agent-guardrails`](specs/014-agent-guardrails/)).
 > Runtime-enforced governance around cap-8's `DocsAgent`: a request-side jailbreak rule that refuses
 > hostile prompts **before any model call**, plus two response-side rules — one enforcing, one
 > record-only. The guarded agent names none of them; rules are declared in configuration and built
@@ -64,13 +64,13 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 > **(R6, settled empirically)**
 > a keyed query returns `Optional`, empty on no match, so `404` and an all-zero `200` stay distinguishable.
 >
-> **⏭️ Next:** open a PR for cap-12, then choose between **evaluation / LLM-judge** (attacks cap-8's
+> **⏭️ Next:** undecided — choose between **evaluation / LLM-judge** (attacks cap-8's
 > soft-grounding gap — and cap-12 sharpened the case for it, since `TextGuardrail.evaluate` receives
 > text only and so *cannot* check grounding; an evaluator that sees question *and* answer is the natural
 > successor) and **streaming** (highest novelty *and* risk — `StreamEffect` / Scala `Source` interop is
 > genuinely unknown).
 >
-> Capabilities 1–11 are **✅ done and merged**; 5–12 were exploratory follow-ups beyond the original four.
+> Capabilities 1–12 are **✅ done and merged**; 5–12 were exploratory follow-ups beyond the original four.
 >
 > **📄 Retrospective:** [`FINDINGS.md`](FINDINGS.md) consolidates the single `dynamicCall` finding that
 > explains every Scala-vs-Java outcome, plus the practical rubric. Caps 5–11 extend the through-line: the
@@ -97,7 +97,7 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 | 9 | **MCP server** — an `@McpEndpoint` at `/mcp` exposes cap-8's retrieval as a JSON-RPC `retrieve` tool + a corpus-sources resource; **Scala-clean** (endpoint, reflective dispatch — no method-ref wall; new `mcp-endpoint` key); a `@McpTool` must return String (throw→isError); fixed top-K 3 (SDK-3.6.0 optional-param bug). Server-side only | [`specs/011-mcp-knowledge-server`](specs/011-mcp-knowledge-server/) | ✅ Done — merged (PR #18) |
 | 10 | **MCP client** — a request-based `McpClientAgent` grounds via the **remote `retrieve` MCP tool** of this service's own cap-9 `/mcp` (agentic RAG — the model decides when to retrieve); closes the loop in-process, fully offline; `POST /grounded-ask`. **Scala-clean** — `.mcpTools(RemoteMcpTools.fromService(...))` is a URL-string builder, no method-ref wall; no cap-9 ACL edit; no citations (model owns retrieval). The tool loop **is** offline-testable (real `retrieve` round-trip via `TestModelProvider`) — a positive contrast to cap-7 D9 | [`specs/012-mcp-client`](specs/012-mcp-client/) | ✅ Done — merged (PR #19) |
 | 11 | **Views / read-model** — a `View` projects cap-6's `TodoEntity` state into one summary row per username; keyed lookup + the cross-user "who has open work" query an entity can't answer; `GET /todo-summaries/...`, read-only, **no model anywhere** (first fully model-free capability). **First split across the component/caller boundary:** the View is **Scala** (its `TableUpdater` in the companion `object` — a **bytecode-shape** requirement, a new hazard class), only the querying **endpoint** is Java (`ViewClient` is method-ref-only) — the rows are Jackson-annotated **Scala** case classes, once a build-order fix made Java→Scala references compile. Keyed query returns `Optional`; new `view` descriptor key | [`specs/013-views-read-model`](specs/013-views-read-model/) | ✅ Done — merged (PR #23) |
-| 12 | **Agent guardrails** — runtime-enforced governance around cap-8's `DocsAgent`: a request-side jailbreak rule (refused **before any model call**), plus response-side rules, one enforcing and one record-only; new `422` outcome on `POST /ask`, `200` answer / `200` decline / `400` validation untouched. Rules are declared in **configuration** and built reflectively from a class-name string — **not components**, so the descriptor is unchanged; the guarded agent names no rule (asserted by a test that reads its source). **All three Scala class forms load**, including `object` — the predicted failure was wrong (`setAccessible` opens the private ctor), which **corrects** cap-11's bytecode-shape rule to "does a ctor with those param types exist", not "is it public". Jailbreak = **one config line, zero Scala, no new dependency**. Two measured limits: a block can't be rethrown (type erased at the client → reply-channel sentinel), and a rule's name/category never reach application code (traces only → rules self-tag their explanation) | [`specs/014-agent-guardrails`](specs/014-agent-guardrails/) | 🚧 Implemented — PR not yet opened |
+| 12 | **Agent guardrails** — runtime-enforced governance around cap-8's `DocsAgent`: a request-side jailbreak rule (refused **before any model call**), plus response-side rules, one enforcing and one record-only; new `422` outcome on `POST /ask`, `200` answer / `200` decline / `400` validation untouched. Rules are declared in **configuration** and built reflectively from a class-name string — **not components**, so the descriptor is unchanged; the guarded agent names no rule (asserted by a test that reads its source). **All three Scala class forms load**, including `object` — the predicted failure was wrong (`setAccessible` opens the private ctor), which **corrects** cap-11's bytecode-shape rule to "does a ctor with those param types exist", not "is it public". Jailbreak = **one config line, zero Scala, no new dependency**. Two measured limits: a block can't be rethrown (type erased at the client → reply-channel sentinel), and a rule's name/category never reach application code (traces only → rules self-tag their explanation) | [`specs/014-agent-guardrails`](specs/014-agent-guardrails/) | ✅ Done — merged (PR #25) |
 
 **Status legend:** ✅ done · 📋 planned (spec written) · 🚧 in progress · ⬜ not started
 
