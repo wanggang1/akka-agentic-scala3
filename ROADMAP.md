@@ -7,7 +7,35 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 ## Where we are
 
-> **You are here:** Feature 11 (Views / read-model) — **✅ merged to `main` 2026-08-29 (PR #23)**
+> **You are here:** Feature 12 (Agent guardrails) — **🚧 implemented on `014-agent-guardrails`, all
+> phases green, PR not yet opened** ([`specs/014-agent-guardrails`](specs/014-agent-guardrails/)).
+> Runtime-enforced governance around cap-8's `DocsAgent`: a request-side jailbreak rule that refuses
+> hostile prompts **before any model call**, plus two response-side rules — one enforcing, one
+> record-only. The guarded agent names none of them; rules are declared in configuration and built
+> reflectively from a class-name string, so there is **no descriptor entry** and **no new dependency**.
+>
+> **Interop verdict — all three Scala class forms load, and the prediction that an `object` would fail
+> was wrong.** `class G(ctx: GuardrailContext)` (loader attempt 1) and `class G` (no-arg, attempt 2 —
+> a path the docs never mention) both work, as expected. A Scala **`object`** was predicted to fail
+> because its module class's only constructor is `private`; it **loads**, because Akka's
+> `ReflectiveDynamicAccess` calls `setAccessible(true)`. The runtime then holds a *fresh instance*, not
+> `MODULE$` — harmless only because scalac makes object fields **static**. That **corrects** the
+> generalisation cap-11 invited: the deciding property is **whether a constructor with the required
+> parameter types exists at all**, not whether it is public (cap-11's inner `TableUpdater` has *none*
+> → fails; an `object` has one, merely private → succeeds). Same bytecode-shape axis, different
+> failure reason.
+>
+> Three more results, all measured rather than reasoned: **(a)** the jailbreak rule needed **one config
+> line and zero Scala** — the SDK ships `"default jailbreak"` complete but inert (`agents = []`), and
+> the runtime evaluates it with the same in-process all-MiniLM ONNX model cap-8 already loads.
+> **(b)** A block **cannot be rethrown** from `onFailure` — the SDK catches it as a *"Failure mapping
+> error"* and the type is erased crossing the component client — so it travels the reply channel behind
+> a shared sentinel. **(c)** A rule's **name and category never reach application code**: the public
+> `GuardrailException` carries the bare explanation, and the composed audit line reaches traces and
+> metrics only. Rules we author name themselves inside their explanation; the SDK's `SimilarityGuard`
+> cannot, and reports `unknown`. Neither limit is Scala-specific — a Java agent hits both identically.
+>
+> **Previously:** Feature 11 (Views / read-model) — **✅ merged to `main` 2026-08-29 (PR #23)**
 > ([`specs/013-views-read-model`](specs/013-views-read-model/)). The CQRS **read side** over cap-6's
 > per-username `TodoEntity`: a `View` projects every entity state change into one summary row per assistant
 > (`total`/`open`/`completed`), serving both a keyed lookup and the cross-user *"who still has open work?"*
@@ -36,13 +64,13 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 > **(R6, settled empirically)**
 > a keyed query returns `Optional`, empty on no match, so `404` and an all-zero `200` stay distinguishable.
 >
-> **⏭️ Next:** undecided — the roadmap is open again. Remaining candidates: **guardrails** (wraps a model
-> call in SDK-registered machinery, so it re-tests "`Class`-keyed or method-ref-keyed?" on a new surface),
-> **evaluation / LLM-judge** (attacks cap-8's soft-grounding gap, but likely Scala-clean → low interop
-> novelty), **streaming** (highest novelty *and* risk — `StreamEffect` / Scala `Source` interop is genuinely
-> unknown).
+> **⏭️ Next:** open a PR for cap-12, then choose between **evaluation / LLM-judge** (attacks cap-8's
+> soft-grounding gap — and cap-12 sharpened the case for it, since `TextGuardrail.evaluate` receives
+> text only and so *cannot* check grounding; an evaluator that sees question *and* answer is the natural
+> successor) and **streaming** (highest novelty *and* risk — `StreamEffect` / Scala `Source` interop is
+> genuinely unknown).
 >
-> Capabilities 1–10 are **✅ done and merged**; 5–11 were exploratory follow-ups beyond the original four.
+> Capabilities 1–11 are **✅ done and merged**; 5–12 were exploratory follow-ups beyond the original four.
 >
 > **📄 Retrospective:** [`FINDINGS.md`](FINDINGS.md) consolidates the single `dynamicCall` finding that
 > explains every Scala-vs-Java outcome, plus the practical rubric. Caps 5–11 extend the through-line: the
@@ -50,7 +78,8 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 > endpoint's reflective dispatch (cap-9, no client at all), and `RemoteMcpTools`'s URL-string builder
 > (cap-10) are all on the Scala-friendly side of it; cap-11 shows the wall claiming a component's **caller
 > while the component itself stays Scala**, and adds a second, independent hazard axis: **reflected bytecode
-> shape**.
+> shape** — which cap-12 then re-tested on an unrelated mechanism and **corrected**: on that axis what
+> matters is whether a constructor with the right parameter types exists, not whether it is public.
 
 ## The path
 
@@ -68,6 +97,7 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 | 9 | **MCP server** — an `@McpEndpoint` at `/mcp` exposes cap-8's retrieval as a JSON-RPC `retrieve` tool + a corpus-sources resource; **Scala-clean** (endpoint, reflective dispatch — no method-ref wall; new `mcp-endpoint` key); a `@McpTool` must return String (throw→isError); fixed top-K 3 (SDK-3.6.0 optional-param bug). Server-side only | [`specs/011-mcp-knowledge-server`](specs/011-mcp-knowledge-server/) | ✅ Done — merged (PR #18) |
 | 10 | **MCP client** — a request-based `McpClientAgent` grounds via the **remote `retrieve` MCP tool** of this service's own cap-9 `/mcp` (agentic RAG — the model decides when to retrieve); closes the loop in-process, fully offline; `POST /grounded-ask`. **Scala-clean** — `.mcpTools(RemoteMcpTools.fromService(...))` is a URL-string builder, no method-ref wall; no cap-9 ACL edit; no citations (model owns retrieval). The tool loop **is** offline-testable (real `retrieve` round-trip via `TestModelProvider`) — a positive contrast to cap-7 D9 | [`specs/012-mcp-client`](specs/012-mcp-client/) | ✅ Done — merged (PR #19) |
 | 11 | **Views / read-model** — a `View` projects cap-6's `TodoEntity` state into one summary row per username; keyed lookup + the cross-user "who has open work" query an entity can't answer; `GET /todo-summaries/...`, read-only, **no model anywhere** (first fully model-free capability). **First split across the component/caller boundary:** the View is **Scala** (its `TableUpdater` in the companion `object` — a **bytecode-shape** requirement, a new hazard class), only the querying **endpoint** is Java (`ViewClient` is method-ref-only) — the rows are Jackson-annotated **Scala** case classes, once a build-order fix made Java→Scala references compile. Keyed query returns `Optional`; new `view` descriptor key | [`specs/013-views-read-model`](specs/013-views-read-model/) | ✅ Done — merged (PR #23) |
+| 12 | **Agent guardrails** — runtime-enforced governance around cap-8's `DocsAgent`: a request-side jailbreak rule (refused **before any model call**), plus response-side rules, one enforcing and one record-only; new `422` outcome on `POST /ask`, `200` answer / `200` decline / `400` validation untouched. Rules are declared in **configuration** and built reflectively from a class-name string — **not components**, so the descriptor is unchanged; the guarded agent names no rule (asserted by a test that reads its source). **All three Scala class forms load**, including `object` — the predicted failure was wrong (`setAccessible` opens the private ctor), which **corrects** cap-11's bytecode-shape rule to "does a ctor with those param types exist", not "is it public". Jailbreak = **one config line, zero Scala, no new dependency**. Two measured limits: a block can't be rethrown (type erased at the client → reply-channel sentinel), and a rule's name/category never reach application code (traces only → rules self-tag their explanation) | [`specs/014-agent-guardrails`](specs/014-agent-guardrails/) | 🚧 Implemented — PR not yet opened |
 
 **Status legend:** ✅ done · 📋 planned (spec written) · 🚧 in progress · ⬜ not started
 
@@ -196,13 +226,16 @@ Small additions made outside the four-capability path, useful as reference:
 - **Input validation** — blank `user`/`text` and malformed JSON rejected with `400`, no model call (PR #3).
 - **Health endpoint** — `GET /health`, added to prove descriptor-driven component discovery for Scala components (PR #4).
 
-## Known SDK-3.6.0 limitations (revisit on upgrade)
+## Known SDK-3.6.x limitations (revisit on upgrade)
 
 A few capabilities hit **version-specific** SDK bugs (distinct from the structural Scala-vs-Java findings
 in [`FINDINGS.md`](FINDINGS.md)) — worked around and consolidated in
 [`docs/sdk-3.6.0-limitations.md`](docs/sdk-3.6.0-limitations.md) as a single "re-check when we bump the
-SDK" list: cap-9's non-tunable MCP `maxResults`, cap-7's un-mockable request-based delegation (D9), and
-cap-6's `readLast(N)` tool-pair trim. Do the bump on its own branch with a full `mvn verify`.
+SDK" list: cap-9's non-tunable MCP `maxResults`, cap-7's un-mockable request-based delegation (D9),
+cap-6's `readLast(N)` tool-pair trim, and cap-12's **six guardrail documentation divergences** — of which
+two would change a design if fixed: a block cannot be rethrown to the caller (the type is erased crossing
+the component client), and a rule's name and category never reach application code at all. Do the bump on
+its own branch with a full `mvn clean verify`.
 
 ## How this doc is kept current
 

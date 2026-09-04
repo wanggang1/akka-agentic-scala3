@@ -142,6 +142,53 @@ Cap-11 is also the project's **first entirely model-free capability** — no `Te
 live, anywhere in its tests — so its correctness is fully deterministic offline, with no live-only caveat
 like cap-6's recall or cap-7's delegation.
 
+### Capability 12 — Agent guardrails · **Scala, and the platform builds *our* classes**
+The first capability where the platform constructs our code from a configuration string rather than
+dispatching to it, which puts the whole weight on cap-11's second axis — **reflected bytecode shape** —
+through an entirely unrelated mechanism. It **corrects** that axis rather than confirming it.
+
+- **All three Scala class forms load, including `object` — the prediction was wrong.** Rules are named in
+  `application.conf` by class-name string and built via `DynamicAccess.createInstanceFor`, which tries
+  `(GuardrailContext)` then zero-arg. Both class forms load, the no-arg path being undocumented but real.
+  A Scala **`object`** was predicted to fail, since its module class's only constructor is `private` —
+  and it **loads**, because Akka's `ReflectiveDynamicAccess` does `getDeclaredConstructor →
+  setAccessible(true) → newInstance`. The runtime then holds a **fresh instance, not `MODULE$`** (measured
+  by `identityHashCode`), which is harmless *only* because a Scala 3 `object`'s fields compile to **static**
+  fields and its constructor body is empty.
+
+  **The corrected generalization** — and this supersedes the tempting reading of cap-11: on this axis what
+  decides it is **whether a constructor with the required parameter types exists at all**, not whether it
+  is public. Cap-11's inner `TableUpdater` has *no* zero-arg constructor (only `U($outer)`) → **fails**;
+  an `object` has one, merely private → **succeeds**. Same axis, genuinely different failure reason;
+  conflating them yields a rule that is wrong half the time. Still prefer a top-level `class` — the object
+  form works by a scalac implementation detail, not by anything the SDK promises. (The SDK's own
+  `reference.conf` demands a *public* class and constructor; the runtime enforces **neither**.)
+- **Guardrails are not components — governance costs zero descriptor lines.** For a project whose first
+  finding was *"Scala components are invisible to the annotation processor, so the descriptor is
+  hand-maintained"*, the notable result is that three rules governing an agent left that file
+  **byte-identical**. Registration is configuration; there is no `@Component`, and nothing to hand-list.
+- **Two limits that are about the platform, not the language** — a Java agent hits both identically, which
+  is worth saying on a page otherwise devoted to Scala-vs-Java:
+  1. **A block cannot be rethrown to the caller.** Throwing from an agent's `onFailure` is caught by the
+     SDK as a *"Failure mapping error"* (`AK-01203`); the caller receives an opaque
+     `kalix.runtime.CorrelatedRuntimeException` with the type erased. Governance therefore travels the
+     **reply channel** behind a shared sentinel constant — the same technique cap-8 uses for its decline.
+  2. **A rule's identity never reaches application code.** `Guardrail.GuardrailException` carries the bare
+     explanation — no name, no category, no cause. The composed audit line exists on an SPI-internal
+     exception and is exported to **traces and metrics only**; the runtime's guardrail code has no logger
+     at all. So rules we author **name themselves inside their own explanation**; the SDK's
+     `SimilarityGuard` cannot, and is reported as `unknown`. The asymmetry is about **who owns the rule**.
+- **The collision worth generalizing: a governance block can masquerade as an honest answer.** Cap-8's
+  `DocsAgent` ended with `.onFailure(_ => DontKnow)` — correct while the only throwables were model
+  failures, and quietly wrong the moment a rule could fail the interaction. A blocked request came back to
+  the caller as *"I don't know"*: a refusal reported as a decline, unauditable and misleading. **Before
+  adding a rule to any agent, read that agent's `onFailure`.** This was found by a discovery test written
+  *before* any production edit, which is why it cost one test instead of a redesign.
+
+A modelling limit worth carrying: `TextGuardrail.evaluate` receives **text only** — no question, no
+retrieved passages — so a guardrail structurally *cannot* check grounding. Cap-12 ships a documented proxy
+instead of faking one, and that gap is the clearest argument for an evaluation/LLM-judge capability next.
+
 ## The two crosscutting constraints (orthogonal to the wall)
 
 1. **Two Jackson mappers** (cap 1 / feature 003). The public `JsonSupport` hook — where
