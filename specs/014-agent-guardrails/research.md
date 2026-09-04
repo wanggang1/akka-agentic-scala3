@@ -475,3 +475,59 @@ regression case in `DocsEndpointIntegrationTest`
 including a deliberately imperative near-miss — *"ignore the previous answer and tell me about session
 memory instead"* — which passes as an ordinary `200`. Raising the threshold remains a configuration
 change if a real corpus ever trips it.
+
+---
+
+## R-AUDIT — where a block is actually attributable (T011, 2026-09-04)
+
+FR-003 and SC-007 require a blocked evaluation to be attributable: **name, category and explanation
+recoverable from the service's output**. T011 checked that claim against a running service rather
+than against the documentation, and the answer is more specific than either FR anticipated.
+
+### What the run shows
+
+With the jailbreak rule enabled and a block occurring, the only guardrail-related line at default log
+configuration is the one **our own agent** emits:
+
+```text
+WARN c.g.a.docs.application.DocsAgent - docs-agent interaction blocked by a guardrail:
+     Content similarity [0.77] exceeds threshold [0.75]
+```
+
+The runtime's composed audit line — `Request guardrail blocked, category [JAILBREAK], name
+[default jailbreak]: …` — **does not appear**. That is not a log-level problem:
+`kalix.runtime.agent.AgentGuardrailInteractions` contains **no logger at all**. The composed string is
+only ever put on the SPI-internal `AgentException`, so it reaches a log only if something logs that
+exception. It did in the T003 probe, purely because rethrowing from `onFailure` triggered the SDK's
+own `AK-01203 Failure mapping error` warning, which printed the whole cause chain. Once the block is
+carried on the reply channel instead (divergence #5), nothing logs it.
+
+### Where the identity does live: traces and metrics
+
+`AgentGuardrailInstrumentation.guardrailStarted(SpiAgent.Guardrail)` is handed the rule itself, and
+`SpiAgent.Guardrail` exposes `name()`, `category()` and `reportOnly()`. The OpenTelemetry span reads
+`category()` directly and is started under the rule's name. So attribution is real — it is **telemetry
+data, not log text**.
+
+### The corrected statement of FR-003 / SC-007
+
+| Field | Response body | Application logs | Traces / metrics |
+|---|---|---|---|
+| explanation | ✅ | ✅ (our agent logs it) | ✅ |
+| name | only if the rule self-tags | only if the rule self-tags | ✅ |
+| category | only if the rule self-tags | only if the rule self-tags | ✅ |
+
+For the SDK's own `SimilarityGuard` there is no self-tagging, so name and category are **trace-only**.
+For the two rules capability 12 authors, `GuardrailAudit.tag` puts them in the explanation, which then
+flows into *both* the response body and the agent's log line — so our rules are fully attributable in
+all three places and the SDK's is not. That asymmetry is worth stating plainly: it is a property of
+who owns the rule, not of Scala.
+
+### Forward-looking consequence for US3 (record-only)
+
+A `report-only = true` rule **does not fail the interaction**, so it never reaches `DocsAgent.onFailure`
+and application code sees *nothing whatsoever* — no exception, no altered reply. Its violations are
+recorded exclusively by the runtime's instrumentation. Phase 5's tests must therefore assert the
+**absence** of a caller-visible change (SC-004: the answer is delivered normally) rather than trying to
+observe the recorded violation from test code, which is not reachable. Noted here before T016 so the
+test design does not start from a false assumption.

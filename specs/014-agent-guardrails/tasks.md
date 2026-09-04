@@ -67,7 +67,7 @@ rule's explanation, and no scripted model response is consumed.
 ### Implementation for User Story 1
 
 - [x] T010 [US1] Enable the SDK's pre-declared rule in `src/main/resources/application.conf` with the single override `akka.javasdk.agent.guardrails."default jailbreak".agents = ["docs-agent"]` — do **not** copy the block (research R2)
-- [ ] T011 [US1] Verify the log line for a blocked request carries name, category and explanation (FR-003, SC-007) and note the observed explanation text in `specs/014-agent-guardrails/research.md`
+- [x] T011 [US1] Verify the log line for a blocked request carries name, category and explanation (FR-003, SC-007) and note the observed explanation text in `specs/014-agent-guardrails/research.md`
 
 **Checkpoint**: MVP — governance is enforced with zero production code written. Commit this gate.
 
