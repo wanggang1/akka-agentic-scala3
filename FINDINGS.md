@@ -1,8 +1,8 @@
 # Findings — Scala 3 on the Java-first Akka SDK
 
-What building **eleven capabilities** in Scala 3 on the Java-first Akka SDK taught us,
+What building **twelve capabilities** in Scala 3 on the Java-first Akka SDK taught us,
 consolidated into one page. The per-capability design detail lives in [`specs/`](specs/); the
-day-to-day interop workarounds live in [`README.md`](README.md) "Scala interop notes" §1–13; the
+day-to-day interop workarounds live in [`README.md`](README.md) "Scala interop notes" §1–14; the
 status table lives in [`ROADMAP.md`](ROADMAP.md). **This page is the synthesis** — the single
 finding that explains every outcome, and the rubric it yields.
 
