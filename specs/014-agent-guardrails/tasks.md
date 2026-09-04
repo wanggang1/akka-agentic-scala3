@@ -136,11 +136,11 @@ an agent it does not name.
 **Purpose**: Convert the Phase 0 predictions into recorded results. These carry no story label
 because they serve the project's research goal, not a user journey.
 
-- [ ] T022 [P] Add the negative probe `ObjectFormGuard` as a Scala **`object`** implementing `TextGuardrail` in `src/test/scala/com/gwgs/akkaagentic/docs/application/GuardrailLoadingIntegrationTest.scala`, and assert the runtime **cannot** construct it (its constructor is private; only `MODULE$` exists) — the cross-mechanism confirmation of cap-11 R2's bytecode-shape hazard. It must never appear in `src/main/resources/application.conf`
-- [ ] T023 [P] In the same file, assert both positive forms load: the `(GuardrailContext)` class and the no-arg class, covering the loader's two attempts (research R1)
-- [ ] T024 [P] In the same file, assert a deliberately misspelled `class` value fails service startup rather than leaving the agent silently unguarded (FR-010, research R4)
-- [ ] T025 Confirm `src/main/resources/META-INF/akka-javasdk-components_com.gwgs_akka-agentic-scala3.conf` is **unchanged** and the suite is green — the evidence that a guardrail is not a component (FR-013, research R5)
-- [ ] T026 Record all four results in `specs/014-agent-guardrails/research.md`, including whether each prediction held
+- [x] T022 [P] Add the negative probe `ObjectFormGuard` as a Scala **`object`** implementing `TextGuardrail` in `src/test/scala/com/gwgs/akkaagentic/docs/application/GuardrailLoadingIntegrationTest.scala`, and measure what the runtime actually does with it. **Result: the prediction was wrong** — `ReflectiveDynamicAccess` calls `setAccessible(true)`, so the private constructor loads; the runtime gets a fresh instance rather than `MODULE$`, which is harmless only because scalac makes object fields static (R1-FINAL). It must never appear in `src/main/resources/application.conf`
+- [x] T023 [P] In the same file, assert both positive forms load: the `(GuardrailContext)` class and the no-arg class, covering the loader's two attempts (research R1)
+- [x] T024 [P] In the same file, assert a deliberately misspelled `class` value fails service startup rather than leaving the agent silently unguarded (FR-010, research R4)
+- [x] T025 Confirm `src/main/resources/META-INF/akka-javasdk-components_com.gwgs_akka-agentic-scala3.conf` is **unchanged** and the suite is green — the evidence that a guardrail is not a component (FR-013, research R5)
+- [x] T026 Record all four results in `specs/014-agent-guardrails/research.md`, including whether each prediction held
 
 **Checkpoint**: The interop finding is resolved with evidence. Commit this gate.
 

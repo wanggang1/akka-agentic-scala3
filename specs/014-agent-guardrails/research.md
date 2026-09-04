@@ -679,3 +679,107 @@ Attachment by role was considered and declined (R8). This service has one agent 
 adding a role annotation to exercise a mechanism we would not otherwise use is the speculative
 generality the constitution forbids. Recorded as a known, untested alternative rather than silently
 skipped.
+
+---
+
+## R1-FINAL — the interop question, answered (T022–T026, 2026-09-04)
+
+This is the capability's headline deliverable (FR-013 / SC-009). Four declarations, four runtimes,
+four measured outcomes. **One of the three predictions was wrong, and the reason is more useful than
+the prediction would have been.**
+
+| Form | Predicted | **Measured** |
+|---|---|---|
+| `class G(ctx: GuardrailContext)` | loads on attempt 1 | ✅ loads |
+| `class G` (no-arg) | loads on attempt 2 | ✅ loads |
+| **`object G`** | **fails both attempts** | ❌ **wrong — it loads** |
+| `class = "…NoSuchGuard"` (typo) | should fail loudly | ✅ fails at **startup** |
+
+### Why the `object` prediction was wrong
+
+R1 reasoned that a Scala `object` compiles to a module class whose only constructor is `private`, so
+neither loader attempt could reach it. The first half is true — `javap -p` on the shipped artifact
+confirms `private com.gwgs…ObjectFormGuard$();`. The second half was an unchecked assumption.
+
+Akka's `ReflectiveDynamicAccess.createInstanceFor` does this (verified in `akka-actor` bytecode):
+
+```text
+getDeclaredConstructor(types…) → setAccessible(true) → newInstance(values…)
+```
+
+**`setAccessible(true)`.** Private is not an obstacle. The mistake was importing an intuition about
+visibility into a mechanism that explicitly discards it.
+
+### What actually happens, and why it is harmless here
+
+The runtime constructs a **fresh instance**, not `MODULE$` — measured directly by having the probe
+record `System.identityHashCode(this)`:
+
+```text
+R1 object form >>> Loaded | evaluations=1 | evaluator=1582938326 | MODULE$=174933319
+```
+
+Two different objects. And yet `evaluations` — a `var` on the `object` — reads `1` when inspected
+through `MODULE$`. The explanation is in the bytecode: **a Scala 3 `object`'s fields compile to
+`static` fields on the module class** (`private static volatile int evaluations`, initialised in
+`<clinit>`), and the module constructor body is empty (`super()` and return). So the duplicate
+instance shares *all* state with `MODULE$` and initialises nothing of its own.
+
+The `object` form therefore does not merely load — it **works**. But it works because of a scalac
+implementation detail, not because of anything the SDK promises.
+
+### The corrected statement of the hazard class
+
+Capability 11 found that a Scala **inner class** `TableUpdater` cannot be constructed by the SDK's
+reflection. It is tempting — and this capability's plan did exactly this — to generalise that to
+*"Scala nesting forms are dangerous around SDK reflection."* The measurement says something more
+precise:
+
+> The deciding property is **whether a constructor with the required parameter types exists at all**,
+> not whether it is public.
+
+- cap-11's inner class: `Updater(V $outer)` — there is **no** zero-arg constructor. Nothing to find.
+  **Fails.**
+- an `object`: there **is** a zero-arg constructor; it is merely private, and `setAccessible` opens it.
+  **Succeeds.**
+
+Both are the bytecode-shape axis, and both are real; but they fail (or don't) for genuinely different
+reasons, and conflating them would have produced a rule that is wrong half the time.
+
+**Recommendation, on the corrected reasoning**: still author guardrails as top-level `class`es —
+because the `object` form's correctness rests on where scalac happens to put object state, and
+because the SDK's own `reference.conf` asks for a public constructor. Just not for the reason
+originally given: it is a robustness preference, not an impossibility.
+
+### Divergence #6 — the documented constructor requirement is not enforced
+
+`reference.conf` states the guardrail class "must … **be public and have a public constructor**". The
+runtime enforces neither: a private constructor is opened with `setAccessible`. A rule that the
+platform documents but does not check is worth recording, because code can come to depend on the
+unenforced behaviour without anyone noticing.
+
+### FR-010 — a bad declaration fails loudly, at startup
+
+The typo case is unambiguous, and better than R4 hoped: construction is **eager**, so the service
+never starts with a broken rule rather than discovering it on the first request.
+
+```text
+FailedAtStartup(… IllegalArgumentException: Guardrail [probe missing class] must implement
+  [akka.javasdk.agent.Guardrail] and optionally have a constructor with GuardrailContext parameter)
+```
+
+No window exists in which an agent is silently unguarded. (Note the message is the same one a
+*wrong-type* class would produce — it does not distinguish "class not found" from "class found but
+unusable", which makes a typo slightly harder to diagnose than it needs to be.)
+
+## R5-CONFIRMED — a guardrail is not a component (T025)
+
+`src/main/resources/META-INF/akka-javasdk-components_com.gwgs_akka-agentic-scala3.conf` is
+**byte-identical** to its state before this capability began — last touched by cap-11 (`88f21ca`),
+untouched by every cap-12 commit — while three rules govern `docs-agent` and the full suite is green.
+
+That is the whole proof. Guardrails are registered by **configuration**, constructed reflectively from
+a class-name string, and never enumerated as components. For a project whose first interop finding was
+*"Scala components are invisible to the annotation processor, so the descriptor must be hand-maintained"*,
+the notable result is that this capability adds **nothing** to that file — the hand-maintenance burden
+does not grow with governance.
