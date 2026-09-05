@@ -36,6 +36,11 @@ object AnswerEvaluator:
     * restated here; a probe test pins that it still resolves (research R1). */
   val HallucinationJudgeId: String = "hallucination-evaluator"
 
+  /** The judge authored in this capability — an ordinary component of ours, listed in the descriptor
+    * under `agent`. Reached the same way as the SDK's, which is the point: to a consumer of verdicts
+    * the two are indistinguishable (SC-007). */
+  val DeclineJudgeId: String = "decline-judge"
+
   /** Four outcomes, and the last two are **not** `Failed`.
     *
     * A judge that could not form an opinion (`Errored`) and a subject that cannot be judged
@@ -89,9 +94,16 @@ final class AnswerEvaluator(componentClient: ComponentClient, knowledgeStore: Kn
       verdicts = verdicts
     )
 
-  /** Which judges are consulted, in a stable order. Capability 13 phase 4 adds the authored judge. */
-  private def judgeIds: List[String] = List(HallucinationJudgeId)
+  /** Which judges are consulted, and in what order — one the platform ships, one we wrote. */
+  private def judgeIds: List[String] = List(HallucinationJudgeId, DeclineJudgeId)
 
+  /** Both judges run **independently**: each is wrapped separately, so one erroring never suppresses
+    * the other's verdict (FR-007, SC-004). They are also called identically — by component id through
+    * `dynamicCall` — even though one belongs to the SDK and one to us. That symmetry is the finding,
+    * not a convenience: the agent client's string-keyed escape hatch reaches components we do not own
+    * (research R1), where the documented `.method(Evaluator::evaluate)` form cannot be written in
+    * Scala at all (T004).
+    */
   private def judge(question: String, referenceText: String, answer: String): List[Verdict] =
     List(
       verdictOf(HallucinationJudgeId) {
@@ -99,9 +111,16 @@ final class AnswerEvaluator(componentClient: ComponentClient, knowledgeStore: Kn
           .forAgent()
           .inSession(UUID.randomUUID().toString)
           .dynamicCall[HallucinationEvaluator.EvaluationRequest, HallucinationEvaluator.Result](
-            HallucinationJudgeId // the docs' `.method(Evaluator::evaluate)` form is the wall (R1/T004)
+            HallucinationJudgeId
           )
           .invoke(new HallucinationEvaluator.EvaluationRequest(question, referenceText, answer))
+      },
+      verdictOf(DeclineJudgeId) {
+        componentClient
+          .forAgent()
+          .inSession(UUID.randomUUID().toString)
+          .dynamicCall[DeclineJudge.EvaluationRequest, DeclineJudge.Result](DeclineJudgeId)
+          .invoke(DeclineJudge.EvaluationRequest(question, referenceText, answer))
       }
     )
 

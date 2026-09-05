@@ -5,7 +5,7 @@ import akka.javasdk.agent.evaluator.HallucinationEvaluator
 import akka.javasdk.testkit.{TestKit, TestKitSupport, TestModelProvider}
 import com.gwgs.akkaagentic.docs.api.DocsEndpoint
 import com.gwgs.akkaagentic.docs.application.{DocsAgent, KnowledgeStore}
-import com.gwgs.akkaagentic.eval.application.AnswerEvaluator
+import com.gwgs.akkaagentic.eval.application.{AnswerEvaluator, DeclineJudge}
 import com.gwgs.akkaagentic.eval.domain.ReferenceText
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.{BeforeEach, Test}
@@ -25,6 +25,7 @@ class EvaluationEndpointIntegrationTest extends TestKitSupport:
 
   private val docsModel = new TestModelProvider()
   private val judgeModel = new TestModelProvider()
+  private val declineJudgeModel = new TestModelProvider()
 
   /** A second store built from the same corpus, used as the independent reference for SC-002 — the
     * same technique capability 9's parity test uses. */
@@ -38,11 +39,17 @@ class EvaluationEndpointIntegrationTest extends TestKitSupport:
       .withAdditionalConfig("akka.javasdk.agent.googleai-gemini.api-key = n/a")
       .withModelProvider(classOf[DocsAgent], docsModel)
       .withModelProvider(classOf[HallucinationEvaluator], judgeModel)
+      .withModelProvider(classOf[DeclineJudge], declineJudgeModel)
 
   @BeforeEach
   def reset(): Unit =
     docsModel.reset()
     judgeModel.reset()
+    declineJudgeModel.reset()
+    // Every test needs a decline verdict; only the tests that assert on it override this.
+    declineJudgeModel.fixedResponse(
+      """{"explanation":"The decision matched the reference text.","label":"appropriate"}"""
+    )
 
   private def evaluate(question: String) =
     httpClient
@@ -81,6 +88,12 @@ class EvaluationEndpointIntegrationTest extends TestKitSupport:
     assertThat(grounding.outcome).isEqualTo("passed")
     assertThat(grounding.judge).isEqualTo("hallucination-evaluator")
     assertThat(grounding.explanation).contains("restates the durability")
+
+    // SC-007: the judge the platform ships and the judge we wrote arrive in the same shape, in a
+    // stable order, and neither reports `unknown` — the capability 12 contrast (research R5).
+    assertThat(body.verdicts.map(_.judge).mkString(", "))
+      .isEqualTo("hallucination-evaluator, decline-judge")
+    assertThat(verdict(body, AnswerEvaluator.DeclineJudgeId).outcome).isEqualTo("passed")
 
   /** US1 acceptance 2: an answer the passages do not support is judged `failed` — the verdict is a
     * real signal, not a rubber stamp. */
@@ -169,6 +182,11 @@ class EvaluationEndpointIntegrationTest extends TestKitSupport:
     assertThat(body.answer).isEqualTo(DocsAgent.DontKnow)
     assertThat(body.citedSources.isEmpty).isTrue()
     assertThat(verdict(body, AnswerEvaluator.HallucinationJudgeId).outcome).isEqualTo("passed")
+    // The point of US2: a decline is not written off as unjudgeable — the authored judge rates the
+    // decision itself, which is the one thing capability 8 never checked.
+    val decline = verdict(body, AnswerEvaluator.DeclineJudgeId)
+    assertThat(decline.outcome).isEqualTo("passed")
+    assertThat(decline.explanation).contains("matched the reference text")
 
   /** FR-010: validation runs first. A blank question is rejected before retrieval, before the
     * assistant, and before any judge — proven by both models still holding their scripted responses
