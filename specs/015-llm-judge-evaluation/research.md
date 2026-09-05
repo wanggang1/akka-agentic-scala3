@@ -536,6 +536,44 @@ developer following `llm_eval.html.md` gets a compiling program and a misdirecti
 Recorded for `docs/sdk-3.6.0-limitations.md` (T030); the fix is one line — use `dynamicCall(id)`.
 
 
+## R6 — measured (T021/T022)
+
+Both not-applicable causes behave as the design predicted, but their **reachability differs**, and the
+difference is recorded rather than papered over.
+
+**A refusal is reachable end to end, and was driven as such.** Capability 13 configures no rule of its
+own; the path exists purely because capability 12's `default jailbreak` guards `docs-agent` and
+`/evaluate` calls the same agent. Sending capability 12's DAN fixture to `POST /evaluate` returns
+`200` with an empty answer, no citations, and both verdicts `not-applicable`.
+
+The test proves the judges were **never invoked**, and proves it by omission rather than by claim: no
+model is scripted for either judge, so had one been called `TestModelProvider` would have failed it and
+the verdict would read `errored`. `not-applicable` is therefore only reachable if the applicability
+rule short-circuited before any model call — the saving R6 predicted, made observable.
+
+**Empty reference material is *not* reachable through the endpoint.** Capability 8's corpus is canned
+and retrieval always returns top-3, so `referenceText` is never blank in practice. The rule still has
+to be right, and is covered where it is genuinely reachable — a domain unit test
+(`EvaluationApplicabilityTest.emptyReferenceMaterialIsNotApplicable`) — rather than by staging an
+artificial path to it through HTTP. Stated here so the coverage gap is a decision on the record and not
+an omission someone discovers later.
+
+**Ordering matters and is pinned**: a refusal against empty reference material reports the *refusal*,
+the more specific and more useful explanation.
+
+---
+
+## Suite after US3 (T023)
+
+```
+mvn clean verify  ->  BUILD SUCCESS
+  unit (surefire):        148   (baseline 127, +21)
+  integration (failsafe): 142   (baseline 121, +21)
+```
+
+Capability 8's and capability 12's suites pass **unmodified** — no existing test file was touched.
+
+
 ## Design decisions falling out of R1–R6
 
 | # | Decision | Rationale | Alternative rejected |
