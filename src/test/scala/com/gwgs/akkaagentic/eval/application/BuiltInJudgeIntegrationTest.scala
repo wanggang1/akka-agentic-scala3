@@ -10,40 +10,35 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
 
-/** T003/T004 — the discovery test that gates every production change in capability 13.
+/** T028 — the capability's interop finding, kept as a permanent regression test.
   *
-  * Research R1 and R3 were both settled by reading the shipped bytecode, and both are load-bearing:
-  * if either is wrong, the design changes rather than the code. Capability 12's equivalent probe
-  * disproved two design assumptions before any production line was written, so cap-13 pays the same
-  * one-test premium before committing to a shape.
+  * This began as the T003/T004 discovery probe that gated every production change: research R1 and R3
+  * were read from the shipped bytecode, and neither had been executed. Both held, so the probe is
+  * promoted rather than deleted — **if a future SDK stops registering the evaluators as provided
+  * components, or changes the model-override precedence, this file fails instead of the service.**
   *
-  * Four facts, none of which has actually been executed before this test:
+  * What it pins:
   *
-  *   a. **R1** — does `dynamicCall("hallucination-evaluator")` reach an agent the **SDK owns**?
-  *      `ComponentLocator$` lists the three evaluators in `agentProvidedComponents`, so they should be
-  *      in `agentClassById` alongside ours. Every previous `dynamicCall` in this project targeted an
-  *      agent *we* declared; this is the first time the escape hatch is pointed at a runtime-owned
-  *      component. Capabilities 4, 6 and 11 each had to quarantine Java when they needed one.
-  *   b. **R3** — does `withModelProvider(classOf[HallucinationEvaluator], …)` actually override the
-  *      model? `LlmAsJudge` sets one *explicitly* from
-  *      `akka.javasdk.agent.evaluators.hallucination-evaluator.model-provider`, so a naive reading
-  *      says the test provider is ignored and every test would call a real model. `AgentImpl` reads
-  *      `overrideModelProvider(id).getOrElse(requestModel.modelProvider)`, which says otherwise. If
-  *      the naive reading wins, the built-in judge is live-only and the whole testing design changes.
-  *   c. what the SDK's own parser requires of a scripted reply, and how `label` maps to `passed`.
-  *   d. what an **unrecognised** label does — expected to throw from the SDK's own
-  *      `toEvaluationResult`. This is not curiosity: it is the deterministic trigger the `errored`
-  *      outcome (FR-005, SC-004) is designed around, and it must come from the SDK rather than from
-  *      us breaking something.
+  *   a. **R1** — `dynamicCall("hallucination-evaluator")` reaches an agent the **SDK owns**.
+  *      `ComponentLocator$` lists the three evaluators in `agentProvidedComponents`, so they sit in
+  *      `agentClassById` alongside ours. Every previous `dynamicCall` in this project targeted an
+  *      agent *we* declared; this is the escape hatch pointed at a runtime-owned component.
+  *      Capabilities 4, 6 and 11 each needed one and each had to quarantine Java to reach it.
+  *   b. **R3** — `withModelProvider(classOf[HallucinationEvaluator], …)` overrides the model even
+  *      though `LlmAsJudge` sets one *explicitly* from
+  *      `akka.javasdk.agent.evaluators.hallucination-evaluator.model-provider`. `AgentImpl` reads
+  *      `overrideModelProvider(id).getOrElse(requestModel.modelProvider)`. Without this, the built-in
+  *      judge would be live-only and the capability's whole testing design would change.
+  *   c. the label vocabulary the SDK's own parser and `toEvaluationResult` enforce, both directions.
+  *   d. that an **unrecognised** label fails — the deterministic, SDK-supplied trigger behind the
+  *      `errored` verdict (FR-005, SC-004). Not a curiosity: it is load-bearing.
   *
-  * **T004, the negative control (FR-013).** The documentation calls a built-in judge with a Java
-  * method reference. This test also *attempts* the Scala equivalent and records exactly what a
-  * developer following the docs would see — "it does not work" is not a finding; the message is.
-  *
-  * The test does not assume its answers: it classifies what it observes and logs it, then asserts
-  * only the properties the capability actually depends on.
+  * **The negative control (FR-013).** The documentation calls a built-in judge with a Java method
+  * reference. The last test attempts the Scala equivalent and records exactly what a developer
+  * following the docs sees — "it does not work" is not a finding; the message is, and this one is
+  * actively misleading.
   */
-class BuiltInJudgeProbeIntegrationTest extends TestKitSupport:
+class BuiltInJudgeIntegrationTest extends TestKitSupport:
 
   private val logger = LoggerFactory.getLogger(getClass)
   private val judgeModel = new TestModelProvider()
@@ -99,9 +94,9 @@ class BuiltInJudgeProbeIntegrationTest extends TestKitSupport:
         // Two distinguishable failure worlds, and the message tells them apart: an unknown component
         // id means R1 is wrong (the evaluators are not in agentClassById); anything about a model
         // connection means R3 is wrong (the explicit .model() won and a real model was called).
-        logger.error("R1/R3 MEASURED NEGATIVE: {}: {}", e.getClass.getName, e.getMessage)
+        logger.error("R1/R3 REGRESSION: {}: {}", e.getClass.getName, e.getMessage)
         throw new AssertionError(
-          s"probe failed — the design depends on this working: ${e.getClass.getName}: ${e.getMessage}",
+          s"the capability depends on this working: ${e.getClass.getName}: ${e.getMessage}",
           e
         )
 

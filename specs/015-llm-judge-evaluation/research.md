@@ -641,6 +641,122 @@ capability's tests must avoid those markers unless the block is the thing under 
 
 ---
 
+## The consolidated interop finding (T029)
+
+**Question.** Can a Scala caller use the Akka SDK's own LLM-as-judge evaluators, and author one of its
+own?
+
+**Answer: yes to both — but not by the route the documentation shows, and the two halves are
+registered in opposite ways.**
+
+### 1. Calling the SDK's judges — `dynamicCall` reaches components we do not own
+
+`akka-context/sdk/agents/llm_eval.html.md` calls a built-in judge as
+`.method(ToxicityEvaluator::evaluate)`. That is a Java method reference resolved from a
+`SerializedLambda`, and it is the wall this project has hit since capability 2. **From Scala the
+nearest equivalent compiles and then fails at invocation with a message that names the wrong class**
+(see "T004" above).
+
+The working route is the escape hatch capability 1 established:
+
+```scala
+componentClient.forAgent().inSession(sessionId)
+  .dynamicCall[HallucinationEvaluator.EvaluationRequest, HallucinationEvaluator.Result](
+    "hallucination-evaluator")
+  .invoke(new HallucinationEvaluator.EvaluationRequest(question, referenceText, answer))
+```
+
+It works because `AgentClientImpl.dynamicCall` resolves the target off `agentClassById` — a
+`Map[String, Class[Agent]]` — and finds the command handler by reflection. No lambda is involved.
+And `agentClassById` holds **every registered agent, the runtime's as well as ours**:
+`ComponentLocator$` provides `HallucinationEvaluator`, `ToxicityEvaluator` and `SummarizationEvaluator`
+in the same hardcoded list as `SessionMemoryEntity`, `PromptTemplate` and `TaskEntity`.
+
+**This sharpens the project's oldest finding by one clause.** The rule was *"the method-reference wall
+is a property of the client"*. Capabilities 4, 6 and 11 each needed a **runtime-owned** component —
+`SessionMemoryEntity`, `TodoEntity`, the `View` — and each had to quarantine Java to reach it, which
+made the wall look like a property of *ownership*. It is not. The precise statement is:
+
+> **The wall is a property of *which* client — and the agent client, alone in having
+> `dynamicCall(String)`, is on the right side of it *even for components the SDK owns*.**
+
+Capability 13 needed a runtime-owned component too, and needed **zero** Java, purely because that
+component happens to be an agent. A jar-wide sweep in capability 11 already established that
+`dynamicCall(String)` exists on `AgentClientInSession` only; capability 13 shows what that
+asymmetry is worth when the component you need is on the lucky side of it.
+
+### 2. Authoring a judge — an ordinary agent, and the *return type* is the switch
+
+A custom evaluator is an `Agent` with one command handler. There is no `@Evaluator` annotation and
+`@AgentRole` is not consulted for it. `Reflect$.isEvaluatorAgent` takes the handler's return class and
+asks `EvaluationResult.class.isAssignableFrom(...)`; `Sdk` folds that boolean into the
+`AgentDescriptor`, and **that flag is what routes verdicts into metrics and traces**.
+
+The failure mode is quiet: drop `extends EvaluationResult` and you have a compiling, working, silently
+un-instrumented agent. `EvaluatorDescriptorTest` pins it for that reason.
+
+### 3. The descriptor asymmetry — the sharpest contrast with capability 12
+
+| | capability 12 (guardrails) | capability 13 (evaluators) |
+|---|---|---|
+| Registered by | configuration: `akka.javasdk.agent.guardrails.<name>.class` | being a component |
+| Constructed by | the runtime, reflectively, from a class-name string | the runtime, as an agent |
+| Descriptor lines **we** add | **0** | **1** (under `agent`) |
+| SDK's own instances | `"default jailbreak"`, inert until `agents = [...]` | three provided components, always present, never listed |
+| Interop axis | bytecode **shape** (cap-11's axis) | the **method-reference wall** (cap-2's axis) |
+| Verdict identity reaching our code | **none** — name and category are SPI-internal | **all of it** — a verdict is a return value |
+
+Two mechanisms that both wrap an agent's behaviour, registered in two entirely different ways, sitting
+on two different interop axes, with opposite attribution properties. Neither generalises to the other,
+and a project that met only one of them would draw the wrong general rule from it.
+
+### 4. What this cost in Java
+
+Nothing. Capability 13 contains **no Java at all** — not in production, not in tests. Compare
+capability 2 (a whole capability), capability 6 (an entity plus its caller), capability 4 (one test),
+capability 11 (one endpoint). The reason is entirely the R1 clause above.
+
+
+---
+
+## SC-003 — asserted mechanically (T031)
+
+The claim "capability 8 and capability 12 are untouched" is worth nothing unless it is shown, so here
+is the showing rather than the saying.
+
+```
+$ git diff --stat main -- src/main/scala/com/gwgs/akkaagentic/docs/
+(no output)
+```
+
+Every blob hash matches the T002 baseline exactly:
+
+```
+a04913e2  docs/api/DocsEndpoint.scala              ff34379e  docs/application/AnswerLengthGuard.scala
+e54d1827  docs/application/DocsAgent.scala          d3548d87  docs/application/LinkedAnswerGuard.scala
+4d7767c6  docs/application/KnowledgeStore.scala     bd404fe1  docs/domain/AnswerRules.scala
+366ac674  docs/domain/AskQuestion.scala             35e2bc11  docs/domain/GuardrailAudit.scala
+04625016  docs/domain/KnowledgeCorpus.scala         0f9ea42e  docs/domain/Passage.scala
+```
+
+`git diff main -- src/test/scala/com/gwgs/akkaagentic/docs/ src/test/java/` is likewise empty: no
+existing test was modified either, which is the other half of SC-003.
+
+The two **shared** files are additive only. `git diff main -- application.conf` contains `+` lines and
+no `-` lines: capability 12's entire `guardrails` block is byte-for-byte intact and capability 13
+appends a top-level `eval` block. The descriptor gains exactly two entries and edits none
+(`EvaluatorDescriptorTest.capability13AddsExactlyTwoDescriptorEntries` pins the count, so an accidental
+third or an edit to an existing line fails the suite).
+
+**Why this was achievable at all**, restated because it is a research result and not discipline:
+research R4 found no `Consume.From*` source for a request-based agent, so evaluation *could not* have
+been attached to `POST /ask` as a background hook even had that been preferred. The separate surface
+was the only available shape, and it happens to make SC-003 provable with `git diff` instead of by
+argument. Capability 12 earned one line of change in `DocsAgent`; capability 13 earned none.
+
+
+---
+
 ## What is offline-provable, and what is not (FR-015, SC-008)
 
 **Offline (the whole functional surface):** the built-in judge (R3), the authored judge, the
