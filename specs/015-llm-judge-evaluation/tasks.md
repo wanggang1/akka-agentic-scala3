@@ -158,7 +158,7 @@ outcome strings; with `eval.enabled = false` the answer still returns and `verdi
 - [x] T034 [P] Add the capability 13 row to `ROADMAP.md` and the capability 13 entry to `FINDINGS.md`, including the deliberate contrast with capability 12: governance costs **zero** descriptor lines because a guardrail is not a component; evaluation costs **one** because a judge is
 - [x] T035 [P] Update `specs/015-llm-judge-evaluation/quickstart.md` against what was actually measured — correct any example whose shape differs from the implementation, as capability 12 had to
 - [x] T036 Run `mvn clean verify` (not `mvn verify`) and record the final unit + integration counts against the T001 baseline
-- [ ] T037 Live smoke test against Ollama `qwen3:8b`: the four flows above, end to end. Record what was seen in `README.md` and `research.md` — **including anything unflattering**, as capability 12 did with the jailbreak variant that got through. Assert nothing about verdict *values*: a live judge's opinion is not deterministic, and the offline suite is the proof
+- [x] T037 Live smoke test against Ollama `qwen3:8b`: the four flows above, end to end. Record what was seen in `README.md` and `research.md` — **including anything unflattering**, as capability 12 did with the jailbreak variant that got through. Assert nothing about verdict *values*: a live judge's opinion is not deterministic, and the offline suite is the proof
 
 **Checkpoint**: Capability complete, documented, and honestly reported.
 

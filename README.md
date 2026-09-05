@@ -1962,6 +1962,32 @@ EVAL_ENABLED=false mvn compile exec:java
 > rewritten because a judge failed it. And the claim that verdicts reach metrics and traces rests on
 > the SDK's mechanism, not on observation: `TelemetryReader` returns no spans under the TestKit and
 > metrics have no reader at all (`docs/sdk-3.6.0-limitations.md` §5b).
+>
+> *Verified live* (Ollama `qwen3:8b`), all four paths end to end, with the verdicts produced by a real
+> model and **zero `ERROR` lines** in the log. An in-corpus question returned an answer that
+> reconstructed the corpus's own method-ref-wall and two-mapper findings — un-hallucinatable, so
+> retrieval and grounding genuinely ran — and both judges passed with explanations that **quote the
+> reference passages** rather than restating the answer:
+> *"The answer correctly identifies two reasons from the reference text: (1) the 'method-reference
+> wall' (reference [1]) … (2) the Scala-unaware mapper … explicitly supported by the reference text
+> without adding unverified information."* The decline case returned `"I don't know"` with no
+> citations, and `decline-judge` passed with *"The reference text contains no information about the
+> capital of France. The three sections describe different agents (help-desk, greeting, activity
+> coordinator) but none provide factual knowledge about geographical capitals."* — naming the three
+> retrieved passages by subject, so it was reasoning about the real reference text. A DAN prompt
+> returned `200` with both verdicts `not-applicable` and `WARN docs-agent interaction blocked by a
+> guardrail: Content similarity [0.77] exceeds threshold [0.75]` in the log: capability 12's rule
+> firing on a surface it never knew about, with capability 13 configuring nothing. A blank question
+> returned `400`.
+>
+> **One result reported because it is a limit of the smoke test, not a success.** No `failed` verdict
+> could be provoked live. Several attempts to make the assistant over-claim — including *"what does
+> capability 20 cover?"*, chosen because no such capability exists — produced an honest `"I don't
+> know"` and two `passed` verdicts. That is encouraging for capability 8, but it means **the live run
+> exercised only one half of each judge**. The `failed` and `errored` paths are proven *offline*, on
+> scripted input, where they can be produced deterministically. Four green live verdicts are not
+> evidence that a judge *can* disagree — and that asymmetry is exactly why nothing in this capability
+> acts on a verdict.
 
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.
