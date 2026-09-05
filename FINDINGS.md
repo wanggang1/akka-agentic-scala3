@@ -1,8 +1,8 @@
 # Findings — Scala 3 on the Java-first Akka SDK
 
-What building **twelve capabilities** in Scala 3 on the Java-first Akka SDK taught us,
+What building **thirteen capabilities** in Scala 3 on the Java-first Akka SDK taught us,
 consolidated into one page. The per-capability design detail lives in [`specs/`](specs/); the
-day-to-day interop workarounds live in [`README.md`](README.md) "Scala interop notes" §1–14; the
+day-to-day interop workarounds live in [`README.md`](README.md) "Scala interop notes" §1–15; the
 status table lives in [`ROADMAP.md`](ROADMAP.md). **This page is the synthesis** — the single
 finding that explains every outcome, and the rubric it yields.
 
@@ -20,7 +20,7 @@ reference in the first place (`Class` references, `Task` constants, a URL string
 
 | Client | Resolves target by | Scala-callable? |
 |--------|--------------------|-----------------|
-| `AgentClient` | `dynamicCall(id)` **or** method-ref | ✅ yes |
+| `AgentClient` | `dynamicCall(id)` **or** method-ref | ✅ yes — **incl. agents the SDK owns** (cap-13) |
 | `AutonomousAgentClient` | `Class` + `Task` constants | ✅ yes |
 | `WorkflowClient` | method-ref **only** | ❌ no |
 | `EventSourcedEntityClient` | method-ref **only** | ❌ no |
@@ -45,6 +45,18 @@ endpoint is Java. The precise statement is therefore:
 
 Everything downstream of that class (the component, its logic, its domain) and everything upstream
 that doesn't hold a method ref (an `httpClient` test) stays Scala.
+
+**Cap-13 supplies the last clause, and it is the one that matters most in practice.** Every capability
+that had ever hit the wall needed a component the *runtime* owned — cap-4's `SessionMemoryEntity`,
+cap-6's `TodoEntity`, cap-11's `View` — and each quarantined Java to reach it. Three for three made the
+wall look like a property of **ownership**: *the SDK's own components are out of reach from Scala.*
+That reading is wrong. `dynamicCall` resolves off `agentClassById`, a map the runtime populates with
+**every** registered agent, its own included — so calling the SDK's built-in `hallucination-evaluator`
+from Scala is a one-liner, and cap-13 contains no Java anywhere. The complete statement:
+
+> **The wall is a property of *which* client. The agent client — alone in having
+> `dynamicCall(String)` — is on the right side of it *even for components the SDK owns*. A
+> runtime-owned component forces Java only when it is not an agent.**
 
 ## Per-capability: why each landed where it did
 
@@ -188,6 +200,43 @@ through an entirely unrelated mechanism. It **corrects** that axis rather than c
 A modelling limit worth carrying: `TextGuardrail.evaluate` receives **text only** — no question, no
 retrieved passages — so a guardrail structurally *cannot* check grounding. Cap-12 ships a documented proxy
 instead of faking one, and that gap is the clearest argument for an evaluation/LLM-judge capability next.
+
+### Capability 13 — LLM-as-judge evaluation · **Scala, and no Java anywhere**
+
+Judges cap-8's answers with the SDK's built-in `hallucination-evaluator` and an authored
+`decline-judge`. It exists because cap-8 documented a soft-grounding gap and cap-12 found a
+*structural* reason it could not close it — `TextGuardrail.evaluate` sees the answer text alone, no
+question and no passages. An evaluator's request carries all three.
+
+- **`dynamicCall` reaches SDK-owned components.** The three built-in evaluators are ordinary `Agent`s
+  *and* provided components (`ComponentLocator$`, same list as `SessionMemoryEntity`/`TaskEntity`),
+  with real `@Component` ids — so the string-keyed escape hatch resolves them. The documented
+  `.method(Evaluator::evaluate)` form is the wall. This is the clause added to the headline finding
+  above, and it is why this capability needed **no Java at all** where caps 4, 6 and 11 each did.
+- **An authored evaluator is an ordinary agent; the *return type* is the switch.** No `@Evaluator`
+  annotation exists. `Reflect$.isEvaluatorAgent` tests whether the handler's return class implements
+  `EvaluationResult`, and `Sdk` folds that into the `AgentDescriptor` — the flag that routes verdicts
+  into metrics and traces. Quiet failure mode: drop the `extends` and you get a compiling, working,
+  silently un-instrumented agent.
+- **Read cap-12 and cap-13 together or not at all.** They both wrap an agent's behaviour and agree on
+  nothing else: config-registered vs component, **0** descriptor lines vs **1**, bytecode shape
+  (cap-11's axis) vs the method-ref wall (cap-2's axis), no identity reaching our code vs all of it.
+  The attribution difference generalises: **a mechanism the platform invokes on your behalf tells you
+  less than one you invoke yourself.** A guardrail block arrives as `rule: "unknown"`; a verdict is a
+  return value, so nothing is erased.
+- **Fully offline — including the SDK's own judge**, which was not the obvious outcome. `LlmAsJudge`
+  sets its model *explicitly*, but `AgentImpl` reads
+  `overrideModelProvider(id).getOrElse(requestModel.modelProvider)`, so the TestKit's per-agent
+  override wins. Better than cap-6 (recall live-only) or cap-7 (delegation not faithfully mockable).
+- **Cap-8 is byte-identical, as a research result rather than as discipline.** There is no
+  `Consume.From*` source for a request-based agent — the SDK's documented `EvaluationConsumer` consumes
+  `TaskEntity`, which cap-8 does not have — so evaluation could only ever have had its own surface.
+  Cap-12 earned one line of change in `DocsAgent`; cap-13 earned none.
+
+Two limits carried forward: the documented Java-method-ref form fails from Scala with an error naming
+**the developer's own class** as "not a subclass of `Agent`" (the worst diagnostic this project has met
+on the wall), and verdict telemetry is not observable under the TestKit at all — see
+[`docs/sdk-3.6.0-limitations.md`](docs/sdk-3.6.0-limitations.md) §5.
 
 ## The two crosscutting constraints (orthogonal to the wall)
 
