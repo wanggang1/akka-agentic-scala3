@@ -563,12 +563,13 @@ the more specific and more useful explanation.
 
 ---
 
-## Suite after US3 (T023)
+## Suite after US3 (T023) and final (T036)
 
 ```
-mvn clean verify  ->  BUILD SUCCESS
-  unit (surefire):        148   (baseline 127, +21)
-  integration (failsafe): 142   (baseline 121, +21)
+after US3 (T023)              final (T036)
+  unit:        148   (+21)      unit:        148   (+21 over the 127 baseline)
+  integration: 142   (+21)      integration: 147   (+26 over the 121 baseline)
+BUILD SUCCESS in both cases.
 ```
 
 Capability 8's and capability 12's suites pass **unmodified** — no existing test file was touched.

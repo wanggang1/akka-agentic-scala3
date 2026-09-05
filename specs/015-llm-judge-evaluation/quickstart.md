@@ -39,7 +39,8 @@ curl -s -X POST http://localhost:9000/evaluate \
 ```
 
 ```json
-{"question":"why must some components be written in Java instead of Scala?",
+{"evaluationId":"c1f0a4e2-…",
+ "question":"why must some components be written in Java instead of Scala?",
  "answer":"Some components must use Java because the Workflow and entity clients resolve targets from Java method references…",
  "citedSources":["interop-method-ref-wall","interop-two-mapper","cap-6-delegation"],
  "verdicts":[
@@ -55,7 +56,7 @@ curl -s -X POST http://localhost:9000/evaluate \
 ```
 
 ```json
-{"answer":"I don't know","citedSources":[],
+{"evaluationId":"…","answer":"I don't know","citedSources":[],
  "verdicts":[{"judge":"hallucination-evaluator","outcome":"passed","explanation":"…"},
              {"judge":"decline-judge","outcome":"passed",
               "explanation":"The reference text does not address the capital of France, so declining was correct."}]}
@@ -77,7 +78,7 @@ curl -s -X POST http://localhost:9000/evaluate \
 ```
 
 ```json
-{"answer":"","citedSources":[],
+{"evaluationId":"…","answer":"","citedSources":[],
  "verdicts":[{"judge":"hallucination-evaluator","outcome":"not-applicable","explanation":"the interaction was refused by a guardrail"},
              {"judge":"decline-judge","outcome":"not-applicable","explanation":"the interaction was refused by a guardrail"}]}
 ```
@@ -101,6 +102,18 @@ EVAL_ENABLED=false mvn compile exec:java
 ```
 
 The answer is still produced and returned; `verdicts` is `[]` and no judge model is called.
+
+## Correlating a verdict with its trace
+
+Every response carries an `evaluationId`. It is the **session** the assistant turn and both judges ran
+in, so the answer and the verdicts about it belong to one trace — the same shape the SDK's own
+documented `EvaluationConsumer` uses when it keys evaluator calls on a task id.
+
+Honest limit: this project could not *observe* that correlation offline. `TelemetryReader.getAgents`
+returns empty under the TestKit and metrics have no reader at all, so the claim that verdicts reach
+metrics and traces rests on the SDK's mechanism — an evaluator flag on the agent descriptor, derived
+from the result type — rather than on something a test here watched happen. See
+[`docs/sdk-3.6.0-limitations.md`](../../docs/sdk-3.6.0-limitations.md) §5b.
 
 ## `POST /ask` is unchanged — checkably
 

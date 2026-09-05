@@ -153,11 +153,11 @@ outcome strings; with `eval.enabled = false` the answer still returns and `verdi
 
 ## Phase 8: Polish, Documentation & Live Verification
 
-- [ ] T032 [P] Add **README §15** documenting the finding, and update the through-line it sharpens: §4/§6/§13's "the wall is a client property" becomes *"…and the agent client's `dynamicCall` reaches components we do **not** own — where capabilities 4, 6 and 11 each had to quarantine Java for a runtime-owned component, capability 13 did not, because that component happened to be an agent"*
-- [ ] T033 [P] Add a **Capability 13 usage section** to `README.md` after capability 12's, with the four `curl` flows from [quickstart.md](quickstart.md): an answer judged, a decline judged, a refusal reported as not-applicable, and validation-first. State the three-model-calls cost and the off switch plainly
-- [ ] T034 [P] Add the capability 13 row to `ROADMAP.md` and the capability 13 entry to `FINDINGS.md`, including the deliberate contrast with capability 12: governance costs **zero** descriptor lines because a guardrail is not a component; evaluation costs **one** because a judge is
-- [ ] T035 [P] Update `specs/015-llm-judge-evaluation/quickstart.md` against what was actually measured — correct any example whose shape differs from the implementation, as capability 12 had to
-- [ ] T036 Run `mvn clean verify` (not `mvn verify`) and record the final unit + integration counts against the T001 baseline
+- [x] T032 [P] Add **README §15** documenting the finding, and update the through-line it sharpens: §4/§6/§13's "the wall is a client property" becomes *"…and the agent client's `dynamicCall` reaches components we do **not** own — where capabilities 4, 6 and 11 each had to quarantine Java for a runtime-owned component, capability 13 did not, because that component happened to be an agent"*
+- [x] T033 [P] Add a **Capability 13 usage section** to `README.md` after capability 12's, with the four `curl` flows from [quickstart.md](quickstart.md): an answer judged, a decline judged, a refusal reported as not-applicable, and validation-first. State the three-model-calls cost and the off switch plainly
+- [x] T034 [P] Add the capability 13 row to `ROADMAP.md` and the capability 13 entry to `FINDINGS.md`, including the deliberate contrast with capability 12: governance costs **zero** descriptor lines because a guardrail is not a component; evaluation costs **one** because a judge is
+- [x] T035 [P] Update `specs/015-llm-judge-evaluation/quickstart.md` against what was actually measured — correct any example whose shape differs from the implementation, as capability 12 had to
+- [x] T036 Run `mvn clean verify` (not `mvn verify`) and record the final unit + integration counts against the T001 baseline
 - [ ] T037 Live smoke test against Ollama `qwen3:8b`: the four flows above, end to end. Record what was seen in `README.md` and `research.md` — **including anything unflattering**, as capability 12 did with the jailbreak variant that got through. Assert nothing about verdict *values*: a live judge's opinion is not deterministic, and the offline suite is the proof
 
 **Checkpoint**: Capability complete, documented, and honestly reported.
