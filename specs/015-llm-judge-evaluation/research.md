@@ -574,6 +574,48 @@ mvn clean verify  ->  BUILD SUCCESS
 Capability 8's and capability 12's suites pass **unmodified** — no existing test file was touched.
 
 
+## R5/FR-011 — measured (T026/T027): full attribution, but telemetry is not observable offline
+
+**Attribution: confirmed, and it is the clean inverse of capability 12.** Every verdict names its
+judge, for the SDK's judge exactly as for ours. Capability 12 had to ship
+`rule: "unknown", category: "unknown"` for the SDK's own `SimilarityGuard`, because the composed audit
+line lives on an SPI-internal exception and never reaches application code. A verdict is a **return
+value**, not an exception, so nothing is erased. `EvaluationEndpointIntegrationTest` asserts the
+absence of `unknown` explicitly, so a regression to capability 12's situation would fail rather than
+pass quietly.
+
+The general point the pair makes: **a mechanism the platform invokes on your behalf tells you less
+than one you invoke yourself**, even when both produce the same shape of finding.
+
+**Telemetry: a TestKit limitation, recorded rather than worked around.** The intent for T027 was to
+observe the correlation directly through `TelemetryReader.getAgents(sessionId)` — the TestKit's own
+span reader, reached from `TestKitSupport.telemetryReader`. It returns an **empty list**. Two
+configurations were tried through `TestKit.Settings.withAdditionalConfig` and neither produced spans:
+
+```
+akka.runtime.telemetry.tracing.enabled = true
+akka.runtime.telemetry.tracing.override-setup =
+  "kalix.runtime.telemetry.tracing.TracingSetup$DevModeInMemoryTracingSetup"
+```
+
+`TestKit.getInMemorySpanExporter` does **not** throw (its "No in-memory span exporter configured"
+message is not reached), so an exporter exists — there are simply no spans in it, i.e. tracing is off
+and the SDK 3.6.3 TestKit offers no documented switch to turn it on from `Settings`.
+
+**Consequence, stated rather than hidden.** FR-011 is verified **by mechanism, not by observation**:
+`Reflect$.isEvaluatorAgent` marks the agent from its return type, `Sdk` folds that flag into the
+`AgentDescriptor`, and that is what routes verdicts into metrics and traces —
+`EvaluatorDescriptorTest` pins both halves. **Metrics have no TestKit reader at all.** This is
+capability 13's one honest gap in an otherwise fully-offline capability, and it is the SDK's, not the
+design's. Recorded for `docs/sdk-3.6.0-limitations.md`.
+
+What *is* asserted at the endpoint is the correlation handle itself: one `evaluationId` per
+evaluation, used as the session for the assistant turn and both judges, and distinct between
+evaluations. Running all three under one session is also better design independently — it is what the
+SDK's own documented `EvaluationConsumer` does, keying every evaluator call on the task id.
+
+---
+
 ## Design decisions falling out of R1–R6
 
 | # | Decision | Rationale | Alternative rejected |

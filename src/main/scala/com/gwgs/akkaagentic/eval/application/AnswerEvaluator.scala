@@ -53,6 +53,7 @@ object AnswerEvaluator:
   final case class Verdict(judge: String, outcome: Outcome, explanation: String)
 
   final case class Evaluation(
+      evaluationId: String,
       question: String,
       answer: String,
       citedSources: List[String],
@@ -67,22 +68,31 @@ final class AnswerEvaluator(componentClient: ComponentClient, knowledgeStore: Kn
     * so capability 12's guardrails apply here too — which is what makes the refused path reachable
     * end to end without this capability configuring any rule.
     */
-  def evaluate(question: String): Evaluation =
+  def evaluate(question: String, judgesEnabled: Boolean = true): Evaluation =
+    // ONE session id for the whole evaluation: the assistant turn and both judges. The judges keep
+    // memory disabled, so nothing leaks between them — what sharing the session buys is that the
+    // answer and the verdicts about it land in a single trace, which is how a developer correlates a
+    // verdict with the interaction it judged (FR-011). The SDK's own documented EvaluationConsumer
+    // does the same, keying every evaluator call on the task id.
+    val evaluationId = UUID.randomUUID().toString
     val retrieved = knowledgeStore.retrieve(question, TopK)
-    val answer = askDocsAgent(question, retrieved)
+    val answer = askDocsAgent(evaluationId, question, retrieved)
     val referenceText = ReferenceText.render(retrieved.map(r => r.source -> r.text))
     val refused = answer.startsWith(DocsAgent.BlockedPrefix)
 
     val verdicts =
-      EvaluationApplicability.of(answer, referenceText, DocsAgent.BlockedPrefix) match
-        case Applicability.NotApplicable(reason) =>
-          // No judge model is called: judging a refusal, or judging against no reference material,
-          // yields a confident and meaningless verdict (research R6).
-          judgeIds.map(Verdict(_, Outcome.NotApplicable, reason))
-        case Applicability.Applicable =>
-          judge(question, referenceText, answer)
+      if !judgesEnabled then List.empty // FR-009: switched off, the answer still stands
+      else
+        EvaluationApplicability.of(answer, referenceText, DocsAgent.BlockedPrefix) match
+          case Applicability.NotApplicable(reason) =>
+            // No judge model is called: judging a refusal, or judging against no reference material,
+            // yields a confident and meaningless verdict (research R6).
+            judgeIds.map(Verdict(_, Outcome.NotApplicable, reason))
+          case Applicability.Applicable =>
+            judge(evaluationId, question, referenceText, answer)
 
     Evaluation(
+      evaluationId = evaluationId,
       question = question,
       // A refusal is not an answer, and the sentinel is an internal marker — the caller learns *that*
       // it was refused from the verdicts, per contracts/evaluate-endpoint.md.
@@ -104,12 +114,17 @@ final class AnswerEvaluator(componentClient: ComponentClient, knowledgeStore: Kn
     * (research R1), where the documented `.method(Evaluator::evaluate)` form cannot be written in
     * Scala at all (T004).
     */
-  private def judge(question: String, referenceText: String, answer: String): List[Verdict] =
+  private def judge(
+      sessionId: String,
+      question: String,
+      referenceText: String,
+      answer: String
+  ): List[Verdict] =
     List(
       verdictOf(HallucinationJudgeId) {
         componentClient
           .forAgent()
-          .inSession(UUID.randomUUID().toString)
+          .inSession(sessionId)
           .dynamicCall[HallucinationEvaluator.EvaluationRequest, HallucinationEvaluator.Result](
             HallucinationJudgeId
           )
@@ -118,7 +133,7 @@ final class AnswerEvaluator(componentClient: ComponentClient, knowledgeStore: Kn
       verdictOf(DeclineJudgeId) {
         componentClient
           .forAgent()
-          .inSession(UUID.randomUUID().toString)
+          .inSession(sessionId)
           .dynamicCall[DeclineJudge.EvaluationRequest, DeclineJudge.Result](DeclineJudgeId)
           .invoke(DeclineJudge.EvaluationRequest(question, referenceText, answer))
       }
@@ -146,10 +161,14 @@ final class AnswerEvaluator(componentClient: ComponentClient, knowledgeStore: Kn
           s"the judge returned an unusable response: ${Option(e.getMessage).getOrElse(e.getClass.getName)}"
         )
 
-  private def askDocsAgent(question: String, retrieved: List[KnowledgeStore.Retrieved]): String =
+  private def askDocsAgent(
+      sessionId: String,
+      question: String,
+      retrieved: List[KnowledgeStore.Retrieved]
+  ): String =
     componentClient
       .forAgent()
-      .inSession(UUID.randomUUID().toString)
+      .inSession(sessionId)
       .dynamicCall[DocsAgent.Request, String]("docs-agent")
       .invoke(
         DocsAgent.Request(question, retrieved.map(r => DocsAgent.Passage(r.source, r.text)).asJava)

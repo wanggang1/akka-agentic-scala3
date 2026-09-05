@@ -1,11 +1,14 @@
 package com.gwgs.akkaagentic.eval.api
 
+import scala.util.Try
+
 import akka.http.javadsl.model.HttpResponse
 import akka.javasdk.annotations.Acl
 import akka.javasdk.annotations.http.{HttpEndpoint, Post}
 import akka.javasdk.client.ComponentClient
 import akka.javasdk.http.HttpResponses
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.typesafe.config.Config
 import com.gwgs.akkaagentic.docs.application.KnowledgeStore
 import com.gwgs.akkaagentic.docs.domain.AskQuestion
 import com.gwgs.akkaagentic.eval.application.AnswerEvaluator
@@ -38,15 +41,23 @@ object EvaluationEndpoint:
   final case class VerdictReply(judge: String, outcome: String, explanation: String)
 
   final case class EvaluateReply(
+      evaluationId: String,
       question: String,
       answer: String,
       citedSources: List[String],
       verdicts: List[VerdictReply]
   )
 
+  /** The config key that turns the judges off without a code change (FR-009). Defaulting to `true`
+    * when absent keeps a configuration that predates this capability working. */
+  private val EnabledKey = "eval.enabled"
+
   /** `referenceText` is deliberately **not** on the wire: it can be large, and `citedSources` already
     * identifies what grounded the answer. That the judges saw exactly those passages is proven by a
-    * test that inspects the judge's actual input, not by echoing it back (SC-002). */
+    * test that inspects the judge's actual input, not by echoing it back (SC-002).
+    *
+    * `evaluationId` **is** on the wire: it is the session the assistant turn and both judges ran in,
+    * so it is what correlates this response with the interaction's traces. */
   private def toApi(verdict: AnswerEvaluator.Verdict): VerdictReply =
     VerdictReply(verdict.judge, outcomeName(verdict.outcome), verdict.explanation)
 
@@ -58,10 +69,19 @@ object EvaluationEndpoint:
 
 @HttpEndpoint
 @Acl(allow = Array(new Acl.Matcher(principal = Acl.Principal.INTERNET)))
-class EvaluationEndpoint(componentClient: ComponentClient, knowledgeStore: KnowledgeStore):
+class EvaluationEndpoint(
+    componentClient: ComponentClient,
+    knowledgeStore: KnowledgeStore,
+    config: Config
+):
   import EvaluationEndpoint.*
 
   private val evaluator = new AnswerEvaluator(componentClient, knowledgeStore)
+
+  /** Judges cost model calls, so they are switchable off by configuration alone (FR-009, SC-005).
+    * Read per request rather than cached, so an override applies without a restart. */
+  private def judgesEnabled: Boolean =
+    Try(config.getBoolean(EnabledKey)).getOrElse(true)
 
   /** Answer, then judge. Validation runs **first** — a blank or absent question is rejected before
     * retrieval, before the assistant, and before any judge (FR-010). Capability 8's `AskQuestion` is
@@ -73,9 +93,10 @@ class EvaluationEndpoint(componentClient: ComponentClient, knowledgeStore: Knowl
       case Left(message) =>
         HttpResponses.badRequest(message)
       case Right(valid) =>
-        val evaluation = evaluator.evaluate(valid.question)
+        val evaluation = evaluator.evaluate(valid.question, judgesEnabled)
         HttpResponses.ok(
           EvaluateReply(
+            evaluationId = evaluation.evaluationId,
             question = evaluation.question,
             answer = evaluation.answer,
             citedSources = evaluation.citedSources,

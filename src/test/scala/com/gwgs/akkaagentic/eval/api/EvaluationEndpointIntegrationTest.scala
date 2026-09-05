@@ -188,6 +188,67 @@ class EvaluationEndpointIntegrationTest extends TestKitSupport:
     assertThat(decline.outcome).isEqualTo("passed")
     assertThat(decline.explanation).contains("matched the reference text")
 
+  /** T026 / FR-005 / SC-007 — every verdict is attributable, and every outcome is one of the four.
+    *
+    * The pointed contrast with capability 12: there, a guardrail block reached the caller as
+    * `rule: "unknown", category: "unknown"` for the SDK's own rule, because the composed audit line
+    * lives on an SPI-internal exception and never reaches application code. A verdict is a **return
+    * value**, not an exception, so nothing is erased — and that holds for the platform's judge exactly
+    * as for ours (research R5). This test asserts the absence of `unknown` explicitly, so a regression
+    * to capability 12's situation would fail rather than pass quietly.
+    */
+  @Test
+  def everyVerdictIsAttributedAndCarriesAKnownOutcome(): Unit =
+    docsModel.fixedResponse("The runtime persists the task, so work survives a restart.")
+    judgeModel.fixedResponse("""{"explanation":"Supported by the reference text.","label":"factual"}""")
+
+    val body = evaluate(DurabilityQuestion).body()
+    val known = Set("passed", "failed", "errored", "not-applicable")
+
+    assertThat(body.verdicts.isEmpty).isFalse()
+    body.verdicts.foreach { v =>
+      assertThat(v.judge).isNotEmpty()
+      assertThat(v.judge).isNotEqualTo("unknown")
+      assertThat(v.explanation).isNotEmpty()
+      assertThat(known.contains(v.outcome)).isTrue()
+    }
+
+    // Both judges reported, in a stable order, each naming itself.
+    assertThat(body.verdicts.map(v => s"${v.judge}:${v.outcome}").mkString(", "))
+      .isEqualTo("hallucination-evaluator:passed, decline-judge:passed")
+
+  /** T027 / FR-011 — the correlation handle, and an honest account of what is NOT observable here.
+    *
+    * An evaluation runs the assistant turn and **both** judges under one session id, returned as
+    * `evaluationId`, so the answer and the verdicts about it belong to a single trace. That is the
+    * handle a developer uses to find them. (The SDK's own documented `EvaluationConsumer` does the
+    * same, keying every evaluator call on the task id.)
+    *
+    * **What this test deliberately does not claim.** The intent was to assert the correlation through
+    * the TestKit's own `TelemetryReader.getAgents(sessionId)`. It returns empty: in-memory tracing
+    * could not be enabled from `TestKit.Settings.withAdditionalConfig` on SDK 3.6.3 — neither
+    * `akka.runtime.telemetry.tracing.enabled = true` nor pointing `override-setup` at the runtime's
+    * `DevModeInMemoryTracingSetup` produced spans (specs/015 research, T027).
+    *
+    * So FR-011 is verified **by mechanism, not by observation**: `Reflect$.isEvaluatorAgent` marks the
+    * agent as an evaluator from its return type and `Sdk` folds that into the descriptor, which is
+    * what routes verdicts into metrics and traces — pinned by `EvaluatorDescriptorTest`. Metrics have
+    * no TestKit reader at all. Written out rather than left implied, because a green test that
+    * asserted less than its name suggested would be worse than no test.
+    */
+  @Test
+  def eachEvaluationCarriesItsOwnCorrelationHandle(): Unit =
+    docsModel.fixedResponse("The runtime persists the task, so work survives a restart.")
+    judgeModel.fixedResponse("""{"explanation":"Supported by the reference text.","label":"factual"}""")
+
+    val first = evaluate(DurabilityQuestion).body()
+    val second = evaluate(DurabilityQuestion).body()
+
+    assertThat(first.evaluationId).isNotEmpty()
+    assertThat(second.evaluationId).isNotEmpty()
+    // Distinct per evaluation: a handle shared between evaluations would correlate nothing.
+    assertThat(first.evaluationId).isNotEqualTo(second.evaluationId)
+
   /** FR-010: validation runs first. A blank question is rejected before retrieval, before the
     * assistant, and before any judge — proven by both models still holding their scripted responses
     * unconsumed (no response is defined, so any call would have failed the request instead). */
