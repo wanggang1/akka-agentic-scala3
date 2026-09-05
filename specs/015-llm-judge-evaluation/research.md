@@ -410,6 +410,132 @@ not-applicable rather than judging a refusal string.
 
 ---
 
+---
+
+## Baseline (T001/T002)
+
+Measured on `8ecb309`, before any capability 13 production code:
+
+```
+mvn clean verify  ->  BUILD SUCCESS
+  unit (surefire):        127
+  integration (failsafe): 121
+```
+
+Blob hashes recorded for the SC-003 byte-identity check (T031 re-checks these):
+
+```
+a04913e2  src/main/scala/com/gwgs/akkaagentic/docs/api/DocsEndpoint.scala
+e54d1827  src/main/scala/com/gwgs/akkaagentic/docs/application/DocsAgent.scala
+ff34379e  .../docs/application/AnswerLengthGuard.scala
+d3548d87  .../docs/application/LinkedAnswerGuard.scala
+4d7767c6  .../docs/application/KnowledgeStore.scala
+bd404fe1  .../docs/domain/AnswerRules.scala
+366ac674  .../docs/domain/AskQuestion.scala
+35e2bc11  .../docs/domain/GuardrailAudit.scala
+04625016  .../docs/domain/KnowledgeCorpus.scala
+0f9ea42e  .../docs/domain/Passage.scala
+```
+
+**Scope of the SC-003 claim, stated precisely so it is not overclaimed.** The whole
+`src/main/scala/com/gwgs/akkaagentic/docs/` tree must end byte-identical — that is the real
+assertion, and `git diff` proves it. `application.conf` and the component descriptor are *shared*
+project files that every capability appends to; capability 13 adds `eval.enabled` and two descriptor
+lines to them. What must hold there is that capability 12's `guardrails` block and the existing
+descriptor entries are **unchanged** — additive only, never edited.
+
+---
+
+## R1/R3 — MEASURED (T003), and T004's negative control
+
+Everything above in R1 and R3 was read from bytecode. This section is what happened when it was
+**run** — `BuiltInJudgeProbeIntegrationTest`, 4 tests, all green, fully offline.
+
+### R1 — CONFIRMED: `dynamicCall` reaches an SDK-owned agent
+
+```
+R1/R3 MEASURED: dynamicCall reached the SDK-owned judge AND the test model override won.
+                passed=true explanation=The answer restates the reference text.
+```
+
+`componentClient.forAgent().inSession(id).dynamicCall[EvaluationRequest, Result]("hallucination-evaluator")`
+returned a real `HallucinationEvaluator.Result`. The evaluators are in `agentClassById` because
+`ComponentLocator$` provides them, exactly as the bytecode said.
+
+**The project's oldest finding gains a clause.** From capability 2 onward the rule was *"the
+method-reference wall is a property of the client"*. Capabilities 4, 6 and 11 each needed a
+**runtime-owned** component (`SessionMemoryEntity`, `TodoEntity` behind `TodoTools`, the View) and each
+had to quarantine Java to reach it. Capability 13 needs a runtime-owned component too — and does not,
+because that component is an **agent**, and the agent client is the one client with `dynamicCall`. The
+sharper statement: *the wall is a property of **which** client, and the agent client is on the right
+side of it **even for components we do not own**.*
+
+### R3 — CONFIRMED: the TestKit override beats the evaluator's explicit `.model(...)`
+
+This was the real risk, and the naive reading lost. `LlmAsJudge` sets its model explicitly from
+`akka.javasdk.agent.evaluators.hallucination-evaluator.model-provider`, yet the scripted response came
+back — no network, no API key, no model server. `AgentImpl`'s
+`overrideModelProvider(id).getOrElse(requestModel.modelProvider)` is decisive in practice, not only in
+bytecode.
+
+Label mapping, both directions, confirmed against the SDK's own parser and `toEvaluationResult`:
+
+| scripted `label` | `Result.passed` |
+|---|---|
+| `factual` | `true` |
+| `hallucinated` | `false` |
+
+**So the SDK's own judge is fully scriptable offline** — the SDK's real prompt, real
+`responseConformsTo(ModelResult)` and real result mapping all still run; only the model is replaced.
+This is a better position than capability 6 (recall live-only) or capability 7 (delegation not
+faithfully mockable, D9) ended in.
+
+### R3(d) — CONFIRMED: an unrecognised label fails, and the failure is usable
+
+```
+R3(d) MEASURED: unknown label ->
+  kalix.runtime.CorrelatedRuntimeException:
+    [e6a8340e-...] Response mapping error: Unknown evaluation label [maybe]
+WARN  AK-01203 Agent [hallucination-evaluator] Response mapping error [e6a8340e-...]:
+      java.lang.IllegalArgumentException: Unknown evaluation label [maybe]
+```
+
+The `errored` outcome therefore has a deterministic trigger that comes from **the SDK**, not from us
+breaking something: script a judge to answer with a label outside its vocabulary.
+
+**One carry-over from capability 12, confirmed rather than assumed.** The original
+`IllegalArgumentException` is **type-erased at the component-client boundary** into
+`kalix.runtime.CorrelatedRuntimeException` — precisely what capability 12 measured when it tried to
+rethrow a `GuardrailException`. The consequence for the design is small but must be respected:
+`AnswerEvaluator` must classify a judge failure by catching **any** `Throwable`, never by matching
+`IllegalArgumentException`. The *message* survives intact (`Unknown evaluation label [maybe]`), so the
+`errored` verdict's explanation is still informative — which is why FR-005 is satisfiable even though
+the type is gone.
+
+### T004 — the negative control, and it is more interesting than expected
+
+The prediction was a `SerializedLambda` resolution failure complaining about a synthetic `$anonfun`.
+That is **not** what a Scala developer sees. The attempt **compiles cleanly**, and at invocation
+produces:
+
+```
+java.lang.IllegalArgumentException:
+  class com.gwgs.akkaagentic.eval.application.BuiltInJudgeProbeIntegrationTest
+  is not a subclass of class akka.javasdk.agent.Agent
+```
+
+`MethodRefResolver` reads the `SerializedLambda`'s **`implClass`**, which for a Scala lambda is the
+*enclosing* class — here the caller — not the agent the lambda mentions. So the SDK reports that
+**the developer's own class is not an Agent**.
+
+**This is a materially worse developer experience than the wall the project has documented so far, and
+worth recording as such.** Every previous encounter produced an error that at least pointed at the
+right area. This one names a class that is not the problem, says nothing about lambdas or Scala, and
+sends a reader off to check whether their endpoint should extend `Agent` — which it must not. A Scala
+developer following `llm_eval.html.md` gets a compiling program and a misdirecting runtime error.
+Recorded for `docs/sdk-3.6.0-limitations.md` (T030); the fix is one line — use `dynamicCall(id)`.
+
+
 ## Design decisions falling out of R1–R6
 
 | # | Decision | Rationale | Alternative rejected |

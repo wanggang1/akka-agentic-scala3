@@ -30,8 +30,8 @@ inside `docs`, so that "capability 8 is untouched" is checkable with `git diff`.
 
 **Purpose**: Establish the baseline this capability must not move.
 
-- [ ] T001 Run `mvn clean verify` and record the passing unit + integration test counts in `specs/015-llm-judge-evaluation/research.md` under a new "Baseline" heading — SC-003 is "capability 8's and capability 12's suites pass unmodified", which needs a number to compare against
-- [ ] T002 [P] Record the current `git rev-parse HEAD` and the output of `git ls-files -s src/main/scala/com/gwgs/akkaagentic/docs/ src/main/resources/application.conf` in `specs/015-llm-judge-evaluation/research.md` — the blob hashes that T031 will re-check for byte-identity (SC-003)
+- [x] T001 Run `mvn clean verify` and record the passing unit + integration test counts in `specs/015-llm-judge-evaluation/research.md` under a new "Baseline" heading — SC-003 is "capability 8's and capability 12's suites pass unmodified", which needs a number to compare against
+- [x] T002 [P] Record the current `git rev-parse HEAD` and the output of `git ls-files -s src/main/scala/com/gwgs/akkaagentic/docs/ src/main/resources/application.conf` in `specs/015-llm-judge-evaluation/research.md` — the blob hashes that T031 will re-check for byte-identity (SC-003)
 
 **Checkpoint**: Baseline captured; any later deviation is a regression, not a surprise.
 
@@ -46,16 +46,16 @@ domain both judges depend on.
 never executed**. Capability 12's equivalent probe disproved a design assumption before code was
 written; this one exists for the same reason.
 
-- [ ] T003 Write the discovery test `src/test/scala/com/gwgs/akkaagentic/eval/application/BuiltInJudgeProbeIntegrationTest.scala` and record **four** facts in `specs/015-llm-judge-evaluation/research.md` under "R1/R3 — measured" before writing any production code:
+- [x] T003 Write the discovery test `src/test/scala/com/gwgs/akkaagentic/eval/application/BuiltInJudgeProbeIntegrationTest.scala` and record **four** facts in `specs/015-llm-judge-evaluation/research.md` under "R1/R3 — measured" before writing any production code:
       **(a)** `componentClient.forAgent().inSession(id).dynamicCall[HallucinationEvaluator.EvaluationRequest, HallucinationEvaluator.Result]("hallucination-evaluator").invoke(...)` reaches the SDK-owned agent from Scala and returns a `Result` (research R1);
       **(b)** `TestKit.Settings.DEFAULT.withModelProvider(classOf[HallucinationEvaluator], provider)` genuinely overrides the evaluator's explicitly-configured `.model(...)`, proven by the scripted response coming back rather than a connection failure (research R3);
       **(c)** what the SDK's parser requires of the scripted reply — confirm `{"explanation": "...", "label": "factual"}` maps to `passed = true` and `"hallucinated"` to `false`;
       **(d)** what an **unrecognised** label does — expected `IllegalArgumentException("Unknown evaluation label [...]")` from the SDK's own `toEvaluationResult`, which is the deterministic trigger the `errored` outcome depends on
-- [ ] T004 Record the **negative control** for FR-013 in `specs/015-llm-judge-evaluation/research.md`: attempt the documented `.method(HallucinationEvaluator::evaluate)` form from Scala, capture the exact compiler or runtime message, then remove the attempt. The finding must state what a Scala author actually sees when they follow the documentation, not merely that "it does not work"
-- [ ] T005 [P] Write failing unit tests in `src/test/scala/com/gwgs/akkaagentic/eval/domain/ReferenceTextTest.scala`: rendering preserves passage order and the `[n] (source) text` shape, an empty list renders empty, and `isEmpty` is true for blank/whitespace-only
-- [ ] T006 [P] Write failing unit tests in `src/test/scala/com/gwgs/akkaagentic/eval/domain/EvaluationApplicabilityTest.scala`: a refusal-prefixed answer is `NotApplicable`, empty reference text is `NotApplicable`, an ordinary answer is `Applicable`, and — the one that protects the capability's second half — **a decline is `Applicable`, not `NotApplicable`** (SC-006, and data-model.md's note)
-- [ ] T007 [P] Create `src/main/scala/com/gwgs/akkaagentic/eval/domain/ReferenceText.scala` — pure functions only, **no Akka import** (Constitution II): `render(passages: List[(String, String)])` and `isEmpty(text)`
-- [ ] T008 [P] Create `src/main/scala/com/gwgs/akkaagentic/eval/domain/EvaluationApplicability.scala` — the `Applicability` enum and `of(answer, referenceText, refusalPrefix)`. The refusal prefix is a **parameter**, not an import of `DocsAgent.BlockedPrefix`, so `domain` never depends on `application` (research D6)
+- [x] T004 Record the **negative control** for FR-013 in `specs/015-llm-judge-evaluation/research.md`: attempt the documented `.method(HallucinationEvaluator::evaluate)` form from Scala, capture the exact compiler or runtime message, then remove the attempt. The finding must state what a Scala author actually sees when they follow the documentation, not merely that "it does not work"
+- [x] T005 [P] Write failing unit tests in `src/test/scala/com/gwgs/akkaagentic/eval/domain/ReferenceTextTest.scala`: rendering preserves passage order and the `[n] (source) text` shape, an empty list renders empty, and `isEmpty` is true for blank/whitespace-only
+- [x] T006 [P] Write failing unit tests in `src/test/scala/com/gwgs/akkaagentic/eval/domain/EvaluationApplicabilityTest.scala`: a refusal-prefixed answer is `NotApplicable`, empty reference text is `NotApplicable`, an ordinary answer is `Applicable`, and — the one that protects the capability's second half — **a decline is `Applicable`, not `NotApplicable`** (SC-006, and data-model.md's note)
+- [x] T007 [P] Create `src/main/scala/com/gwgs/akkaagentic/eval/domain/ReferenceText.scala` — pure functions only, **no Akka import** (Constitution II): `render(passages: List[(String, String)])` and `isEmpty(text)`
+- [x] T008 [P] Create `src/main/scala/com/gwgs/akkaagentic/eval/domain/EvaluationApplicability.scala` — the `Applicability` enum and `of(answer, referenceText, refusalPrefix)`. The refusal prefix is a **parameter**, not an import of `DocsAgent.BlockedPrefix`, so `domain` never depends on `application` (research D6)
 
 **Checkpoint**: The two design-critical assumptions are measured facts; the pure domain is green.
 Commit gate — `feat(015): cap-13 foundational — built-in judge probe + applicability rules`.
