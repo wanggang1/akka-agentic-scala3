@@ -1986,7 +1986,11 @@ EVAL_ENABLED=false mvn compile exec:java
 >
 > **Known limits, stated rather than hidden.** Judging is not free — three model calls, run
 > sequentially, off by one key (and see the note above on why that switch is coarser than a real
-> deployment would want).
+> deployment would want). Two of those are open follow-ups rather than settled tradeoffs, both raised
+> in PR review and tracked in [`ROADMAP.md`](ROADMAP.md#ideas--follow-ups): the two judges are
+> **independent and could run concurrently** (three sequential calls where two would do), and the
+> chain has **no timeout** — `verdictOf` turns a judge *failure* into an `errored` verdict, but a
+> judge that simply never returns is not a failure and nothing bounds it.
 > A verdict from a live model is **not deterministic**, so no test asserts a verdict's *value* and
 > neither should any automation; verdicts here are observational, and nothing is blocked, retried or
 > rewritten because a judge failed it. And the claim that verdicts reach metrics and traces rests on

@@ -183,11 +183,33 @@ Not on the four-capability path, captured so they're not forgotten:
   component-serialized **stays Java-shaped**. Consequence: capabilities 2–4 below can't use
   idiomatic `Option` wire types either — keep them Java-shaped. See README "Scala interop notes" §3.
 
+- **Capability 13 — run the two judges concurrently** *(open; raised in PR #27 review).*
+  `AnswerEvaluator.judge` builds its verdicts in a `List(...)` literal, which Scala evaluates strictly
+  left to right, so `hallucination-evaluator` completes before `decline-judge` starts. The two calls are
+  **independent** — same three inputs, neither feeds the other — so an evaluation is **three sequential
+  model calls where two would do**. This was never weighed: specs/015 acknowledges the latency
+  (`plan.md`, `quickstart.md`: "not a low-latency surface") but never discusses concurrency, so it is an
+  omission rather than a decision. Blocking is *not* the obstacle — the SDK runs handlers on virtual
+  threads and injects a virtual-thread `Executor` for exactly this. The one constraint:
+  `EvaluationEndpointIntegrationTest` pins verdict order
+  (`"hallucination-evaluator:passed, decline-judge:passed"`), so results must be reassembled in fixed
+  order, not in completion order.
+
+- **Capability 13 — bound the chained model calls with a timeout** *(open; raised in PR #27 review).*
+  `POST /evaluate` makes three chained LLM calls with **no configured bound anywhere** — grepping
+  specs/015 for "timeout" returns nothing. On a slow local model that can outlast a default client or
+  platform HTTP timeout, and there is no partial-result path (an answer with the verdicts still pending
+  is a perfectly reasonable degraded reply, and is not expressible today). Note `AnswerEvaluator.verdictOf`
+  does **not** cover this: it turns a judge *failure* into an `errored` verdict, and a hang is not a
+  failure. No test covers a judge that never returns. This is the weakest part of the capability's error
+  story, and the more important of these two follow-ups — the concurrency one is a performance
+  improvement, this one is a correctness gap.
+
 ## Candidate next capabilities
 
-The roadmap is **open** — caps 1–10 are merged, the MCP server/client loop is closed, and cap-11 (Views)
-is implemented. These are the leading candidates for cap-12, each framed by what it explores and the
-project's signature question:
+The roadmap is **open** — caps 1–13 are merged, so **guardrails and evaluation below are done** (PR #25,
+PR #27) and are kept only for the framing they record. **Streaming is the standing pick for cap-14.**
+Each candidate is framed by what it explores and the project's signature question:
 *is it Scala-clean, or does it hit the method-reference wall?* (See [`FINDINGS.md`](FINDINGS.md) for the
 wall — the single `dynamicCall` property that has predicted every Scala-vs-Java outcome so far.) None is
 specced yet; pick one and start via `/akka.specify`.
