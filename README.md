@@ -1936,12 +1936,40 @@ curl -i -s -X POST http://localhost:9000/evaluate \
 ```
 
 **Turn judging off with one key, no recompile.** An evaluation is **three** model calls (one answer,
-two verdicts) where `POST /ask` is one — fine in development, usually not wanted at production scale:
+two verdicts) where `POST /ask` is one:
 
 ```shell
 EVAL_ENABLED=false mvn compile exec:java
 # the question is still answered and cited; "verdicts" is [] and no judge model is called
 ```
+
+> **What evaluation is *for*, and why this surface is not the production shape.** The switch above is
+> easy to misread as a cost dial on a production feature — turn judging on when you can afford it. That
+> is not what an LLM judge is for, and the SDK says so in its own opening lines
+> (`agents/llm_eval.html.md`): evaluation matters *"when refining prompts and model parameters"*,
+> because *"interactions with an LLM are not deterministic"* and therefore **"traditional assertions
+> don't work"**. A judge is a **substitute for the assertions you cannot write** — a regression
+> instrument, not a request-path quality gate.
+>
+> **Its value is in aggregate, never in one verdict.** A single verdict from a non-deterministic judge
+> is noise. A pass rate over a fixed set of questions, compared before and after a prompt edit, a model
+> swap, or a corpus change, is signal. That is the whole reason nothing in this capability acts on a
+> verdict — not caution, but that one verdict does not carry enough information to act on. The useful
+> way to run `POST /evaluate` here is to put a standing list of questions through it on either side of
+> a change and diff the outcomes; that is CI, not serving.
+>
+> **Where judging does run against production traffic, it is sampled and out of band** — a small
+> percentage of interactions, judged asynchronously off the request path, so the cost is a few percent
+> rather than 3× and user-visible latency is zero. That is also the shape the SDK documents:
+> `EvaluationConsumer` is a `Consumer` reacting to `TaskEntity` events, not an endpoint.
+>
+> **This capability could not use that shape, and that is a fact about capability 8 rather than a
+> recommendation.** There is no `Consume.FromAgent` and no agent-interaction stream, and capability 8
+> is a request-based agent with no task to consume (research R4) — the same finding that makes
+> "capability 8 is byte-identical" provable. A synchronous surface was the only one available. Read
+> `EVAL_ENABLED` in that light: it is a **coarse** switch because this surface is a demonstration; a
+> production-shaped evaluator would want a *sample rate*, not a boolean, and would not sit in the
+> caller's request path at all.
 
 > **Where the interop line falls — and it falls nowhere.** Capability 13 contains **no Java at all**,
 > in production or in tests. The SDK's judges are ordinary `Agent`s and **provided components** of every
@@ -1956,7 +1984,9 @@ EVAL_ENABLED=false mvn compile exec:java
 > and result mapping all run against a scripted response. Even the `errored` outcome has an
 > SDK-supplied deterministic trigger, so nothing is broken to produce it.
 >
-> **Known limits, stated rather than hidden.** Judging is not free — three model calls, off by one key.
+> **Known limits, stated rather than hidden.** Judging is not free — three model calls, run
+> sequentially, off by one key (and see the note above on why that switch is coarser than a real
+> deployment would want).
 > A verdict from a live model is **not deterministic**, so no test asserts a verdict's *value* and
 > neither should any automation; verdicts here are observational, and nothing is blocked, retried or
 > rewritten because a judge failed it. And the claim that verdicts reach metrics and traces rests on
