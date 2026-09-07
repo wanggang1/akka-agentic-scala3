@@ -7,7 +7,43 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 ## Where we are
 
-> **You are here:** Feature 13 (LLM-as-judge evaluation) — **in progress on `015-llm-judge-evaluation`**
+> **You are here:** Feature 13 (LLM-as-judge evaluation) — **✅ merged to `main` 2026-09-07 (PR #27)**
+> ([`specs/015-llm-judge-evaluation`](specs/015-llm-judge-evaluation/)).
+> Two LLM judges rate cap-8's answers: the SDK's built-in **`hallucination-evaluator`** (is the answer
+> supported by the passages it was given?) and an authored **`decline-judge`** (was declining — or not
+> declining — the right call?). `POST /evaluate` runs the same retrieve→ask pipeline, then judges the
+> result; four outcomes (`passed`/`failed`/`errored`/`not-applicable`) and **nothing is gated**, so a
+> failed verdict is a *successful* evaluation. It exists because cap-8 documented a soft-grounding gap
+> and cap-12 found a **structural** reason it could not close it: `TextGuardrail.evaluate` receives the
+> answer text alone. An evaluator's request carries question, reference text and answer.
+>
+> **Interop verdict — `dynamicCall` reaches components the SDK OWNS, and this capability has no Java at
+> all.** The docs call a built-in judge with a Java method reference (`.method(ToxicityEvaluator::evaluate)`)
+> — the wall. But `ComponentLocator$` registers the three evaluators as **provided components** of every
+> service, and `AgentClientImpl.dynamicCall` resolves off `agentClassById`, which the runtime populates
+> with *every* registered agent, its own included. Caps 4, 6 and 11 each needed a **runtime-owned**
+> component and each quarantined Java, which made the wall look like a property of *ownership*. It is
+> not: *the wall is a property of **which** client, and the agent client — alone in having
+> `dynamicCall(String)` — is on the right side of it **even for components the SDK owns**.* A
+> runtime-owned component forces Java only when it is **not an agent**.
+>
+> Four more results: **(a)** an evaluator is an ordinary `Agent` with **no annotation** — what makes the
+> platform treat its reply as a verdict is the **return type implementing `EvaluationResult`**, which
+> `Reflect$.isEvaluatorAgent` tests and `Sdk` folds into the descriptor. Drop the `extends` and you get a
+> compiling, working, **silently un-instrumented** agent, so a test pins it. That costs **one** descriptor
+> line against cap-12's zero — and the pair matters more than either half: governance is registered by
+> *configuration*, evaluation by *being a component*. **(b)** The whole capability is **offline-provable,
+> including the SDK's own judge** — `LlmAsJudge` sets its model explicitly, but `AgentImpl` reads
+> `overrideModelProvider(id).getOrElse(...)`, so the TestKit's per-agent override **wins**; even the
+> `errored` outcome has an SDK-supplied deterministic trigger. **(c)** **Capability 8 is byte-identical**,
+> and that is a research result rather than discipline: there is no `Consume.From*` source for a
+> request-based agent, so evaluation *could not* have been a background hook — its own surface was the
+> only shape available. **(d)** Two sharp edges: the documented call form compiles from Scala and then
+> blames *the caller's own class* for not being an `Agent` (`MethodRefResolver` reads the
+> `SerializedLambda`'s `implClass`), and verdict telemetry is **not observable offline** — FR-011 is
+> verified by mechanism, not by watching it happen.
+>
+> **Previously:** Feature 12 (agent guardrails) — **✅ merged to `main` (PR #25)**
 > ([`specs/014-agent-guardrails`](specs/014-agent-guardrails/)).
 > Runtime-enforced governance around cap-8's `DocsAgent`: a request-side jailbreak rule that refuses
 > hostile prompts **before any model call**, plus two response-side rules — one enforcing, one
@@ -35,42 +71,11 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 > metrics only. Rules we author name themselves inside their explanation; the SDK's `SimilarityGuard`
 > cannot, and reports `unknown`. Neither limit is Scala-specific — a Java agent hits both identically.
 >
-> **Previously:** Feature 11 (Views / read-model) — **✅ merged to `main` 2026-08-29 (PR #23)**
-> ([`specs/013-views-read-model`](specs/013-views-read-model/)). The CQRS **read side** over cap-6's
-> per-username `TodoEntity`: a `View` projects every entity state change into one summary row per assistant
-> (`total`/`open`/`completed`), serving both a keyed lookup and the cross-user *"who still has open work?"*
-> query — the question an entity, addressable only by its own id, cannot answer. `GET /todo-summaries/...`,
-> **read-only** (to-dos are still written only through cap-6's assistant, which is untouched). The project's
-> **first entirely model-free capability**: no `TestModelProvider`, mocked or live, anywhere in its tests.
+> **⏭️ Next:** **streaming** (`StreamEffect` / Scala `Source`) — the standing candidate, and now the
+> highest-novelty *and* highest-risk item left: the interop question is genuinely unknown, where every
+> capability since cap-5 has been a variation on a wall whose shape was already understood.
 >
-> **Interop verdict — the first capability split *across* the component/caller boundary.** Every previous
-> encounter with the method-ref wall pulled the **whole component** into Java (cap-2's Workflow, cap-6's
-> entity). Here the **View component stays Scala** and only the **caller** is Java, which sharpens the
-> through-line to: *the wall is a property of the client, and it travels no further than the class that holds
-> the method reference*. Three results: **(R1)** `ViewClient` is method-reference-only (no `dynamicCall`;
-> `akka.japi.function.Function` is `Serializable`) → the querying endpoint is Java. **(R2, new hazard class)**
-> the `TableUpdater` must live in the **companion `object`**, not as an inner class — the SDK instantiates
-> updaters via `getDeclaredClasses()` + a **zero-arg** `getDeclaredConstructor()`, and a Scala inner class has
-> only `U($outer)`. This is the first finding that turns on **bytecode shape** rather than on a `Class`- vs
-> method-ref-keyed API. **(R3, corrected in PR review)** "Java can't reference
-> Scala" was a **latent build defect**, not a language boundary: `maven-compiler-plugin` (parent POM) ran
-> before `scala-maven-plugin` (ours), so javac ran first and the capability **did not build from clean** —
-> masked throughout development by incremental builds reusing a `target/classes` that already held the Scala
-> output. Fix: bind `scala-maven-plugin` to `process-resources` / `process-test-resources` with
-> `sendJavaToScalac=true`, so scalac runs first and javac compiles last against its output (which is also why
-> `-parameters` now survives). **Both directions compile**, the view rows are Jackson-annotated **Scala** case
-> classes, and the Java quarantine is **exactly one class** — the endpoint holding the method reference. README
-> §8's "never Java→Scala" is repealed as a mechanical law and survives only as ergonomics guidance.
-> **(R6, settled empirically)**
-> a keyed query returns `Optional`, empty on no match, so `404` and an all-zero `200` stay distinguishable.
->
-> **⏭️ Next:** undecided — choose between **evaluation / LLM-judge** (attacks cap-8's
-> soft-grounding gap — and cap-12 sharpened the case for it, since `TextGuardrail.evaluate` receives
-> text only and so *cannot* check grounding; an evaluator that sees question *and* answer is the natural
-> successor) and **streaming** (highest novelty *and* risk — `StreamEffect` / Scala `Source` interop is
-> genuinely unknown).
->
-> Capabilities 1–12 are **✅ done and merged**; 5–12 were exploratory follow-ups beyond the original four.
+> Capabilities 1–13 are **✅ done and merged**; 5–13 were exploratory follow-ups beyond the original four.
 >
 > **📄 Retrospective:** [`FINDINGS.md`](FINDINGS.md) consolidates the single `dynamicCall` finding that
 > explains every Scala-vs-Java outcome, plus the practical rubric. Caps 5–11 extend the through-line: the
@@ -98,7 +103,7 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 | 10 | **MCP client** — a request-based `McpClientAgent` grounds via the **remote `retrieve` MCP tool** of this service's own cap-9 `/mcp` (agentic RAG — the model decides when to retrieve); closes the loop in-process, fully offline; `POST /grounded-ask`. **Scala-clean** — `.mcpTools(RemoteMcpTools.fromService(...))` is a URL-string builder, no method-ref wall; no cap-9 ACL edit; no citations (model owns retrieval). The tool loop **is** offline-testable (real `retrieve` round-trip via `TestModelProvider`) — a positive contrast to cap-7 D9 | [`specs/012-mcp-client`](specs/012-mcp-client/) | ✅ Done — merged (PR #19) |
 | 11 | **Views / read-model** — a `View` projects cap-6's `TodoEntity` state into one summary row per username; keyed lookup + the cross-user "who has open work" query an entity can't answer; `GET /todo-summaries/...`, read-only, **no model anywhere** (first fully model-free capability). **First split across the component/caller boundary:** the View is **Scala** (its `TableUpdater` in the companion `object` — a **bytecode-shape** requirement, a new hazard class), only the querying **endpoint** is Java (`ViewClient` is method-ref-only) — the rows are Jackson-annotated **Scala** case classes, once a build-order fix made Java→Scala references compile. Keyed query returns `Optional`; new `view` descriptor key | [`specs/013-views-read-model`](specs/013-views-read-model/) | ✅ Done — merged (PR #23) |
 | 12 | **Agent guardrails** — runtime-enforced governance around cap-8's `DocsAgent`: a request-side jailbreak rule (refused **before any model call**), plus response-side rules, one enforcing and one record-only; new `422` outcome on `POST /ask`, `200` answer / `200` decline / `400` validation untouched. Rules are declared in **configuration** and built reflectively from a class-name string — **not components**, so the descriptor is unchanged; the guarded agent names no rule (asserted by a test that reads its source). **All three Scala class forms load**, including `object` — the predicted failure was wrong (`setAccessible` opens the private ctor), which **corrects** cap-11's bytecode-shape rule to "does a ctor with those param types exist", not "is it public". Jailbreak = **one config line, zero Scala, no new dependency**. Two measured limits: a block can't be rethrown (type erased at the client → reply-channel sentinel), and a rule's name/category never reach application code (traces only → rules self-tag their explanation) | [`specs/014-agent-guardrails`](specs/014-agent-guardrails/) | ✅ Done — merged (PR #25) |
-| 13 | **LLM-as-judge evaluation** — judges cap-8's answers with the SDK's built-in **`hallucination-evaluator`** (is the answer supported by its passages?) and an authored **`decline-judge`** (was declining — or not declining — right?); `POST /evaluate` over the same pipeline, four outcomes (`passed`/`failed`/`errored`/`not-applicable`), nothing gated. **Capability 8 is byte-identical** — not discipline but a research result: there is no `Consume.From*` source for a request-based agent, so evaluation could only ever have had its own surface. **Headline: `dynamicCall` reaches components the SDK OWNS** — the built-in evaluators are ordinary Agents *and* provided components, so the escape hatch resolves them off `agentClassById`; caps 4/6/11 each quarantined Java for a runtime-owned component, cap-13 has **no Java at all**. An authored evaluator is an ordinary agent whose **return type** implementing `EvaluationResult` (not an annotation) is what routes verdicts to metrics/traces — **one** descriptor line, against cap-12's zero. Fully offline-tested **including the SDK's own judge** (the TestKit's per-agent model override beats `LlmAsJudge`'s explicit `.model(...)`) | [`specs/015-llm-judge-evaluation`](specs/015-llm-judge-evaluation/) | 🚧 In progress |
+| 13 | **LLM-as-judge evaluation** — judges cap-8's answers with the SDK's built-in **`hallucination-evaluator`** (is the answer supported by its passages?) and an authored **`decline-judge`** (was declining — or not declining — right?); `POST /evaluate` over the same pipeline, four outcomes (`passed`/`failed`/`errored`/`not-applicable`), nothing gated. **Capability 8 is byte-identical** — not discipline but a research result: there is no `Consume.From*` source for a request-based agent, so evaluation could only ever have had its own surface. **Headline: `dynamicCall` reaches components the SDK OWNS** — the built-in evaluators are ordinary Agents *and* provided components, so the escape hatch resolves them off `agentClassById`; caps 4/6/11 each quarantined Java for a runtime-owned component, cap-13 has **no Java at all**. An authored evaluator is an ordinary agent whose **return type** implementing `EvaluationResult` (not an annotation) is what routes verdicts to metrics/traces — **one** descriptor line, against cap-12's zero. Fully offline-tested **including the SDK's own judge** (the TestKit's per-agent model override beats `LlmAsJudge`'s explicit `.model(...)`) | [`specs/015-llm-judge-evaluation`](specs/015-llm-judge-evaluation/) | ✅ Done — merged (PR #27) |
 
 **Status legend:** ✅ done · 📋 planned (spec written) · 🚧 in progress · ⬜ not started
 
