@@ -138,3 +138,72 @@ of them is Scala-specific — a Java agent hits every one of them identically.
 **Re-test on upgrade.** #1 and #2 are documentation fixes; #4 and #5 are the ones that would change this
 project's design if the SDK ever surfaced a typed, identified block to application code. Detail:
 `specs/014-agent-guardrails/research.md` (R1-FINAL, R3-RESOLVED, R-AUDIT) and README §14.
+
+---
+
+## 5. Evaluators: a misdirecting error from Scala, and telemetry that cannot be observed offline (cap-13, feature 015)
+
+Two items, one of which is the worst *diagnostic* this project has met on the method-reference wall.
+
+### 5a. The documented call form fails from Scala with an error naming the wrong class
+
+`akka-context/sdk/agents/llm_eval.html.md` calls a built-in judge with a Java method reference:
+
+```java
+componentClient.forAgent().inSession(taskId).method(ToxicityEvaluator::evaluate).invoke(...)
+```
+
+Scala has no `::` method reference; the nearest equivalent is a lambda adapted to
+`akka.japi.function.Function2`. **It compiles.** At invocation it fails with:
+
+```
+java.lang.IllegalArgumentException:
+  class com.gwgs.akkaagentic.eval.application.BuiltInJudgeIntegrationTest
+  is not a subclass of class akka.javasdk.agent.Agent
+```
+
+`MethodRefResolver` reads the `SerializedLambda`'s **`implClass`**, which for a Scala lambda is the
+*enclosing* class — the caller — not the agent the lambda mentions. So the SDK reports that **the
+developer's own class is not an `Agent`**.
+
+**Why this is worse than every previous encounter with the wall.** The others at least pointed at the
+right area (a workflow step that would not wire, an entity client with no `dynamicCall`). This one
+names a class that is not the problem, never mentions lambdas or Scala, and sends a reader off to make
+their endpoint extend `Agent` — which it must not do. A Scala developer following the documentation
+gets a program that compiles and an error that misdirects.
+
+**Workaround** — one line: use `dynamicCall(componentId)`. The three built-in ids are
+`hallucination-evaluator`, `toxicity-evaluator`, `summarization-evaluator`, and they resolve because
+`ComponentLocator$` registers the evaluators as **provided components** of every service, so they are
+in `agentClassById` alongside your own agents.
+
+**Not a limitation, recorded because it is the good news:** this means `dynamicCall` reaches components
+the SDK owns, not only your own — which is why capability 13 contains no Java at all, where
+capabilities 4, 6 and 11 each had to quarantine some when they needed a runtime-owned component.
+
+### 5b. Verdicts cannot be observed in the TestKit — no spans, no metrics reader
+
+`TestKitSupport.telemetryReader` exposes `getAgents(sessionId)`, which should show the agents that ran
+under a trace. It returns an **empty list**, and neither of these enabled tracing through
+`TestKit.Settings.withAdditionalConfig`:
+
+```
+akka.runtime.telemetry.tracing.enabled = true
+akka.runtime.telemetry.tracing.override-setup =
+  "kalix.runtime.telemetry.tracing.TracingSetup$DevModeInMemoryTracingSetup"
+```
+
+`TestKit.getInMemorySpanExporter` does **not** throw — an exporter exists, there are simply no spans in
+it. Metrics have no TestKit reader at all.
+
+**Consequence.** The SDK's promise that an evaluator's verdicts reach metrics and traces is verified in
+this project **by mechanism, not by observation**: `Reflect$.isEvaluatorAgent` marks an agent from its
+handler's return type and `Sdk` folds that flag into the `AgentDescriptor`. Both halves are pinned by
+`EvaluatorDescriptorTest`, but nothing here watches a verdict actually arrive anywhere. This is
+capability 13's one gap in an otherwise fully-offline capability, and it belongs to the TestKit rather
+than to the design.
+
+**Re-test on upgrade.** 5a is a documentation fix (the docs should show `dynamicCall` for non-Java
+callers) plus, ideally, a clearer resolver message naming the *lambda* rather than its enclosing class.
+5b would let FR-011 be asserted rather than reasoned about. Detail:
+`specs/015-llm-judge-evaluation/research.md` (R1, T004, R5/FR-011) and README §15.
