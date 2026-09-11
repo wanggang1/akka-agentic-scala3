@@ -1,6 +1,8 @@
 package com.gwgs.akkaagentic.eval.application
 
+import java.time.Duration
 import java.util.UUID
+import java.util.concurrent.{CompletableFuture, CompletionException, CompletionStage, TimeUnit, TimeoutException}
 
 import scala.jdk.CollectionConverters.*
 import scala.util.{Failure, Success, Try}
@@ -42,6 +44,16 @@ object AnswerEvaluator:
     * the two are indistinguishable (SC-007). */
   val DeclineJudgeId: String = "decline-judge"
 
+  /** How long one judge may take before its verdict is `errored`. The two judges run concurrently, so
+    * this also bounds the judging half of an evaluation. 60s is one attempt of the model provider's own
+    * `response-timeout`; with the provider's two retries a single model call can otherwise run for
+    * about three minutes, which is exactly what this bounds. `eval.judge-timeout` overrides it. */
+  val DefaultJudgeTimeout: Duration = Duration.ofSeconds(60)
+
+  /** "60s" rather than "PT1M", and "500ms" rather than "0s" for a sub-second test deadline. */
+  private def describe(d: Duration): String =
+    if d.toMillis % 1000 == 0 then s"${d.toSeconds}s" else s"${d.toMillis}ms"
+
   /** Four outcomes, and the last two are **not** `Failed`.
     *
     * A judge that could not form an opinion (`Errored`) and a subject that cannot be judged
@@ -62,7 +74,11 @@ object AnswerEvaluator:
       verdicts: List[Verdict]
   )
 
-final class AnswerEvaluator(componentClient: ComponentClient, knowledgeStore: KnowledgeStore):
+final class AnswerEvaluator(
+    componentClient: ComponentClient,
+    knowledgeStore: KnowledgeStore,
+    judgeTimeout: Duration = AnswerEvaluator.DefaultJudgeTimeout
+):
   import AnswerEvaluator.*
 
   private val logger = LoggerFactory.getLogger(classOf[AnswerEvaluator])
@@ -131,12 +147,17 @@ final class AnswerEvaluator(componentClient: ComponentClient, knowledgeStore: Kn
   /** Which judges are consulted, and in what order — one the platform ships, one we wrote. */
   private def judgeIds: List[String] = List(HallucinationJudgeId, DeclineJudgeId)
 
-  /** Both judges run **independently**: each is wrapped separately, so one erroring never suppresses
-    * the other's verdict (FR-007, SC-004). They are also called identically — by component id through
-    * `dynamicCall` — even though one belongs to the SDK and one to us. That symmetry is the finding,
-    * not a convenience: the agent client's string-keyed escape hatch reaches components we do not own
-    * (research R1), where the documented `.method(Evaluator::evaluate)` form cannot be written in
-    * Scala at all (T004).
+  /** Both judges run **independently and concurrently**. Each is started before either is awaited, so
+    * an evaluation costs the slower judge's latency rather than the sum of both; each is bounded by
+    * `judgeTimeout` and turned into a verdict separately, so one erroring or hanging never suppresses
+    * the other's verdict (FR-007, SC-004). Verdicts come back in [[judgeIds]] order, not completion
+    * order — callers and tests rely on a stable order. Blocking on the results is fine: endpoint
+    * handlers run on virtual threads.
+    *
+    * They are also called identically — by component id through `dynamicCall` — even though one
+    * belongs to the SDK and one to us. That symmetry is the finding, not a convenience: the agent
+    * client's string-keyed escape hatch reaches components we do not own (research R1), where the
+    * documented `.method(Evaluator::evaluate)` form cannot be written in Scala at all (T004).
     */
   private def judge(
       sessionId: String,
@@ -144,26 +165,42 @@ final class AnswerEvaluator(componentClient: ComponentClient, knowledgeStore: Kn
       referenceText: String,
       answer: String
   ): List[Verdict] =
-    List(
-      verdictOf(HallucinationJudgeId) {
+    val pending = List(
+      HallucinationJudgeId -> bounded {
         componentClient
           .forAgent()
           .inSession(sessionId)
           .dynamicCall[HallucinationEvaluator.EvaluationRequest, HallucinationEvaluator.Result](
             HallucinationJudgeId
           )
-          .invoke(new HallucinationEvaluator.EvaluationRequest(question, referenceText, answer))
+          .invokeAsync(new HallucinationEvaluator.EvaluationRequest(question, referenceText, answer))
       },
-      verdictOf(DeclineJudgeId) {
+      DeclineJudgeId -> bounded {
         componentClient
           .forAgent()
           .inSession(sessionId)
           .dynamicCall[DeclineJudge.EvaluationRequest, DeclineJudge.Result](DeclineJudgeId)
-          .invoke(DeclineJudge.EvaluationRequest(question, referenceText, answer))
+          .invokeAsync(DeclineJudge.EvaluationRequest(question, referenceText, answer))
       }
     )
+    pending.map((judgeId, result) => verdictOf(judgeId, result))
 
-  /** Run one judge and turn whatever happens into a verdict.
+  /** Start one judge and put a deadline on it.
+    *
+    * `orTimeout` completes *our* future exceptionally once the deadline passes. It does **not** cancel
+    * the model call behind it, which keeps running until the provider's own `response-timeout` ends it
+    * — the honest limit of a client-side deadline. A call that fails before it even starts is folded
+    * into the same future, so every judge becomes a verdict however it goes wrong.
+    */
+  private def bounded[R <: EvaluationResult](start: => CompletionStage[R]): CompletableFuture[EvaluationResult] =
+    Try(start) match
+      case Success(stage) =>
+        stage.toCompletableFuture
+          .thenApply[EvaluationResult]((result: R) => result)
+          .orTimeout(judgeTimeout.toMillis, TimeUnit.MILLISECONDS)
+      case Failure(e) => CompletableFuture.failedFuture[EvaluationResult](e)
+
+  /** Await one judge and turn whatever happened into a verdict.
     *
     * Catching broadly is deliberate and measured, not lazy. The SDK's own `toEvaluationResult` throws
     * `IllegalArgumentException` on a label outside its vocabulary, but that type is **erased at the
@@ -171,19 +208,32 @@ final class AnswerEvaluator(componentClient: ComponentClient, knowledgeStore: Kn
     * measured the same erasure for guardrail exceptions, and the T003 probe confirmed it here. So the
     * type cannot be matched on; the *message* survives, which is what the explanation needs.
     *
+    * The one type that *can* be matched is the deadline's `TimeoutException`: `orTimeout` raises it in
+    * this JVM, on our side of that boundary, so nothing erases it. A judge that did not answer in time
+    * is reported as exactly that, not as an unusable response.
+    *
     * A judge failure must never become a failed request (FR-007): the answer is already computed and
     * is returned regardless.
     */
-  private def verdictOf(judgeId: String)(call: => EvaluationResult): Verdict =
-    Try(call) match
+  private def verdictOf(judgeId: String, pending: CompletableFuture[EvaluationResult]): Verdict =
+    Try(pending.join()) match
       case Success(result) =>
         Verdict(judgeId, if result.passed then Outcome.Passed else Outcome.Failed, result.explanation)
       case Failure(e) =>
-        Verdict(
-          judgeId,
-          Outcome.Errored,
-          s"the judge returned an unusable response: ${Option(e.getMessage).getOrElse(e.getClass.getName)}"
-        )
+        causeOf(e) match
+          case _: TimeoutException =>
+            Verdict(judgeId, Outcome.Errored, s"the judge did not respond within ${describe(judgeTimeout)}")
+          case cause =>
+            Verdict(
+              judgeId,
+              Outcome.Errored,
+              s"the judge returned an unusable response: ${Option(cause.getMessage).getOrElse(cause.getClass.getName)}"
+            )
+
+  /** `join` wraps a failure in `CompletionException`; the reason is its cause. */
+  private def causeOf(e: Throwable): Throwable = e match
+    case wrapped: CompletionException if wrapped.getCause != null => wrapped.getCause
+    case other                                                     => other
 
   private def askDocsAgent(
       sessionId: String,
