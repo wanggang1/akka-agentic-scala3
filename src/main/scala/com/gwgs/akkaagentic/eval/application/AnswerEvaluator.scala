@@ -12,6 +12,7 @@ import com.gwgs.akkaagentic.docs.application.{DocsAgent, KnowledgeStore}
 import com.gwgs.akkaagentic.eval.domain.EvaluationApplicability
 import com.gwgs.akkaagentic.eval.domain.EvaluationApplicability.Applicability
 import com.gwgs.akkaagentic.eval.domain.ReferenceText
+import org.slf4j.LoggerFactory
 
 /** Orchestration for capability 13: answer a question exactly as capability 8 does, then have LLM
   * judges rate the result.
@@ -64,9 +65,20 @@ object AnswerEvaluator:
 final class AnswerEvaluator(componentClient: ComponentClient, knowledgeStore: KnowledgeStore):
   import AnswerEvaluator.*
 
+  private val logger = LoggerFactory.getLogger(classOf[AnswerEvaluator])
+
   /** Retrieve, answer, then judge. The answer is produced by the **same** call `DocsEndpoint` makes,
     * so capability 12's guardrails apply here too — which is what makes the refused path reachable
     * end to end without this capability configuring any rule.
+    *
+    * The assistant's turn can fail in two places, and neither is a decision to judge:
+    *   - **inside the agent** (a model timeout, a rate limit, an unusable reply): `DocsAgent.onFailure`
+    *     catches it and replies behind [[DocsAgent.FailedPrefix]];
+    *   - **outside it** (the component call itself): the agent never sees it, so it throws here. It is
+    *     caught rather than allowed to become a `500`, because every `/evaluate` outcome except invalid
+    *     input is `200` (contracts/evaluate-endpoint.md).
+    *
+    * Both end as `not-applicable` with no judge called — the refused path's shape, for the same reason.
     */
   def evaluate(question: String, judgesEnabled: Boolean = true): Evaluation =
     // ONE session id for the whole evaluation: the assistant turn and both judges. The judges keep
@@ -76,30 +88,42 @@ final class AnswerEvaluator(componentClient: ComponentClient, knowledgeStore: Kn
     // does the same, keying every evaluator call on the task id.
     val evaluationId = UUID.randomUUID().toString
     val retrieved = knowledgeStore.retrieve(question, TopK)
-    val answer = askDocsAgent(evaluationId, question, retrieved)
+    val reply: Option[String] =
+      Try(askDocsAgent(evaluationId, question, retrieved)) match
+        case Success(answer) => Option(answer) // a null reply is no reply; the domain never sees null
+        case Failure(e) =>
+          logger.warn(s"docs-agent call failed during evaluation [$evaluationId]", e)
+          None
     val referenceText = ReferenceText.render(retrieved.map(r => r.source -> r.text))
-    val refused = answer.startsWith(DocsAgent.BlockedPrefix)
+
+    // Neither a refusal nor a failure is an answer, and both sentinels are internal markers — the
+    // caller learns *which* it was from the verdicts, per contracts/evaluate-endpoint.md.
+    val answered =
+      reply.filterNot(r => r.startsWith(DocsAgent.BlockedPrefix) || r.startsWith(DocsAgent.FailedPrefix))
 
     val verdicts =
       if !judgesEnabled then List.empty // FR-009: switched off, the answer still stands
       else
-        EvaluationApplicability.of(answer, referenceText, DocsAgent.BlockedPrefix) match
+        EvaluationApplicability.of(
+          reply,
+          referenceText,
+          refusalPrefix = DocsAgent.BlockedPrefix,
+          failurePrefix = DocsAgent.FailedPrefix
+        ) match
           case Applicability.NotApplicable(reason) =>
-            // No judge model is called: judging a refusal, or judging against no reference material,
-            // yields a confident and meaningless verdict (research R6).
+            // No judge model is called: judging a refusal, a failure, or an answer against no
+            // reference material yields a confident and meaningless verdict (research R6).
             judgeIds.map(Verdict(_, Outcome.NotApplicable, reason))
-          case Applicability.Applicable =>
+          case Applicability.Applicable(answer) =>
             judge(evaluationId, question, referenceText, answer)
 
     Evaluation(
       evaluationId = evaluationId,
       question = question,
-      // A refusal is not an answer, and the sentinel is an internal marker — the caller learns *that*
-      // it was refused from the verdicts, per contracts/evaluate-endpoint.md.
-      answer = if refused then "" else answer,
+      answer = answered.getOrElse(""),
+      // A decline cites nothing, and neither does a turn that produced no answer at all.
       citedSources =
-        if refused || isDecline(answer) then List.empty
-        else retrieved.map(_.source).distinct,
+        answered.filterNot(isDecline).map(_ => retrieved.map(_.source).distinct).getOrElse(List.empty),
       referenceText = referenceText,
       verdicts = verdicts
     )

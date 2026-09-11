@@ -155,3 +155,29 @@ class EvaluationErrorsIntegrationTest extends TestKitSupport:
     val refused = evaluate(JailbreakAttempt).body()
     assertThat(refused.verdicts.map(_.outcome).mkString(", "))
       .isEqualTo("not-applicable, not-applicable")
+
+  /** Capability-13 timeout follow-up, path 1 — the assistant's turn **fails inside the agent** (here a
+    * scripted model failure; live, a `ModelTimeoutException` after the provider's `response-timeout`).
+    *
+    * Before the fix `DocsAgent.onFailure` turned that into "I don't know", and `/evaluate` then asked
+    * `decline-judge` to rate a decline the assistant never made — a slow model reported as a bad
+    * decision. As in the refusal test, no judge model is scripted, so a judge call would read
+    * `errored`: asserting `not-applicable` proves neither judge ran.
+    */
+  @Test
+  def aFailedAnswerIsNotApplicableAndIsNeverJudgedAsADecline(): Unit =
+    docsModel.whenMessage((_: String) => true).failWith(new RuntimeException("simulated model timeout"))
+
+    val reply = evaluate(DurabilityQuestion)
+    assertThat(reply.status()).isEqualTo(StatusCodes.OK)
+    val body = reply.body()
+
+    // Neither the failure sentinel nor a fake decline reaches the caller.
+    assertThat(body.answer).isEmpty()
+    assertThat(body.citedSources.isEmpty).isTrue()
+
+    assertThat(body.verdicts.map(v => s"${v.judge}=${v.outcome}").mkString(", "))
+      .isEqualTo("hallucination-evaluator=not-applicable, decline-judge=not-applicable")
+    body.verdicts.foreach { v =>
+      assertThat(v.explanation).isEqualTo("the assistant failed to answer")
+    }

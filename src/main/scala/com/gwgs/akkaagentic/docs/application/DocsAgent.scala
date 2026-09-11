@@ -30,6 +30,18 @@ object DocsAgent:
     */
   val BlockedPrefix: String = "__guardrail-blocked__:"
 
+  /** Marks a reply that is **not** an answer but a failed turn — the model timed out, was
+    * rate-limited, or returned something unusable — followed by the failure's message.
+    *
+    * Until the capability-13 timeout follow-up, a failed turn became [[DontKnow]]. That was harmless
+    * for `POST /ask`, whose callers see a decline either way, but it made a slow model
+    * indistinguishable from an honest decline — and `POST /evaluate` then asked `decline-judge` to
+    * rate a decision the assistant never made. The failure now travels the reply channel behind its
+    * own prefix, the [[BlockedPrefix]] technique again. `DocsEndpoint` maps it straight back to
+    * [[DontKnow]], so `POST /ask` behaves exactly as before; only the evaluator treats it differently.
+    */
+  val FailedPrefix: String = "__turn-failed__:"
+
   /** A wire copy of a retrieved passage handed to the agent as grounding context.
     *
     * Java-shaped on purpose: an agent `Request` (and its nested types) crosses the SDK's *internal*
@@ -65,8 +77,8 @@ class DocsAgent extends Agent:
 
   /** Answer the question grounded only in the supplied passages, or reply with the [[DontKnow]]
     * sentinel. Retrieval and citation happen in the endpoint (research R4); this agent just grounds.
-    * An ordinary failed turn degrades to the sentinel (a clean decline) rather than a 500 — AGENTS.md
-    * checklist. A **guardrail block does not**: see [[onFailure]].
+    * A failed turn replies behind [[FailedPrefix]] rather than becoming a 500 — AGENTS.md checklist —
+    * and a guardrail block behind [[BlockedPrefix]]: see [[onFailure]].
     */
   def ask(request: Request): Agent.Effect[String] =
     effects()
@@ -75,7 +87,8 @@ class DocsAgent extends Agent:
       .onFailure(onFailure)
       .thenReply()
 
-  /** Capability 12's one edit to capability 8, and the narrowest one that works.
+  /** Sort a failed turn into what it actually was. Capability 12 narrowed this handler once; the
+    * capability-13 timeout follow-up narrowed it again.
     *
     * `onFailure` used to absorb *every* throwable into [[DontKnow]], which was correct while the only
     * throwables were model failures. Guardrails changed that: the runtime aborts a blocked interaction
@@ -86,9 +99,12 @@ class DocsAgent extends Agent:
     * observed exactly that swallowing before this narrowing existed.
     *
     * A block is therefore re-emitted behind [[BlockedPrefix]] rather than rethrown — see that
-    * constant for why the exception itself cannot cross the component-client boundary. Every other
-    * failure keeps cap-8's honest-decline behaviour, now with a log line, since a silently swallowed
-    * exception is how capability 6's real bug stayed invisible.
+    * constant for why the exception itself cannot cross the component-client boundary.
+    *
+    * Every other failure used to keep cap-8's honest-decline behaviour and reply [[DontKnow]]. It now
+    * replies behind [[FailedPrefix]] instead, because a failure is not a decision and must not be
+    * judged as one — see that constant. Still with a log line, since a silently swallowed exception is
+    * how capability 6's real bug stayed invisible.
     */
   private def onFailure(failure: Throwable): String = failure match
     case block: Guardrail.GuardrailException =>
@@ -97,8 +113,8 @@ class DocsAgent extends Agent:
       logger.warn("docs-agent interaction blocked by a guardrail: {}", block.getMessage)
       BlockedPrefix + Option(block.getMessage).getOrElse("")
     case other =>
-      logger.warn("docs-agent turn failed; degrading to the decline sentinel", other)
-      DontKnow
+      logger.warn("docs-agent turn failed; replying behind the failure sentinel", other)
+      FailedPrefix + Option(other.getMessage).getOrElse(other.getClass.getName)
 
   /** Render the question plus a numbered, source-labeled block of the retrieved passages. */
   private def userMessage(request: Request): String =

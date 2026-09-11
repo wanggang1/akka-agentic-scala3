@@ -95,6 +95,11 @@ class DocsEndpoint(componentClient: ComponentClient, knowledgeStore: KnowledgeSt
           .invoke(agentRequest)
 
         if answer.startsWith(DocsAgent.BlockedPrefix) then blocked(blockedReply(answer))
+        else if answer.startsWith(DocsAgent.FailedPrefix) then
+          // A failed turn reaches /ask callers exactly as it always has: a decline that cites nothing.
+          // The distinct sentinel exists for POST /evaluate, which must not judge a failure as a
+          // decision; this surface's contract is unchanged.
+          HttpResponses.ok(AskReply(DocsAgent.DontKnow, List.empty))
         else
           val citedSources =
             if isDecline(answer) then List.empty
