@@ -357,3 +357,68 @@ separate, smaller category is **version-specific SDK bugs** we hit on **3.6.0** 
 params, request-based delegation offline-mocking, `readLast` history trimming). Those are worked around
 and tracked in [`docs/sdk-3.6.0-limitations.md`](docs/sdk-3.6.0-limitations.md) to re-check on an SDK
 upgrade — they are debt to clear, not lessons about the language boundary.
+
+---
+
+## Capability 14 — streaming: the escape hatch is narrower than "the agent client"
+
+`dynamicCall(String)` has been the project's one exemption from the method-reference wall since
+capability 1, and every capability since has been classified by asking *which client* is involved.
+Streaming shows that question is one level too coarse.
+
+**`dynamicCall` rescues the agent client's request/response calls and nothing else.** It returns a
+`DynamicMethodRef`, which has `invoke`/`invokeAsync` and **no streaming member**. Consuming a token
+stream is `tokenStream(SomeAgent::method)` — a Java method reference — so **the same agent client is on
+both sides of the wall at once**. The precise rule is now: *the wall is a property of which client **and
+which method on it**.*
+
+Measured, all four routes:
+
+| Attempt | Result |
+|---|---|
+| Scala lambda into `tokenStream` | **compiles**, fails at run time: `class <the caller's own class> is not a subclass of class akka.javasdk.agent.Agent` |
+| `dynamicCall(id).source(msg)` | compile error: `value source is not a member of DynamicMethodRef` |
+| `tokenStream("component-id")` | compile error: no `String` overload |
+| the same call in **Java** | works — the control that makes this about Scala, not about our usage |
+
+**Streams are not the deciding axis.** The jar-wide inventory is the useful part:
+
+| Client | Streaming member | Keyed on | Scala? |
+|---|---|---|---|
+| `AgentClientInSession` | `tokenStream(Function \| Function2)` | method reference | no |
+| `EventSourcedEntityClient` / `KeyValueEntityClient` / `WorkflowClient` | `notificationStream(Function)` | method reference | no |
+| `AutonomousAgentClient` | `notificationStream()` | *nothing* | **yes** |
+| `TaskClient` | `notificationStream()` | *nothing* | **yes** |
+
+Two notification streams in the same package are Scala-clean because they take no argument. What
+decides is what it always was: whether the API takes a Java method reference.
+
+**The wall took one class, and that is now enforced rather than observed.** The agent, the domain rule
+and even the capability's own endpoint test are Scala; only the endpoint holding the method reference is
+Java, and a test asserts exactly one `.java` file exists under the capability. Capability 11 discovered
+that the wall travels no further than the class holding the reference; capability 14 makes it a
+regression test.
+
+**Three platform findings that are not about Scala at all:**
+
+1. **A stream has no `onFailure`.** The builder's `error(...)` is decided before any token; after the
+   first one there is no hook. The sentinel technique capabilities 8, 12 and 13 depend on cannot exist
+   here — no value can replace text already read. **Every fallback pattern in this project assumed a
+   single-value reply.**
+2. **A failed model call never terminates a token stream** — nothing emitted, never completed, never
+   failed, still silent after **240 s**. Guards (`initialTimeout`, `idleTimeout`) are mandatory, not
+   defensive.
+3. **A guard buys termination, not legibility.** With the guard, a pre-token failure reaches the caller
+   as `200` with a body that *completes normally and is empty*, because the status line was already
+   sent. A caller must treat an empty body as failure; the alternative is a different wire format
+   (SSE), which is recorded as a fork. This is the first outcome in the project where the honest answer
+   is "the contract cannot express it", rather than a technique that recovers it.
+
+**And one positive interop result worth reusing.** The endpoint's language was chosen by the *SDK*, so
+capability 14 is the first time §8's language-of-consumer guidance meets a consumer we did not choose.
+A Java caller reads the idiomatic Scala domain (`Option`/`Either`) cleanly: the companion method
+resolves through scalac's static forwarder with no `MODULE$`, `Option.apply` converts the nullable at
+the boundary, and the only cost is two `Left`/`Right` casts. **When the SDK forces the consumer's
+language, keep the domain idiomatic and pay the cast** — moving the rule into Java would have grown the
+quarantine the wall forced.
+

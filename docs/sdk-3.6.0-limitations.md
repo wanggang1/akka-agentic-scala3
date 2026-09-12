@@ -207,3 +207,53 @@ than to the design.
 callers) plus, ideally, a clearer resolver message naming the *lambda* rather than its enclosing class.
 5b would let FR-011 be asserted rather than reasoned about. Detail:
 `specs/015-llm-judge-evaluation/research.md` (R1, T004, R5/FR-011) and README §15.
+
+---
+
+## 6. Streaming (capability 14, measured on 3.6.3)
+
+Three behaviours worth re-testing on any SDK upgrade. None is Scala-specific — a Java service meets all
+three identically.
+
+### 6a. A failed model call never terminates a token stream
+
+With the model scripted to fail, a consumer of
+`componentClient.forAgent().inSession(id).tokenStream(Agent::method).source(arg)` observes **no tokens,
+no completion and no failure**. Measured twice: silent at 30 s, and still silent at **240 019 ms** —
+well past the provider's own budget (`response-timeout = 1m` × `max-retries = 2`). So this is not retry
+latency; the stream simply never ends.
+
+**Consequence**: an endpoint returning such a stream *must* bound it (`initialTimeout`, `idleTimeout`)
+or a caller holds an open connection indefinitely. Ours does.
+
+**Scope**: observed under the TestKit with a scripted failure; a real provider failure is unverified and
+is listed as live-only work in specs/016.
+
+### 6b. A guard delivers termination, not a failure signal
+
+With `initialTimeout = 1s`, the same pre-token failure reaches an HTTP caller as:
+
+```text
+200 OK, after ~1s, body completes normally with ZERO chunks
+```
+
+The status line is written before any token exists, so Akka HTTP ends the already-committed chunked
+body rather than aborting it. **A pre-token failure is therefore indistinguishable from "nothing to
+say"** unless the caller treats an empty body as failure. A failure *after* fragments were sent does
+abort the body, so that case is visibly truncated.
+
+**Workaround, not taken**: server-sent events (`HttpResponses.serverSentEvents`) have somewhere to put
+an error after the body has begun. It changes the wire format for every client, so capability 14 keeps
+plain text and records SSE as a fork.
+
+### 6c. `StreamEffect` has no `onFailure`
+
+`Agent.StreamEffect.Builder` offers `error(String | CommandException)` — a refusal decided *before* any
+token — and no failure hook thereafter. Every other agent surface in this project degrades a failed turn
+to a sentinel value (`DontKnow`, `BlockedPrefix`, `FailedPrefix`); a stream structurally cannot, because
+no value can replace text the caller has already read.
+
+**Consequence**: fallback behaviour for a streamed agent has to live in the *stream* (guards, and how a
+client interprets a short body), not in the effect. Worth re-checking if a later SDK adds a stream-level
+failure hook.
+

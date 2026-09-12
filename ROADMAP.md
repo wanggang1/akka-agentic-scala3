@@ -7,7 +7,33 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 ## Where we are
 
-> **You are here:** Feature 13 (LLM-as-judge evaluation) — **✅ merged to `main` 2026-09-07 (PR #27)**
+> **You are here:** Feature 14 (streaming responses) — **in progress on `016-streaming-responses`**
+> ([`specs/016-streaming-responses`](specs/016-streaming-responses/)).
+> `POST /stream-chat/{sessionId}` delivers a reply **as it is generated**: the agent's handler returns
+> `StreamEffect` instead of `Effect[String]`, and the endpoint writes the fragments as a chunked
+> response. Capability 4's one-piece `/chat` surface is untouched.
+>
+> **Interop verdict — the agent client is on BOTH sides of the wall.** `dynamicCall(String)` has been
+> the project's one exemption since capability 1; it returns a `DynamicMethodRef` with
+> `invoke`/`invokeAsync` and **no streaming member**, while consuming a token stream is
+> `tokenStream(SomeAgent::method)` — a method reference. Measured: the Scala lambda **compiles** and
+> then fails at run time blaming *the caller's own class* (capability 13's diagnostic on a new path);
+> `dynamicCall(id).source(msg)` and `tokenStream("id")` do not compile; the same call in **Java**
+> works. So the rule sharpens to *which client **and which method on it***. Streams are not the axis:
+> `AutonomousAgentClient`/`TaskClient.notificationStream()` are zero-arg and Scala-clean. The wall took
+> **one class** — the endpoint — and a test now pins that it stays one.
+>
+> Three platform findings that are not about Scala: a stream has **no `onFailure`** (so the sentinel
+> technique of capabilities 8, 12 and 13 cannot exist — no value can replace text already read); a
+> failed model call **never terminates** a token stream (silent past **240 s**), making
+> `initialTimeout`/`idleTimeout` mandatory; and a guard buys **termination, not legibility** — a
+> pre-token failure arrives as `200` with a normally-completed **empty** body, so a caller must read an
+> empty body as failure. SSE would fix that and is recorded as a **fork**, not taken.
+>
+> Streaming is nevertheless **fully offline-provable** (57 fragments, exact parity, asserted over real
+> HTTP because the testkit's client buffers), and a streamed turn **is** persisted to session memory.
+>
+> **Previously:** Feature 13 (LLM-as-judge evaluation) — **✅ merged to `main` 2026-09-07 (PR #27, follow-up PR #28)**
 > ([`specs/015-llm-judge-evaluation`](specs/015-llm-judge-evaluation/)).
 > Two LLM judges rate cap-8's answers: the SDK's built-in **`hallucination-evaluator`** (is the answer
 > supported by the passages it was given?) and an authored **`decline-judge`** (was declining — or not
@@ -44,39 +70,14 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 > `SerializedLambda`'s `implClass`), and verdict telemetry is **not observable offline** — FR-011 is
 > verified by mechanism, not by watching it happen.
 >
-> **Previously:** Feature 12 (agent guardrails) — **✅ merged to `main` (PR #25)**
-> ([`specs/014-agent-guardrails`](specs/014-agent-guardrails/)).
-> Runtime-enforced governance around cap-8's `DocsAgent`: a request-side jailbreak rule that refuses
-> hostile prompts **before any model call**, plus two response-side rules — one enforcing, one
-> record-only. The guarded agent names none of them; rules are declared in configuration and built
-> reflectively from a class-name string, so there is **no descriptor entry** and **no new dependency**.
 >
-> **Interop verdict — all three Scala class forms load, and the prediction that an `object` would fail
-> was wrong.** `class G(ctx: GuardrailContext)` (loader attempt 1) and `class G` (no-arg, attempt 2 —
-> a path the docs never mention) both work, as expected. A Scala **`object`** was predicted to fail
-> because its module class's only constructor is `private`; it **loads**, because Akka's
-> `ReflectiveDynamicAccess` calls `setAccessible(true)`. The runtime then holds a *fresh instance*, not
-> `MODULE$` — harmless only because scalac makes object fields **static**. That **corrects** the
-> generalisation cap-11 invited: the deciding property is **whether a constructor with the required
-> parameter types exists at all**, not whether it is public (cap-11's inner `TableUpdater` has *none*
-> → fails; an `object` has one, merely private → succeeds). Same bytecode-shape axis, different
-> failure reason.
->
-> Three more results, all measured rather than reasoned: **(a)** the jailbreak rule needed **one config
-> line and zero Scala** — the SDK ships `"default jailbreak"` complete but inert (`agents = []`), and
-> the runtime evaluates it with the same in-process all-MiniLM ONNX model cap-8 already loads.
-> **(b)** A block **cannot be rethrown** from `onFailure` — the SDK catches it as a *"Failure mapping
-> error"* and the type is erased crossing the component client — so it travels the reply channel behind
-> a shared sentinel. **(c)** A rule's **name and category never reach application code**: the public
-> `GuardrailException` carries the bare explanation, and the composed audit line reaches traces and
-> metrics only. Rules we author name themselves inside their explanation; the SDK's `SimilarityGuard`
-> cannot, and reports `unknown`. Neither limit is Scala-specific — a Java agent hits both identically.
->
-> **⏭️ Next:** **streaming** (`StreamEffect` / Scala `Source`) — the standing candidate, and now the
-> highest-novelty *and* highest-risk item left: the interop question is genuinely unknown, where every
-> capability since cap-5 has been a variation on a wall whose shape was already understood.
+> **⏭️ Next:** undecided — capability 14 is the last of the four candidates from PR #21, so the roadmap
+> is open again. The forks this capability recorded are the obvious seeds: a streaming **grounded**
+> answer (retrieval before the stream, and the citation problem it creates), or **SSE** framing so a
+> mid-stream failure can describe itself.
 >
 > Capabilities 1–13 are **✅ done and merged**; 5–13 were exploratory follow-ups beyond the original four.
+> Capability 14 is **in progress**.
 >
 > **📄 Retrospective:** [`FINDINGS.md`](FINDINGS.md) consolidates the single `dynamicCall` finding that
 > explains every Scala-vs-Java outcome, plus the practical rubric. Caps 5–11 extend the through-line: the
@@ -105,6 +106,8 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 | 11 | **Views / read-model** — a `View` projects cap-6's `TodoEntity` state into one summary row per username; keyed lookup + the cross-user "who has open work" query an entity can't answer; `GET /todo-summaries/...`, read-only, **no model anywhere** (first fully model-free capability). **First split across the component/caller boundary:** the View is **Scala** (its `TableUpdater` in the companion `object` — a **bytecode-shape** requirement, a new hazard class), only the querying **endpoint** is Java (`ViewClient` is method-ref-only) — the rows are Jackson-annotated **Scala** case classes, once a build-order fix made Java→Scala references compile. Keyed query returns `Optional`; new `view` descriptor key | [`specs/013-views-read-model`](specs/013-views-read-model/) | ✅ Done — merged (PR #23) |
 | 12 | **Agent guardrails** — runtime-enforced governance around cap-8's `DocsAgent`: a request-side jailbreak rule (refused **before any model call**), plus response-side rules, one enforcing and one record-only; new `422` outcome on `POST /ask`, `200` answer / `200` decline / `400` validation untouched. Rules are declared in **configuration** and built reflectively from a class-name string — **not components**, so the descriptor is unchanged; the guarded agent names no rule (asserted by a test that reads its source). **All three Scala class forms load**, including `object` — the predicted failure was wrong (`setAccessible` opens the private ctor), which **corrects** cap-11's bytecode-shape rule to "does a ctor with those param types exist", not "is it public". Jailbreak = **one config line, zero Scala, no new dependency**. Two measured limits: a block can't be rethrown (type erased at the client → reply-channel sentinel), and a rule's name/category never reach application code (traces only → rules self-tag their explanation) | [`specs/014-agent-guardrails`](specs/014-agent-guardrails/) | ✅ Done — merged (PR #25) |
 | 13 | **LLM-as-judge evaluation** — judges cap-8's answers with the SDK's built-in **`hallucination-evaluator`** (is the answer supported by its passages?) and an authored **`decline-judge`** (was declining — or not declining — right?); `POST /evaluate` over the same pipeline, four outcomes (`passed`/`failed`/`errored`/`not-applicable`), nothing gated. **Evaluation could only ever have had its own surface** — not discipline but a research result: there is no `Consume.From*` source for a request-based agent. That left cap-8 **byte-identical at merge**; the judge-timeout follow-up then edited `DocsAgent` deliberately, so a failed turn is no longer judged as a decline. **Headline: `dynamicCall` reaches components the SDK OWNS** — the built-in evaluators are ordinary Agents *and* provided components, so the escape hatch resolves them off `agentClassById`; caps 4/6/11 each quarantined Java for a runtime-owned component, cap-13 has **no Java at all**. An authored evaluator is an ordinary agent whose **return type** implementing `EvaluationResult` (not an annotation) is what routes verdicts to metrics/traces — **one** descriptor line, against cap-12's zero. Fully offline-tested **including the SDK's own judge** (the TestKit's per-agent model override beats `LlmAsJudge`'s explicit `.model(...)`) | [`specs/015-llm-judge-evaluation`](specs/015-llm-judge-evaluation/) | ✅ Done — merged (PR #27) |
+
+| 14 | **Streaming responses** — `StreamEffect` instead of `Effect[T]`: `POST /stream-chat/{sessionId}` writes the reply as it is generated (chunked), beside cap-4's untouched one-piece `/chat`. **Headline: `dynamicCall` covers request/response ONLY** — it returns a `DynamicMethodRef` with no streaming member, so the agent client is on **both** sides of the method-ref wall; the Scala lambda compiles then fails at runtime blaming the caller's own class, while Java works. The wall took **one class** (the endpoint), pinned by a test; agent, domain and the endpoint's own test stay Scala. Streams are not the axis — `AutonomousAgentClient`/`TaskClient.notificationStream()` are zero-arg and clean. Also: **no `onFailure` on a stream**, a failed model call **never ends** one (silent past 240 s → guards mandatory), and a guard gives termination but not legibility (pre-token failure = `200` + empty body). Fully offline-provable: 57 fragments, exact parity | [`specs/016-streaming-responses`](specs/016-streaming-responses/) | 🚧 In progress |
 
 **Status legend:** ✅ done · 📋 planned (spec written) · 🚧 in progress · ⬜ not started
 

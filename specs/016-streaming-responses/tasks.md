@@ -174,22 +174,22 @@ abnormally rather than looking complete.
 **Independent Test**: read README, FINDINGS and ROADMAP; the verdict, what was measured, and which
 single class is Java are all stated.
 
-- [ ] T018 [P] [US4] `README.md` — new **§16** in "Scala interop notes": authoring is Scala-clean;
+- [x] T018 [P] [US4] `README.md` — new **§16** in "Scala interop notes": authoring is Scala-clean;
   consuming is not; the four attempts with their exact diagnostics; the Java positive control; the
   never-terminating stream and the absent `onFailure`. Plus a **Capability 14 usage section** (curl with
   `--no-buffer`, the conversation, validation-first) and the **project-layout** entry.
-- [ ] T019 [P] [US4] `FINDINGS.md` — the amendment: **`dynamicCall` covers the agent client's
+- [x] T019 [P] [US4] `FINDINGS.md` — the amendment: **`dynamicCall` covers the agent client's
   request/response calls only**, so the agent client sits on **both** sides of the wall; and streams are
   not the deciding axis, since `AutonomousAgentClient.notificationStream()` and
   `TaskClient.notificationStream()` are zero-arg and Scala-clean. Include the client-by-client
   inventory from research Q-B.
-- [ ] T020 [P] [US4] `ROADMAP.md` — row 14 (✅ with the finding in one line) and "Where we are" moved
+- [x] T020 [P] [US4] `ROADMAP.md` — row 14 (✅ with the finding in one line) and "Where we are" moved
   forward, with capability 13 demoted to "Previously".
-- [ ] T021 [P] [US4] `docs/sdk-3.6.0-limitations.md` — a new section for the two SDK behaviours this
+- [x] T021 [P] [US4] `docs/sdk-3.6.0-limitations.md` — a new section for the two SDK behaviours this
   capability measured: a failed model call never terminates a token stream (240 s, no event), and
   `StreamEffect` has no `onFailure`, so no fallback is expressible once streaming starts. Both to be
   re-tested on an SDK upgrade.
-- [ ] T022 [US4] `README.md` §13 — sharpen the existing claim that `dynamicCall(String)` exists on
+- [x] T022 [US4] `README.md` §13 — sharpen the existing claim that `dynamicCall(String)` exists on
   `AgentClientInSession` **only**: still true, and now shown to be insufficient, because it does not
   cover `tokenStream`. Same file as T018, so **not** parallel with it.
 

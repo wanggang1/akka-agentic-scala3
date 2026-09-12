@@ -222,3 +222,25 @@ moving the rule into Java, which would have grown the quarantine the wall forced
 language-of-consumer guidance holds with one clarification: **when the SDK forces the consumer's
 language, keep the domain idiomatic and pay the cast at the boundary.**
 
+---
+
+## Fork recorded (user decision, 2026-09-12): keep plain text, do not adopt SSE
+
+Q-A(3) produced the first evidence against research D4's choice of `streamText`: a pre-token failure
+arrives as a normally-completed empty `200`, and only a framing with room for a post-body error —
+server-sent events with an explicit `event: error` — could make it self-describing.
+
+**Decision: keep `HttpResponses.streamText` and record SSE as a fork.** Reasons, in the order they
+mattered:
+
+1. The weakness is *documentable and bounded*: "treat an empty body as failure" is a one-line contract
+   rule, and the request does terminate promptly, which was the dangerous half.
+2. Switching framing changes the wire format for **every** client, for a failure path, in a capability
+   whose purpose is an interop finding rather than a production surface.
+3. `serverSentEvents` is available on `HttpResponses` whenever the tradeoff changes, and the endpoint's
+   stream composition would be reused as-is — only the final response builder differs.
+
+Recorded in the contract, in `docs/streaming-vs-request-response.md`, in README §16 and in
+`docs/sdk-3.6.0-limitations.md` §6b, so a future reader meets the limitation and the available fix
+together rather than rediscovering both.
+
