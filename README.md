@@ -138,8 +138,8 @@ src/main/java/com/gwgs/akkaagentic/streaming/api/          # StreamingChatEndpoi
 # streamEffects builder takes only values and strings); CONSUMING one is not — tokenStream(Agent::method)
 # needs a Java method reference and dynamicCall has NO streaming counterpart, so the endpoint is the
 # ONE Java class here (cap-11's shape) and a test pins that it stays one. StreamEffect has no
-# onFailure, and a pre-token model failure never terminates the stream, so the endpoint imposes
-# initialTimeout/idleTimeout. Fully offline-tested incl. incrementality (57 fragments, exact parity).
+# onFailure, and a model that never answers AND never errors would hang the stream, so the endpoint
+# imposes initialTimeout/idleTimeout (a real provider error the runtime ends itself, in ~178 ms). Fully offline-tested incl. incrementality (57 fragments, exact parity).
 # See §16 and docs/streaming-vs-request-response.md.
 
 src/main/resources/application.conf                 # default model-provider config
@@ -887,7 +887,8 @@ writing components in Scala needs explicit workarounds:
       file exists under the capability, so growth of the quarantine becomes a recorded finding rather
       than silent drift — capability 11's outcome, now mechanically enforced.
 
-    - **There is no `onFailure` on a stream, and a failed model call never ends one.** The builder
+    - **There is no `onFailure` on a stream, and a stream can hang — though not for the reason first
+      measured.** The builder
       offers `error(...)`, decided *before* any token, and nothing for a failure after the first one —
       so the sentinel technique capabilities 8, 12 and 13 all rely on **cannot exist here**: no value
       can replace text the caller has already read. And the failure behaviour needed two
@@ -2189,8 +2190,9 @@ curl -i -X POST http://localhost:9000/stream-chat/c-1 \
 # 400 Bad Request — question must not be blank   (no model call, nothing streamed)
 ```
 
-**The two guards are tunable, and they are not optional.** A model failure before the first token
-leaves the SDK's stream silent for ever (measured past 240 s), so the endpoint bounds it:
+**The two guards are tunable, and worth keeping.** A real provider error ends the stream on its own
+(~178 ms, measured live); what the guards bound is a model that never answers *and* never errors,
+which would otherwise hold the connection open indefinitely:
 
 ```shell
 STREAMING_FIRST_TOKEN_TIMEOUT=10s STREAMING_IDLE_TIMEOUT=5s mvn compile exec:java

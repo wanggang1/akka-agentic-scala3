@@ -215,7 +215,7 @@ callers) plus, ideally, a clearer resolver message naming the *lambda* rather th
 Three behaviours worth re-testing on any SDK upgrade. None is Scala-specific — a Java service meets all
 three identically.
 
-### 6a. A failed model call never terminates a token stream
+### 6a. A token stream can hang — under a scripted failure; a real provider error ends it
 
 With the model scripted to fail, a consumer of
 `componentClient.forAgent().inSession(id).tokenStream(Agent::method).source(arg)` observes **no tokens,

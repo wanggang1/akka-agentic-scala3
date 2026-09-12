@@ -139,3 +139,13 @@ Foundational: the domain validation type and its unit test. US1: the endpoint pl
 parity tests. US2: the multi-turn memory test. US3: the termination-guard tests. US4: README §16,
 FINDINGS, ROADMAP, `docs/sdk-3.6.0-limitations.md` for the never-terminating stream. Finally a live
 smoke test covering the two unverified items in research.
+
+## Addendum — 2026-09-12: the guard's justification, corrected by the live run
+
+This plan states twice that "a failed model call never terminates the stream (measured at 240 s)". That
+was measured with `TestModelProvider.failWith`. The live smoke test (T023) showed a **real** provider
+error failing the stage in ~178 ms (`AgentSource.publishErrorAndFailStage`), so the 240 s silence is a
+test-provider artifact. The design decision stands — `initialTimeout`/`idleTimeout` remain — on the
+narrower justification that they bound a model which never answers *and* never errors. See research.md
+Q-A(2), which carries the corrected measurement inline.
+
