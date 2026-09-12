@@ -38,7 +38,7 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 > `errored` outcome has an SDK-supplied deterministic trigger. **(c)** **Evaluation could only ever have
 > had its own surface**, as a research result rather than discipline: there is no `Consume.From*` source
 > for a request-based agent, so it *could not* have been a background hook. That left capability 8
-> **byte-identical at merge** — a property given up in PR review, deliberately, to stop a failed turn
+> **byte-identical at merge** — a property given up in PR review (PR #28), deliberately, to stop a failed turn
 > being judged as a decline (see "Ideas / follow-ups"). **(d)** Two sharp edges: the documented call form compiles from Scala and then
 > blames *the caller's own class* for not being an `Agent` (`MethodRefResolver` reads the
 > `SerializedLambda`'s `implClass`), and verdict telemetry is **not observable offline** — FR-011 is
@@ -184,8 +184,7 @@ Not on the four-capability path, captured so they're not forgotten:
   component-serialized **stays Java-shaped**. Consequence: capabilities 2–4 below can't use
   idiomatic `Option` wire types either — keep them Java-shaped. See README "Scala interop notes" §3.
 
-- **Capability 13 — run the two judges concurrently** — ✅ *done on `fix/cap13-judge-timeout`
-  (2026-09-11).* `AnswerEvaluator.judge` built its verdicts in a `List(...)` literal, which Scala
+- **Capability 13 — run the two judges concurrently** — ✅ *done — merged (PR #28).* `AnswerEvaluator.judge` built its verdicts in a `List(...)` literal, which Scala
   evaluates strictly left to right, so `hallucination-evaluator` completed before `decline-judge`
   started: three sequential model calls where two would do. It had never been weighed — specs/015
   acknowledged the latency but never discussed concurrency. Both judges are now started with
@@ -193,8 +192,7 @@ Not on the four-capability path, captured so they're not forgotten:
   reassembled in fixed order because `EvaluationEndpointIntegrationTest` pins it. Measured, not
   assumed: two judges scripted at 2.5s each finish inside 4.2s.
 
-- **Capability 13 — bound the chained model calls with a timeout** — ✅ *done on
-  `fix/cap13-judge-timeout` (2026-09-11), and the original claim here was wrong.* This said there was
+- **Capability 13 — bound the chained model calls with a timeout** — ✅ *done — merged (PR #28), and the original claim here was wrong.* This said there was
   **no configured bound anywhere**. In fact every model call already inherited the provider's
   `response-timeout = 1m`, `connection-timeout = 15s` and `max-retries = 2` from the SDK's
   `reference.conf` — so one call gave up after about three minutes. What was genuinely missing was a

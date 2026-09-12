@@ -225,7 +225,7 @@ decline. That is no longer the agent's behaviour.
 
 - Capability 12 (specs/014) first narrowed `onFailure` so a guardrail block replies behind
   `BlockedPrefix` instead.
-- The capability-13 judge-timeout follow-up (branch `fix/cap13-judge-timeout`) narrowed it again.
+- The capability-13 judge-timeout follow-up (PR #28) narrowed it again.
   Every other failure — a model timeout, a rate limit, an unusable reply — now replies behind
   `FailedPrefix = "__turn-failed__:"`. The reason: capability 13's `POST /evaluate` judges declines,
   and a timed-out answer arriving as "I don't know" was being judged as a decision the assistant

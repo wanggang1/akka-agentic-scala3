@@ -824,7 +824,7 @@ live variability is then visible *as* variability, rather than being mistaken fo
 
 R3/T007 narrowed `DocsAgent.onFailure` so a guardrail block replies behind `BlockedPrefix`, and stated
 that every other throwable keeps degrading to `DontKnow`. The capability-13 judge-timeout follow-up
-(branch `fix/cap13-judge-timeout`) narrowed the same handler a second time: non-guardrail failures now
+(PR #28) narrowed the same handler a second time: non-guardrail failures now
 reply behind `FailedPrefix = "__turn-failed__:"`. It uses exactly the reply-channel technique this
 feature established, for the same reason: a failure reported as an honest decline misleads whoever
 consumes it, and capability 13's decline judge was consuming it.

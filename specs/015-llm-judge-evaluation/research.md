@@ -835,7 +835,7 @@ R4's finding stands: there is no `Consume.From*` source for a request-based agen
 only ever have had its own surface, and at merge (PR #27) capability 8's sources were byte-identical.
 That property did not survive the follow-up, and it was given up deliberately.
 
-The judge-timeout follow-up from PR #27 review (branch `fix/cap13-judge-timeout`) found two failure
+The judge-timeout follow-up from PR #27 review (PR #28) found two failure
 paths this capability misreported:
 
 1. **A turn that fails inside the agent** (a model timeout, a rate limit, an unusable reply) reached
