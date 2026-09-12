@@ -145,14 +145,20 @@ question on a fresh id, which must show no knowledge of it.
 terminates promptly instead of hanging; force a stall after fragments and confirm the body ends
 abnormally rather than looking complete.
 
-- [ ] T015 [US3] `src/test/scala/com/gwgs/akkaagentic/streaming/api/StreamingChatFailureIntegrationTest.scala`
+- [x] T015 [US3] `src/test/scala/com/gwgs/akkaagentic/streaming/api/StreamingChatFailureIntegrationTest.scala`
   with a short `initialTimeout` override: a scripted model failure (`failWith`) returns **no** fragments
   and the request **terminates within the bound** (FR-006). This is the test that would have hung for
   ever before the guard existed — assert the bound, not merely the outcome.
-- [ ] T016 [US3] In the same class, a stalled stream (a scripted reply that sleeps past the idle bound)
-  terminates via `idleTimeout` after delivering earlier fragments, and the fragments already received
-  stay valid (FR-005).
-- [ ] T017 [US3] Record in that test class's ScalaDoc that a **genuine mid-stream model failure is not
+- [x] T016 [US3] **Revised while implementing (2026-09-12), because the planned test could not observe
+  its own claim.** `TestModelProvider` produces the whole reply and tokenizes afterwards, so every
+  fragment flows at once: a sleep produces a gap *before* the first token (that is T015's
+  `initialTimeout` case), and **no scripted model can produce a gap between tokens**. So instead, in
+  the same class: (a) a false-positive guard — a slow-but-answering model must still complete, which is
+  what would catch a badly-chosen default (cap-12's regression-guard technique); and (b) FR-005's
+  mechanism pinned on a **synthetic source** — `idleTimeout` delivers what arrived, then *fails*
+  rather than completing, which is what makes a truncated answer distinguishable from a finished one.
+  The genuine mid-stream model failure stays live-only, recorded in T017 and in research.
+- [x] T017 [US3] Record in that test class's ScalaDoc that a **genuine mid-stream model failure is not
   scriptable offline** — the test provider produces the whole reply and tokenizes afterwards, so an
   injected failure always lands before the first token. The stall above is the honest proxy; the real
   case belongs to T023 and to `docs/sdk-3.6.0-limitations.md`, not to a test pretending to cover it.

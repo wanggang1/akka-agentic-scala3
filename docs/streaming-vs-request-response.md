@@ -63,8 +63,19 @@ nothing and text appearing at once.
    token, and **no `onFailure`**. Capabilities 8, 12 and 13 all lean on `.onFailure(_ => sentinel)`;
    a stream cannot, because no value can replace text the caller has already read. This is the first
    capability in the project that cannot use that technique.
-2. **No error status after the first byte.** The `200` and headers are already on the wire, so a later
-   failure can only be a *truncated body*. Error reporting genuinely degrades.
+2. **No error status after the first byte, and worse than "truncated".** The `200` and headers are on
+   the wire before any token exists, so a later failure cannot change the status. What a caller
+   actually observes splits in two, both measured:
+
+   | Failure | Caller observes |
+   |---|---|
+   | **before** the first fragment | `200` with a body that **completes normally and is empty** — indistinguishable from "nothing to say" |
+   | **after** fragments were sent | the body **aborts**: truncated, and visibly so |
+
+   The first row is the uncomfortable one: a guard makes the request *end* (1041 ms, versus silent
+   past 240 s without it) but not *legible*. A client must treat an empty body as failure. The only
+   real fix is a framing with room for an error after the body starts — server-sent events, with an
+   explicit `event: error` — which is a wire-format decision, not a code change.
 3. **Guards become mandatory, not defensive.** Measured: when a model call fails **before** the first
    token, the token stream produces no tokens, no completion and no failure — nothing, still silent
    after **240 seconds**, well past the provider's own budget (`response-timeout = 1m` × 3 attempts).

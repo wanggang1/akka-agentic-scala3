@@ -55,10 +55,16 @@ Also `400` for a malformed JSON body (the SDK rejects it) and for a blank-lookin
 
 ### Abnormal termination — there is no error status once streaming has begun
 
-| When | What the caller observes |
-|---|---|
-| Failure **before** the first fragment | the stream is failed by the endpoint's `initialTimeout` guard, so the request terminates rather than hanging. **Without that guard the SDK's stream emits nothing and never ends** — measured at 240 s (research Q-A(2)). |
-| Failure **after** fragments were sent | an abnormally terminated body: the fragments already read stay valid, and the truncation is visible as an incomplete response rather than a clean end (FR-005). |
+| When | What the caller observes | Measured |
+|---|---|---|
+| Failure **before** the first fragment | **`200` with an empty body that completes normally.** The guard ends the request promptly (~1 s) instead of hanging — without it the SDK's stream emits nothing and never ends, silent past **240 s** — but the status line was already sent, so there is no distinct failure signal. **A caller must treat an empty body as failure.** | T015, research Q-A(2)/(3) |
+| Failure **after** fragments were sent | the body **aborts**: fragments already read stay valid and the truncation is visible as an incomplete response rather than a clean end (FR-005). | pinned on a synthetic source — the model cannot produce a mid-stream gap offline |
+
+> **Known weakness, not a to-do.** FR-006 asked for "a single clear failure"; the pre-token case
+> delivers "ends promptly and empties". Making the two cases distinguishable requires a framing with
+> somewhere to put an error after the body has begun — server-sent events with an explicit
+> `event: error` — which changes this contract from plain text to an event stream and changes every
+> client. Recorded as a fork rather than taken silently.
 
 **Why no error JSON**: the status line and headers are sent with the first fragment, so a later failure
 cannot change the status. And unlike every other agent surface in this project, there is **no fallback

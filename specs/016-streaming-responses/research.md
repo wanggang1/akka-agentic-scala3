@@ -51,6 +51,38 @@ hang), plus `idleTimeout`, `completionTimeout`, `keepAlive`, `recover`/`recoverW
 **Honest scope of the measurement**: observed under the TestKit with a scripted failure. Whether a real
 provider failure behaves the same is unverified and belongs in the live smoke test.
 
+### Q-A(3) — what the caller sees *with* the guard: a clean, empty `200` (measured at T015)
+
+The guard was expected to make a pre-token failure observable. It makes it **terminate**; it does not
+make it **distinguishable**. Measured end to end with `first-token-timeout = 1s`:
+
+```text
+status = 200 OK, after 1041 ms, body = completed with 0 chunk(s)
+```
+
+The status line is already on the wire when the stream fails — the handler returned its
+`HttpResponse` long before any token existed — so Akka HTTP **ends the already-committed chunked body
+normally** rather than aborting it. At the HTTP level, "the model failed before saying anything" and
+"the assistant had nothing to say" are the same response.
+
+So the asymmetry FR-005/FR-006 actually get is:
+
+| Failure | Caller observes |
+|---|---|
+| **before** the first fragment | `200`, body completes normally, **zero chunks** |
+| **after** fragments were sent | body **aborts** — the stream fails, so the body is truncated (pinned on a synthetic source, since the model cannot produce a mid-stream gap offline) |
+
+**What this costs the contract.** FR-006 asked for "a single clear failure". What exists is "a request
+that ends promptly and empties", which a caller can only interpret by **treating an empty body as
+failure**. That is now documented in `contracts/stream-chat-endpoint.md` rather than claimed away, and
+pinned by T015 so a change in the shape surfaces as a finding.
+
+**The available fix is a wire-format change, not a code fix.** Distinguishing the two cases needs a
+framing with somewhere to put an error *after* the body has begun — which is what SSE exists for
+(`HttpResponses.serverSentEvents`, with an explicit `event: error`). That would replace plain text with
+an event stream and change every client, so it is recorded as a fork for the user to decide rather than
+taken unilaterally (research D4 chose `streamText`; this is the first evidence against that choice).
+
 ---
 
 ## Q-B — Can a **Scala** caller consume a token stream? **NO. This is the headline.**
