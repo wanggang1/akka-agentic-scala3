@@ -69,18 +69,20 @@ nothing and text appearing at once.
 
    | Failure | Caller observes |
    |---|---|
-   | **before** the first fragment | `200` with a body that **completes normally and is empty** — indistinguishable from "nothing to say" |
+   | **before** the first fragment | `200`, `Transfer-Encoding: chunked`, **zero bytes**, and — measured live — `curl_exit=0` with the connection left intact. The runtime logs "Aborting connection"; it still renders as a normal terminating zero-length chunk, so there is **no client-side signal at all** |
    | **after** fragments were sent | the body **aborts**: truncated, and visibly so |
 
    The first row is the uncomfortable one: a guard makes the request *end* (1041 ms, versus silent
    past 240 s without it) but not *legible*. A client must treat an empty body as failure. The only
    real fix is a framing with room for an error after the body starts — server-sent events, with an
    explicit `event: error` — which is a wire-format decision, not a code change.
-3. **Guards become mandatory, not defensive.** Measured: when a model call fails **before** the first
-   token, the token stream produces no tokens, no completion and no failure — nothing, still silent
-   after **240 seconds**, well past the provider's own budget (`response-timeout = 1m` × 3 attempts).
-   Without `initialTimeout` a caller holds an open connection indefinitely. `idleTimeout` covers a
-   stall after streaming began.
+3. **Guards are for the hang, and the first measurement of that was misleading.** Under a *scripted*
+   failure the token stream produces nothing — no tokens, no completion, no failure — still silent
+   after **240 seconds**. But against a **real** provider error the runtime fails the stage in
+   **~178 ms** (`AgentSource.publishErrorAndFailStage`), so that silence is a **test-provider
+   artifact**. `initialTimeout`/`idleTimeout` still earn their place, for the case the runtime does
+   *not* cover: a model that never answers **and** never errors. Keep them; just do not believe the
+   scarier version of the story.
 4. **Reassembly becomes the client's job**, and a buffering client sees results byte-identical to the
    non-streaming surface — so "we stream" is unobservable to it. (`curl` needs `--no-buffer`.)
 5. **Nothing can be appended after the text.** Citations computed from retrieval cannot honestly

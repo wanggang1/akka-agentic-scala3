@@ -405,14 +405,21 @@ regression test.
    first one there is no hook. The sentinel technique capabilities 8, 12 and 13 depend on cannot exist
    here — no value can replace text already read. **Every fallback pattern in this project assumed a
    single-value reply.**
-2. **A failed model call never terminates a token stream** — nothing emitted, never completed, never
-   failed, still silent after **240 s**. Guards (`initialTimeout`, `idleTimeout`) are mandatory, not
-   defensive.
-3. **A guard buys termination, not legibility.** With the guard, a pre-token failure reaches the caller
-   as `200` with a body that *completes normally and is empty*, because the status line was already
-   sent. A caller must treat an empty body as failure; the alternative is a different wire format
-   (SSE), which is recorded as a fork. This is the first outcome in the project where the honest answer
-   is "the contract cannot express it", rather than a technique that recovers it.
+2. **A token stream can hang, but not for the reason first measured — and the correction matters.**
+   Under `TestModelProvider.failWith` the stream emits nothing, completes never and fails never, still
+   silent after **240 s**. Against a **real** provider error the runtime fails the stage in **~178 ms**
+   (`AgentSource.publishErrorAndFailStage`). So the 240 s silence is a **test-provider artifact**, and
+   a guard's real justification is the narrower case: a model that never answers *and* never errors.
+   Worth carrying as a method lesson too — **a failure you injected is not necessarily the failure
+   production will hand you**, and capability 6's `readLast` correction was the same shape of mistake.
+3. **A pre-token failure is undetectable by the client, measured both ways.** It reaches the caller as
+   `200` with a body that *completes normally and is empty*, because the status line went out before
+   any token existed. Live, against a real provider error:
+   `Transfer-Encoding: chunked · BYTES=0 · curl_exit=0 · Connection left intact` — the runtime logs
+   "Aborting connection" and it still renders as a normal terminating zero-length chunk, so **curl
+   reports success**. A caller must treat an empty body as failure; the alternative is a wire format
+   with room for a post-body error (SSE), recorded as a fork. This is the first outcome in the project
+   where the honest answer is "the contract cannot express it" rather than a technique that recovers it.
 
 **And one positive interop result worth reusing.** The endpoint's language was chosen by the *SDK*, so
 capability 14 is the first time §8's language-of-consumer guidance meets a consumer we did not choose.

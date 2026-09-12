@@ -226,8 +226,20 @@ latency; the stream simply never ends.
 **Consequence**: an endpoint returning such a stream *must* bound it (`initialTimeout`, `idleTimeout`)
 or a caller holds an open connection indefinitely. Ours does.
 
-**Scope**: observed under the TestKit with a scripted failure; a real provider failure is unverified and
-is listed as live-only work in specs/016.
+**CORRECTED by the live run (2026-09-12).** This is a **test-provider artifact**, not general SDK
+behaviour. Against a real provider error (`OLLAMA_MODEL=no-such-model-xyz`) the stream fails in
+**~178 ms** — the runtime logs `AK-01202 … Model call failed` and
+`Response stream … failed with 'Model call failed'. Aborting connection.`, via
+`AgentSource.publishErrorAndFailStage`.
+
+| Injection | Stream ends? | When |
+|---|---|---|
+| real provider error | yes, by the runtime | ~178 ms |
+| `TestModelProvider.failWith` | no | silent past 240 s |
+
+**So what the guard is for is narrower than it first appeared**: not provider errors (the runtime
+handles those faster than any timeout), but a model that never answers *and* never errors — a hang.
+Worth keeping for that, and worth knowing it is not the common case.
 
 ### 6b. A guard delivers termination, not a failure signal
 
@@ -241,6 +253,16 @@ The status line is written before any token exists, so Akka HTTP ends the alread
 body rather than aborting it. **A pre-token failure is therefore indistinguishable from "nothing to
 say"** unless the caller treats an empty body as failure. A failure *after* fragments were sent does
 abort the body, so that case is visibly truncated.
+
+**Confirmed live, including the part the first run missed.** With a real provider error the caller sees:
+
+```text
+HTTP/1.1 200 OK · Transfer-Encoding: chunked · BYTES=0 · curl_exit=0 · Connection left intact
+```
+
+The runtime logs "Aborting connection", but it is rendered as a normal terminating zero-length chunk —
+**curl reports success**. So the abort is undetectable at the client, for a scripted *and* a real
+failure alike.
 
 **Workaround, not taken**: server-sent events (`HttpResponses.serverSentEvents`) have somewhere to put
 an error after the body has begun. It changes the wire format for every client, so capability 14 keeps

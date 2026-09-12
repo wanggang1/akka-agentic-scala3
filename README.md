@@ -890,10 +890,14 @@ writing components in Scala needs explicit workarounds:
     - **There is no `onFailure` on a stream, and a failed model call never ends one.** The builder
       offers `error(...)`, decided *before* any token, and nothing for a failure after the first one —
       so the sentinel technique capabilities 8, 12 and 13 all rely on **cannot exist here**: no value
-      can replace text the caller has already read. Worse, measured: when the model fails before the
-      first token the SDK's token stream emits nothing, completes never and fails never — still silent
-      after **240 seconds**, past the provider's own budget. The endpoint therefore imposes
-      `initialTimeout` and `idleTimeout`; without them a caller holds an open connection for ever.
+      can replace text the caller has already read. And the failure behaviour needed two
+      measurements, the second of which corrected the first. Under `TestModelProvider.failWith` the
+      token stream emits nothing, completes never and fails never — still silent after **240 seconds**.
+      But against a **real** provider error (a bogus `OLLAMA_MODEL`) the runtime fails the stage in
+      **~178 ms** (`AgentSource.publishErrorAndFailStage`, logged as `AK-01202 … Aborting connection`).
+      So the 240 s silence is a **test-provider artifact**, and the endpoint's `initialTimeout` /
+      `idleTimeout` guards earn their place for the narrower case they actually cover: a model that
+      never answers *and* never errors.
       **And the guard buys termination, not legibility**: the measured result is `200` with a body that
       *completes normally and is empty*, because the status line went out before any token existed. A
       caller must treat an empty body as failure. That is documented in the contract and pinned by a
@@ -2194,7 +2198,10 @@ STREAMING_FIRST_TOKEN_TIMEOUT=10s STREAMING_IDLE_TIMEOUT=5s mvn compile exec:jav
 
 > **Read an empty body as failure.** Because the `200` and headers are sent before any token exists, a
 > failure *before* the first fragment arrives as a normally-completed, **empty** body — indistinguishable
-> from "nothing to say" (measured; pinned by a test). A failure *after* fragments were sent aborts the
+> from "nothing to say". Measured live against a real provider error:
+> `HTTP/1.1 200 OK · Transfer-Encoding: chunked · BYTES=0 · curl_exit=0 · Connection left intact` —
+> the runtime logs "Aborting connection", yet it renders as a normal terminating zero-length chunk and
+> **curl reports success**. There is no client-side signal to detect. A failure *after* fragments were sent aborts the
 > body instead, so it is visibly truncated. Making the first case self-describing would need
 > server-sent events with an explicit error event; that is recorded as a **fork**, not done, because it
 > would change the wire format for every client. See
@@ -2204,6 +2211,22 @@ STREAMING_FIRST_TOKEN_TIMEOUT=10s STREAMING_IDLE_TIMEOUT=5s mvn compile exec:jav
 > method reference, so the endpoint is the single Java class in the capability and a test pins that it
 > stays single (§16). Everything else — agent, domain rule, and this surface's own integration test —
 > is Scala.
+>
+> *Verified live* (Ollama `qwen3:8b`). **The number that makes the case**: a multi-sentence answer came
+> back with **first byte at 0.049 s and completion at 16.93 s** (698 bytes) — text on screen in a
+> twentieth of a second, against nearly seventeen seconds of generation. The control is capability 4's
+> surface on the same service and model, where `TTFB = TOTAL = 3.169 s` exactly, because nothing is
+> sent until the whole answer exists. **Conversation** worked across streamed turns — turn 1 *"Hello,
+> Ada!"*, turn 2 on the same session *"Your name is Ada."*, and a fresh session *"I don't have access
+> to your name"* — which is **recall**, the one property no offline test in this project can show
+> (capability 4 R6). A blank message returned `400` with `Content-Length: 26`, i.e. not chunked at all,
+> so validation genuinely precedes the stream.
+>
+> **Two limits of the live run, stated rather than glossed.** A real pre-token failure was induced with
+> a bogus model name and is reported above. A genuine **mid-stream** failure was **not attempted**: it
+> would have meant killing a running Ollama mid-request, and the offline synthetic-source test covers
+> the operator contract instead — so "what a client sees when generation dies after 20 of 57 tokens"
+> remains unverified rather than assumed.
 
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.

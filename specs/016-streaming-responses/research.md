@@ -48,8 +48,42 @@ operators: `initialTimeout(Duration)` (fail if no *first* element arrives in tim
 hang), plus `idleTimeout`, `completionTimeout`, `keepAlive`, `recover`/`recoverWith`, `takeWithin` and
 `watchTermination`.
 
-**Honest scope of the measurement**: observed under the TestKit with a scripted failure. Whether a real
-provider failure behaves the same is unverified and belongs in the live smoke test.
+**CORRECTED BY THE LIVE RUN (T023, 2026-09-12) — the 240 s silence is a test-provider artifact.**
+The measurement above used `TestModelProvider.failWith`. Against a **real** provider error (service
+started with `OLLAMA_MODEL=no-such-model-xyz`), the stream fails almost immediately:
+
+```text
+STATUS=200  TTFB=0.049s  TOTAL=0.178s  BYTES=0
+AK-01202 Agent [streaming-chat-agent] Model call failed
+Response stream for [POST /stream-chat/live-fail] failed with 'Model call failed'. Aborting connection.
+  at kalix.runtime.agent.AgentSource$$anon$1.publishErrorAndFailStage(AgentSource.scala:457)
+Caused by: dev.langchain4j.exception.ModelNotFoundException: model 'no-such-model-xyz' not found
+```
+
+So the runtime **does** have an error path that fails the stage — `publishErrorAndFailStage` — and it
+runs in ~178 ms, faster than any guard. The corrected statement:
+
+| How the failure is injected | Stream ends? | When | Caller sees |
+|---|---|---|---|
+| **Real provider error** (bogus model) | yes, by the runtime | ~178 ms | `200`, chunked, 0 bytes |
+| **`TestModelProvider.failWith`** | no | silent past **240 s** | nothing until our guard fires |
+
+**What the guard is actually for, then.** Not the provider-error case — the runtime beats it. It is for
+the **hang**: a model that never answers *and* never errors, which is precisely what the test provider
+simulates and what a wedged model server would do. That is a narrower justification than "a failed
+model call never terminates a stream", and it is the accurate one.
+
+**And the abort is invisible to the client** (measured with curl's exit code, which the first live run
+omitted):
+
+```text
+HTTP/1.1 200 OK · Transfer-Encoding: chunked · BYTES=0 · curl_exit=0 · Connection left intact
+```
+
+Despite the runtime logging "Aborting connection", the response is rendered as a **normal terminating
+zero-length chunk**: curl reports success. So Q-A(3)'s conclusion holds and is now proven against a
+real provider error rather than only a scripted one — **a caller cannot detect this except by treating
+an empty body as failure.**
 
 ### Q-A(3) — what the caller sees *with* the guard: a clean, empty `200` (measured at T015)
 

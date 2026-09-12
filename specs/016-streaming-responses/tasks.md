@@ -35,7 +35,7 @@ API key, no network — which research Q-C established is possible for streaming
 
 **Purpose**: confirm there is nothing to set up — recorded rather than assumed.
 
-- [ ] T001 Confirm no `pom.xml` change is required: `akka.stream.javadsl` resolves from the existing
+- [x] T001 Confirm no `pom.xml` change is required: `akka.stream.javadsl` resolves from the existing
   `akka-javasdk` 3.6.3 dependency (already proven — the Phase 0 probes compile and run against it), and
   the mixed Scala/Java build already handles a Java class referencing Scala classes (README §13 R3).
   No task follows from this; it exists so a reader knows the question was asked.
@@ -208,7 +208,7 @@ single class is Java are all stated.
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [ ] T023 Live smoke test against Ollama `qwen3:8b`, recording results in the README the way
+- [x] T023 Live smoke test against Ollama `qwen3:8b`, recording results in the README the way
   capabilities 10–13 do — including anything unflattering. It must cover the **two items research lists
   as offline-unverifiable**: whether a real provider failure before the first token also fails to
   terminate the stream, and whether a **mid-stream** failure is reachable at all. Also confirm by eye
@@ -217,7 +217,7 @@ single class is Java are all stated.
 - [x] T024 `mvn clean verify` — **clean**, not incremental (a stale `target/classes` once hid a
   capability 11 build that failed from clean).
 - [x] T025 FR-009 check, mechanical: `git diff --stat main -- src/main/scala/com/gwgs/akkaagentic/{application,team,assistant,chat,approvals,a2a,activities,docs,mcp,mcpclient,todos,eval} src/main/java src/test` must show **no** change outside this capability's own packages, the one descriptor file, and the Java endpoint's new directory. Report it, do not assert it in prose.
-- [ ] T026 Walk `quickstart.md` end to end against the running service and fix anything that has drifted.
+- [x] T026 Walk `quickstart.md` end to end against the running service and fix anything that has drifted.
 
 ---
 
