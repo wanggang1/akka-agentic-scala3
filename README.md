@@ -130,6 +130,18 @@ src/main/scala/com/gwgs/akkaagentic/eval/api/         # EvaluationEndpoint (POST
 # deliberately, so a FAILED turn is no longer reported as a decline — see §15. Fully offline-tested,
 # judges included.
 
+# Capability 14 — Scala agent + ONE Java caller (streaming responses; see "Scala interop notes" §16)
+src/main/scala/com/gwgs/akkaagentic/streaming/domain/      # StreamQuestion (pure validation, no Akka import)
+src/main/scala/com/gwgs/akkaagentic/streaming/application/ # StreamingChatAgent (StreamEffect + session memory)
+src/main/java/com/gwgs/akkaagentic/streaming/api/          # StreamingChatEndpoint (POST /stream-chat/{sessionId})
+# Note: the reply is delivered as it is generated. AUTHORING a streamed reply is Scala-clean (the
+# streamEffects builder takes only values and strings); CONSUMING one is not — tokenStream(Agent::method)
+# needs a Java method reference and dynamicCall has NO streaming counterpart, so the endpoint is the
+# ONE Java class here (cap-11's shape) and a test pins that it stays one. StreamEffect has no
+# onFailure, and a pre-token model failure never terminates the stream, so the endpoint imposes
+# initialTimeout/idleTimeout. Fully offline-tested incl. incrementality (57 fragments, exact parity).
+# See §16 and docs/streaming-vs-request-response.md.
+
 src/main/resources/application.conf                 # default model-provider config
 src/test/{scala,java}/com/gwgs/akkaagentic/...       # tests (TestModelProvider, no live model)
 ```
@@ -584,6 +596,12 @@ writing components in Scala needs explicit workarounds:
       never resolves. A jar-wide sweep confirms `dynamicCall(String)` exists on **`AgentClientInSession`
       only** — the Agent/AutonomousAgent clients remain the sole escape hatch.
 
+      > **Sharpened again by capability 14 — the escape hatch is narrower than "the agent client".**
+      > `dynamicCall` returns a `DynamicMethodRef`, which has `invoke`/`invokeAsync` and **no
+      > streaming counterpart**. So it rescues the agent client's *request/response* calls and nothing
+      > else: `tokenStream` is method-ref-only, and the same agent client is therefore on **both**
+      > sides of the wall at once. See §16.
+
       > **Sharpened by capability 13 — that asymmetry is worth more than it looked.** Caps 4, 6 and 11
       > each needed a **runtime-owned** component and each quarantined Java, which made the wall look
       > like a property of *ownership*. `dynamicCall` resolves off `agentClassById`, which holds the
@@ -825,6 +843,88 @@ writing components in Scala needs explicit workarounds:
     it happen. Both are recorded in
     [`docs/sdk-3.6.0-limitations.md`](docs/sdk-3.6.0-limitations.md) §5. See specs/015 research R1–R6.
 
+
+16. **Streaming splits the agent client in two — and this is where the project's oldest finding gets its
+    last amendment.** Capability 14 (`com.gwgs.akkaagentic.streaming.*`) delivers a reply **as it is
+    generated**: the agent's handler returns `StreamEffect` instead of `Effect[String]`, and
+    `POST /stream-chat/{sessionId}` writes the fragments to the caller as a chunked response.
+    Capability 4's one-piece `POST /chat/{sessionId}` is a sibling surface and is untouched. Six
+    findings, all measured before the design was written:
+
+    - **Authoring is Scala-clean; consuming is not.** `streamEffects()` returns a builder keyed
+      entirely on values and strings (`systemMessage`, `userMessage`, `tools`, `mcpTools`, `memory`,
+      `thenReply`) — no `akka.japi.function` parameter anywhere, so a Scala agent writes a streamed
+      reply with no friction at all. The **caller** is the problem, and all four routes were tried:
+
+      | Attempt | Result |
+      |---|---|
+      | `tokenStream[Agent, String]((a, m) => a.stream(m))` | **compiles**, then fails at run time (below) |
+      | `tokenStream(_.stream(_))` | same |
+      | `dynamicCall[String, String]("streaming-chat-agent").source(msg)` | **compile error**: `value source is not a member of DynamicMethodRef` |
+      | `tokenStream("streaming-chat-agent")` | **compile error**: no overload takes a `String` |
+
+      The lambda's run-time failure is capability 13's misdirecting diagnostic, reproduced on a new
+      path: `IllegalArgumentException: class <the caller's own class> is not a subclass of class
+      akka.javasdk.agent.Agent`, because `MethodRefResolver` reads the `SerializedLambda`'s
+      `implClass`, which for a Scala lambda is the *enclosing* class. A **Java** probe consumes the
+      same stream successfully, which is the control that makes this a statement about Scala rather
+      than about our usage.
+
+    - **The amendment: `dynamicCall` covers request/response only, so the agent client is on *both*
+      sides of the wall.** Since capability 1 the agent client has been "the one client on the friendly
+      side", because of `dynamicCall(String)`. That is now too coarse. `dynamicCall` returns a
+      `DynamicMethodRef` with `invoke`/`invokeAsync` and no streaming member, so the precise statement
+      is: *the wall is a property of which client **and which method on it**.* And **streams are not
+      the deciding axis** — the jar-wide inventory shows `AutonomousAgentClient.notificationStream()`
+      and `TaskClient.notificationStream()` are **zero-arg** and therefore Scala-clean, while
+      `tokenStream` and the entity/workflow `notificationStream(Function)` are method-ref-keyed. What
+      decides is the same thing it always was: whether the API takes a Java method reference.
+
+    - **The wall took one class, and a test keeps it that way.**
+      [`StreamingChatEndpoint`](src/main/java/com/gwgs/akkaagentic/streaming/api/StreamingChatEndpoint.java)
+      is Java; the agent, the domain rule, and even this capability's own endpoint test are Scala
+      (`httpClient` holds no method reference). `JavaQuarantineTest` asserts that exactly one `.java`
+      file exists under the capability, so growth of the quarantine becomes a recorded finding rather
+      than silent drift — capability 11's outcome, now mechanically enforced.
+
+    - **There is no `onFailure` on a stream, and a failed model call never ends one.** The builder
+      offers `error(...)`, decided *before* any token, and nothing for a failure after the first one —
+      so the sentinel technique capabilities 8, 12 and 13 all rely on **cannot exist here**: no value
+      can replace text the caller has already read. And the failure behaviour needed two
+      measurements, the second of which corrected the first. Under `TestModelProvider.failWith` the
+      token stream emits nothing, completes never and fails never — still silent after **240 seconds**.
+      But against a **real** provider error (a bogus `OLLAMA_MODEL`) the runtime fails the stage in
+      **~178 ms** (`AgentSource.publishErrorAndFailStage`, logged as `AK-01202 … Aborting connection`).
+      So the 240 s silence is a **test-provider artifact**, and the endpoint's `initialTimeout` /
+      `idleTimeout` guards earn their place for the narrower case they actually cover: a model that
+      never answers *and* never errors.
+      **And the guard buys termination, not legibility**: the measured result is `200` with a body that
+      *completes normally and is empty*, because the status line went out before any token existed. A
+      caller must treat an empty body as failure. That is documented in the contract and pinned by a
+      test rather than smoothed over; making it legible needs SSE, which is recorded as a fork.
+
+    - **Streaming is fully offline-provable, which the SDK's testing docs never mention.**
+      `TestModelProvider` tokenizes a scripted reply by itself: a two-sentence answer arrives as **57
+      fragments** that concatenate back exactly, so *incrementality* and *parity* are both asserted
+      with no model — and over real HTTP, because the testkit's own client buffers into a
+      `StrictResponse` and would have "passed" against a non-streaming endpoint. A streamed turn is
+      also **persisted to session memory** as one assembled reply (1 user + 1 AI message), so the
+      surface is a genuine conversation. Both are better outcomes than capability 7's un-mockable
+      delegation.
+
+    - **A Java caller reads an idiomatic Scala domain API cleanly (the new wrinkle on §8).** The
+      endpoint's language was chosen *by the SDK*, not by us — the first time the language-of-consumer
+      guidance meets that situation. Measured: `StreamQuestion.validate(Option.apply(msg))` resolves
+      through scalac's static forwarder with **no `MODULE$`**, `Option.apply` converts the nullable at
+      the boundary so the domain never sees `null`, and the only friction is two `Left`/`Right` casts.
+      So: **when the SDK forces the consumer's language, keep the domain idiomatic and pay the cast at
+      the boundary** — do not move the rule into Java, which would grow the quarantine the wall forced.
+
+    The descriptor key is unchanged (`agent` for a streaming agent, `http-endpoint` for its caller); no
+    `pom.xml` change was needed, since `akka.stream.javadsl` is inside the SDK's own tree. See
+    specs/016 research Q-A–Q-E and
+    [`docs/streaming-vs-request-response.md`](docs/streaming-vs-request-response.md) for when to stream
+    at all — including why payload size is *not* a reason.
 
 ## Build
 
@@ -2055,6 +2155,78 @@ call — so the provider's timeout governs it, and a failed turn is `not-applica
 > scripted input, where they can be produced deterministically. Four green live verdicts are not
 > evidence that a judge *can* disagree — and that asymmetry is exactly why nothing in this capability
 > acts on a verdict.
+
+### Capability 14 — streamed chat (`POST /stream-chat/{sessionId}`)
+
+Capability 14 answers like capability 4, but delivers the reply **as it is written** rather than in one
+piece. `POST /chat/{sessionId}` is untouched and still returns the whole answer at once.
+
+`--no-buffer` is what makes `curl` print fragments as they land — without it you will see a complete
+answer appear at the end and learn nothing:
+
+```shell
+curl --no-buffer -N -X POST http://localhost:9000/stream-chat/c-1 \
+  -H "Content-Type: application/json" \
+  -d '{"message":"why does agent work survive a restart, in a few sentences?"}'
+```
+
+**It is a conversation** — the same `sessionId` continues it, a different one is independent:
+
+```shell
+curl --no-buffer -N -X POST http://localhost:9000/stream-chat/c-1 \
+  -H "Content-Type: application/json" -d '{"message":"my name is Ada"}'
+
+curl --no-buffer -N -X POST http://localhost:9000/stream-chat/c-1 \
+  -H "Content-Type: application/json" -d '{"message":"what is my name?"}'
+# ...streams back an answer that knows "Ada" — the streamed turn was remembered
+```
+
+**Validation still runs first**, as an ordinary non-streamed response:
+
+```shell
+curl -i -X POST http://localhost:9000/stream-chat/c-1 \
+  -H "Content-Type: application/json" -d '{"message":"  "}'
+# 400 Bad Request — question must not be blank   (no model call, nothing streamed)
+```
+
+**The two guards are tunable, and they are not optional.** A model failure before the first token
+leaves the SDK's stream silent for ever (measured past 240 s), so the endpoint bounds it:
+
+```shell
+STREAMING_FIRST_TOKEN_TIMEOUT=10s STREAMING_IDLE_TIMEOUT=5s mvn compile exec:java
+```
+
+> **Read an empty body as failure.** Because the `200` and headers are sent before any token exists, a
+> failure *before* the first fragment arrives as a normally-completed, **empty** body — indistinguishable
+> from "nothing to say". Measured live against a real provider error:
+> `HTTP/1.1 200 OK · Transfer-Encoding: chunked · BYTES=0 · curl_exit=0 · Connection left intact` —
+> the runtime logs "Aborting connection", yet it renders as a normal terminating zero-length chunk and
+> **curl reports success**. There is no client-side signal to detect. A failure *after* fragments were sent aborts the
+> body instead, so it is visibly truncated. Making the first case self-describing would need
+> server-sent events with an explicit error event; that is recorded as a **fork**, not done, because it
+> would change the wire format for every client. See
+> [`docs/streaming-vs-request-response.md`](docs/streaming-vs-request-response.md).
+>
+> **Where the interop line falls.** Authoring the streamed reply is Scala; *consuming* it needs a Java
+> method reference, so the endpoint is the single Java class in the capability and a test pins that it
+> stays single (§16). Everything else — agent, domain rule, and this surface's own integration test —
+> is Scala.
+>
+> *Verified live* (Ollama `qwen3:8b`). **The number that makes the case**: a multi-sentence answer came
+> back with **first byte at 0.049 s and completion at 16.93 s** (698 bytes) — text on screen in a
+> twentieth of a second, against nearly seventeen seconds of generation. The control is capability 4's
+> surface on the same service and model, where `TTFB = TOTAL = 3.169 s` exactly, because nothing is
+> sent until the whole answer exists. **Conversation** worked across streamed turns — turn 1 *"Hello,
+> Ada!"*, turn 2 on the same session *"Your name is Ada."*, and a fresh session *"I don't have access
+> to your name"* — which is **recall**, the one property no offline test in this project can show
+> (capability 4 R6). A blank message returned `400` with `Content-Length: 26`, i.e. not chunked at all,
+> so validation genuinely precedes the stream.
+>
+> **Two limits of the live run, stated rather than glossed.** A real pre-token failure was induced with
+> a bogus model name and is reported above. A genuine **mid-stream** failure was **not attempted**: it
+> would have meant killing a running Ollama mid-request, and the offline synthetic-source test covers
+> the operator contract instead — so "what a client sees when generation dies after 20 of 57 tokens"
+> remains unverified rather than assumed.
 
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.
