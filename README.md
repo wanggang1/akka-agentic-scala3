@@ -124,9 +124,11 @@ src/main/scala/com/gwgs/akkaagentic/eval/api/         # EvaluationEndpoint (POST
 # dynamicCall reaches them even though the SDK owns them — the clause cap-13 adds to the method-ref
 # wall (§15), and why this capability has NO Java at all. An authored evaluator is an ordinary agent
 # whose RESULT TYPE implements EvaluationResult (that, not an annotation, is what routes verdicts to
-# metrics/traces) — so it costs ONE descriptor line where cap-12's guardrails cost zero. Capability 8
-# is byte-identical: the SDK has no Consume.From* source for a request-based agent, so evaluation
-# could only ever have had its own surface. Fully offline-tested, judges included.
+# metrics/traces) — so it costs ONE descriptor line where cap-12's guardrails cost zero. Evaluation
+# needed no change to cap-8 at merge (no Consume.From* source exists for a request-based agent, so it
+# could only ever have had its own surface); the judge-timeout follow-up then edited DocsAgent
+# deliberately, so a FAILED turn is no longer reported as a decline — see §15. Fully offline-tested,
+# judges included.
 
 src/main/resources/application.conf                 # default model-provider config
 src/test/{scala,java}/com/gwgs/akkaagentic/...       # tests (TestModelProvider, no live model)
@@ -712,10 +714,12 @@ writing components in Scala needs explicit workarounds:
       edit.** Cap-8's `DocsAgent` ended with `.onFailure(_ => DontKnow)`. A discovery test declaring an
       always-failing rule showed a governance block coming back to the caller as *"I don't know"* — a
       refusal reported as an honest decline, unauditable and misleading. `onFailure` now discriminates:
-      a `Guardrail.GuardrailException` becomes a `422`, everything else still degrades to the sentinel
-      (now with a log line). That one edit is the **only** change to capability 8, and it references the
-      guardrail *mechanism* without naming any rule — asserted by a test that reads `DocsAgent.scala`
-      and pins the two permitted `Guardrail` lines exactly.
+      a `Guardrail.GuardrailException` becomes a `422`, everything else degraded to the sentinel (now
+      with a log line). That edit referenced the guardrail *mechanism* without naming any rule —
+      asserted by a test that reads `DocsAgent.scala` and pins the two permitted `Guardrail` lines
+      exactly. *(Capability 13's judge-timeout follow-up later narrowed the same handler a second time:
+      a non-guardrail failure now replies behind `DocsAgent.FailedPrefix` rather than as a decline, for
+      the same reason — see §15. `POST /ask` still answers a failed turn with "I don't know".)*
     - **`report-only` is proven by configuration, not prose.** Two test classes over the same guardrail
       class and the same declaration, differing in exactly one key: as shipped (`report-only = true`)
       an over-long answer is delivered `200` verbatim; with `report-only = false` overridden the same
@@ -792,13 +796,25 @@ writing components in Scala needs explicit workarounds:
       SDK-supplied deterministic trigger — a label outside the judge's vocabulary makes its own
       `toEvaluationResult` throw — so nothing has to be broken to test it.
 
-    - **Capability 8 is byte-identical, and that is a research result rather than discipline (R4).**
-      There is **no `Consume.From*` source for a request-based agent** — the SDK's documented
-      asynchronous `EvaluationConsumer` actually consumes `TaskEntity`, which capability 8 does not
-      have. So evaluation *could not* have been attached to `POST /ask` as a background hook even if
-      that had been preferred; its own surface was the only available shape, and it makes
-      "capability 8 is untouched" provable with `git diff` (all ten blob hashes unchanged) instead of
-      by argument. Capability 12 earned one line of change in `DocsAgent`; capability 13 earned none.
+    - **Evaluation needed its own surface, and that is a research result rather than discipline (R4)
+      — though "capability 8 is byte-identical" did not survive the follow-up.** There is **no
+      `Consume.From*` source for a request-based agent** — the SDK's documented asynchronous
+      `EvaluationConsumer` actually consumes `TaskEntity`, which capability 8 does not have. So
+      evaluation *could not* have been attached to `POST /ask` as a background hook even if that had
+      been preferred; its own surface was the only available shape. At merge (PR #27) that made
+      "capability 8 is untouched" provable with `git diff`, all ten blob hashes unchanged.
+
+      **PR review then bought a capability 8 edit for something worth more.** A turn that fails
+      *inside* the agent — a model timeout, a rate limit, an unusable reply — used to reach the
+      evaluator as `"I don't know"`, because `DocsAgent.onFailure` degraded every non-guardrail failure
+      to the decline sentinel. `decline-judge` then rated a decline the assistant never made: **a slow
+      model reported as a bad decision.** The evaluator cannot tell the two apart, because they arrive
+      as the same string, so the fix had to be in capability 8. `DocsAgent` now replies behind a
+      `FailedPrefix` sentinel and `DocsEndpoint` maps it straight back, so `POST /ask`'s contract is
+      unchanged and a test pins that. A failure *outside* the agent — the component call itself — is
+      caught in the evaluator and needed no capability 8 change. Both end `not-applicable`, with no
+      judge called. So capability 12 earned one line of change in `DocsAgent`, and capability 13
+      earned its own only after the fact, to stop a failure being judged as a decision.
 
     Two sharp edges carried forward. **The documented call form fails from Scala with a misdirecting
     error**: it compiles, then reports that *the developer's own class* "is not a subclass of class
@@ -1852,8 +1868,10 @@ exactly as `POST /ask` does, then has two LLM judges rate the result — the SDK
 `decline-judge` (was the decision to decline, or not to decline, the right one?).
 
 **Nothing is gated.** A failed verdict is a *successful* evaluation, so every outcome except an invalid
-request is `200`. And `POST /ask` is not touched at all — its request shape, its four response shapes,
-its latency and its source files are exactly as capability 12 left them.
+request is `200`. And `POST /ask`'s contract is untouched — its request shape, its four response
+shapes and its latency are exactly as capability 12 left them. (Its *sources* were untouched at merge
+too; the judge-timeout follow-up then changed how a **failed** turn is reported internally, which
+`DocsEndpoint` maps straight back, so callers of `/ask` see no difference.)
 
 **An answer, judged:**
 
@@ -1921,8 +1939,8 @@ rule first, so two model calls are saved on an input where a verdict would be me
 |---|---|
 | `passed` | The judge formed an opinion and it was favourable |
 | `failed` | The judge formed an opinion and it was unfavourable |
-| `errored` | The judge could not form a usable opinion (an unrecognised label, a failed call) |
-| `not-applicable` | There was nothing judgeable (refused interaction, no reference material) |
+| `errored` | The judge could not form a usable opinion (an unrecognised label, a failed call, or a judge that missed its deadline) |
+| `not-applicable` | There was nothing judgeable (refused interaction, a turn that failed instead of answering, no reference material) |
 
 A judge that could not answer, and a subject that cannot be judged, are different from a verdict of
 "no". Collapsing either into `failed` would report a working system as a broken one.
@@ -1942,6 +1960,21 @@ two verdicts) where `POST /ask` is one:
 EVAL_ENABLED=false mvn compile exec:java
 # the question is still answered and cited; "verdicts" is [] and no judge model is called
 ```
+
+**And a judge that does not answer is bounded, not waited on.** The two judges run **concurrently**,
+each under `eval.judge-timeout` (default `60s`), so the judging half of an evaluation costs the slower
+judge rather than the sum of both:
+
+```shell
+EVAL_JUDGE_TIMEOUT=10s mvn compile exec:java
+# a judge that takes longer returns: {"judge":"...","outcome":"errored",
+#                                     "explanation":"the judge did not respond within 10s"}
+```
+
+The other judge still reports, and the answer is unaffected. It is a **client-side** deadline: the
+abandoned model call keeps running until the provider's own `response-timeout` ends it. The **answer**
+call is deliberately not bounded this way — a deadline there would turn a slow answer into a failed
+call — so the provider's timeout governs it, and a failed turn is `not-applicable`, never a decline.
 
 > **What evaluation is *for*, and why this surface is not the production shape.** The switch above is
 > easy to misread as a cost dial on a production feature — turn judging on when you can afford it. That
@@ -1965,8 +1998,8 @@ EVAL_ENABLED=false mvn compile exec:java
 >
 > **This capability could not use that shape, and that is a fact about capability 8 rather than a
 > recommendation.** There is no `Consume.FromAgent` and no agent-interaction stream, and capability 8
-> is a request-based agent with no task to consume (research R4) — the same finding that makes
-> "capability 8 is byte-identical" provable. A synchronous surface was the only one available. Read
+> is a request-based agent with no task to consume (research R4) — the same finding that made
+> "capability 8 is byte-identical" provable at merge. A synchronous surface was the only one available. Read
 > `EVAL_ENABLED` in that light: it is a **coarse** switch because this surface is a demonstration; a
 > production-shaped evaluator would want a *sample rate*, not a boolean, and would not sit in the
 > caller's request path at all.
@@ -1986,11 +2019,11 @@ EVAL_ENABLED=false mvn compile exec:java
 >
 > **Known limits, stated rather than hidden.** Judging is not free — three model calls, run
 > sequentially, off by one key (and see the note above on why that switch is coarser than a real
-> deployment would want). Two of those are open follow-ups rather than settled tradeoffs, both raised
-> in PR review and tracked in [`ROADMAP.md`](ROADMAP.md#ideas--follow-ups): the two judges are
-> **independent and could run concurrently** (three sequential calls where two would do), and the
-> chain has **no timeout** — `verdictOf` turns a judge *failure* into an `errored` verdict, but a
-> judge that simply never returns is not a failure and nothing bounds it.
+> deployment would want) — though the two judges at least run **concurrently**, so judging costs the
+> slower of them rather than both. Each model call was always bounded by the provider
+> (`response-timeout = 1m`, two retries); what was missing, and was added by the follow-up to PR #27,
+> is a bound a *caller* can reason about: `eval.judge-timeout`, past which that judge's verdict is
+> `errored`. It is client-side, so the abandoned call still runs until the provider gives up.
 > A verdict from a live model is **not deterministic**, so no test asserts a verdict's *value* and
 > neither should any automation; verdicts here are observational, and nothing is blocked, retried or
 > rewritten because a judge failed it. And the claim that verdicts reach metrics and traces rests on

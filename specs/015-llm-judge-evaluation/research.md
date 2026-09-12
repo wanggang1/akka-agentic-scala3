@@ -856,3 +856,12 @@ One claim in the follow-up notes written at merge (ROADMAP, README) was also wro
 anywhere". Each model call already inherits the provider's `response-timeout = 1m`,
 `connection-timeout = 15s` and `max-retries = 2` from the SDK's `reference.conf`. What was missing was
 a bound on the whole request, not on each call.
+
+The same follow-up also settled a question this research never asked: the judges were called one after
+the other, and nothing bounded one that did not answer. They now run **concurrently** (`invokeAsync`
+before either is awaited, verdicts reassembled in `judgeIds` order), each bounded by
+`eval.judge-timeout` (default `60s`), past which that judge's verdict is `errored` and the other still
+reports. The deadline is client-side: `orTimeout` completes our future, and the abandoned model call
+runs on until the provider's `response-timeout`. The **answer** call is deliberately left to the
+provider's timeout — a deadline of ours there would convert a slow answer into a failed call, which is
+path 2 above.
