@@ -60,10 +60,10 @@ to be redone.
 - [x] T005 `src/test/scala/com/gwgs/akkaagentic/streaming/probe/ScalaTokenStreamProbeIntegrationTest.scala`
   — records the wall: the lambda form compiles, then fails at run time. Kept permanently as FR-013
   evidence. **Done** (852e47c).
-- [ ] T006 Unit test `src/test/scala/com/gwgs/akkaagentic/streaming/domain/StreamQuestionTest.scala`:
+- [x] T006 Unit test `src/test/scala/com/gwgs/akkaagentic/streaming/domain/StreamQuestionTest.scala`:
   `None` and blank/whitespace → `Left("question must not be blank")`; a padded value → `Right` with the
   text trimmed. Written **first**, and must fail because the type does not exist yet.
-- [ ] T007 Implement `src/main/scala/com/gwgs/akkaagentic/streaming/domain/StreamQuestion.scala` —
+- [x] T007 Implement `src/main/scala/com/gwgs/akkaagentic/streaming/domain/StreamQuestion.scala` —
   `validate(question: Option[String]): Either[String, StreamQuestion]`, parse-don't-validate, **no Akka
   import** (Constitution II). Do **not** reuse capability 8's `AskQuestion`: that would couple two
   capabilities for a non-blank check and put a capability-14 edit one step from capability 8 (FR-009,
