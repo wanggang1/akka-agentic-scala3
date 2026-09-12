@@ -113,6 +113,43 @@ class StreamingChatEndpointIntegrationTest extends TestKitSupport:
     // And grouping must not corrupt the answer: the chunks still reassemble exactly.
     assertThat(chunks.map(_.utf8String).mkString).isEqualTo(Answer)
 
+  /** T013 / SC-005 — the half **this** surface can prove.
+    *
+    * Two streamed turns on one `sessionId` each deliver their own answer, and a third turn on a
+    * different id is an independent conversation. The scripted replies are keyed on the question, so a
+    * turn that reached the agent with the wrong message would fail rather than silently pass.
+    *
+    * What a mocked model **cannot** show is *recall* — it sees only the current turn (capability 4
+    * research R6, re-confirmed by capability 6), so no assertion here claims the second answer used
+    * the first. And the substance of retention and isolation — what is actually in session memory —
+    * is asserted in `StreamProbeIntegrationTest` (Java), because reading `SessionMemoryEntity` needs
+    * a Java method reference (capability 4 §6). Keeping it there means the Java quarantine does not
+    * grow to a second class.
+    */
+  @Test
+  def repeatedTurnsOnOneSessionEachStreamTheirOwnAnswer(): Unit =
+    val introduction = "Nice to meet you, Ada."
+    val recollection = "Your name is Ada."
+
+    model.reset()
+    model.whenMessage((m: String) => m.contains("my name is Ada")).reply(introduction)
+    model.whenMessage((m: String) => m.contains("what is my name?")).reply(recollection)
+
+    val first = post("c-multi", "my name is Ada")
+    val second = post("c-multi", "what is my name?")
+    val separate = post("c-other", "what is my name?")
+
+    assertThat(first.status()).isEqualTo(StatusCodes.OK)
+    assertThat(first.body().utf8String).isEqualTo(introduction)
+
+    // The same conversation continues to work, and turn 2 got its own answer.
+    assertThat(second.status()).isEqualTo(StatusCodes.OK)
+    assertThat(second.body().utf8String).isEqualTo(recollection)
+
+    // A different id is a separate conversation; it streams independently.
+    assertThat(separate.status()).isEqualTo(StatusCodes.OK)
+    assertThat(separate.body().utf8String).isEqualTo(recollection)
+
   /** An absent `message` is the same rejection rather than a 500 — the `Option` boundary from
     * feature 003, and the reason the domain takes an `Option` at all. */
   @Test

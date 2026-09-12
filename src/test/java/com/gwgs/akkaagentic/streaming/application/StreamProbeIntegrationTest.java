@@ -178,8 +178,33 @@ public class StreamProbeIntegrationTest extends TestKitSupport {
     logger.info("Q-D probe >>> stored messages = {} (user = {}, ai = {}); ai text = {}",
         messages.size(), userTexts.size(), aiTexts.size(), aiTexts);
 
-    // Recorded rather than demanded: whether a STREAMED reply is persisted is the question.
-    logger.info("Q-D probe >>> was the streamed answer itself persisted? {}",
-        aiTexts.stream().anyMatch(t -> t != null && t.equals(ANSWER)));
+    // T014 — the measurement is settled (research Q-D), so this is now asserted rather than logged.
+    // A streamed turn is remembered exactly like a non-streamed one: one user message, one AI
+    // message, and the AI message carries the WHOLE answer rather than a fragment of it. That is
+    // what makes the streaming surface a real conversation (SC-005) instead of a single-turn one.
+    assertThat(messages).hasSize(2);
+    assertThat(userTexts).containsExactly("my name is Ada");
+    assertThat(aiTexts).containsExactly(ANSWER);
+  }
+
+  /**
+   * T014, the other half of SC-005: a conversation is isolated. A session that was never used holds
+   * nothing, so a streamed turn cannot leak into another conversation.
+   *
+   * <p>This lives in Java for the same reason as the check above — reading
+   * {@code SessionMemoryEntity} needs a Java method reference (capability 4 §6) — and deliberately in
+   * the class the wall already claimed, so the quarantine stays at one class ({@code JavaQuarantineTest}).
+   */
+  @Test
+  public void aStreamedTurnDoesNotLeakIntoAnotherConversation() throws Exception {
+    model.fixedResponse(ANSWER);
+    var used = UUID.randomUUID().toString();
+    var untouched = UUID.randomUUID().toString();
+
+    tokensOf(used, "my name is Ada");
+    Thread.sleep(Duration.ofSeconds(2).toMillis());
+
+    assertThat(history(used).messages()).isNotEmpty();
+    assertThat(history(untouched).messages()).isEmpty();
   }
 }

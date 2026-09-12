@@ -123,11 +123,11 @@ fragment arrives (incrementality) and that the fragments concatenated equal the 
 **Independent Test**: two turns on one `sessionId` where the second depends on the first; then the same
 question on a fresh id, which must show no knowledge of it.
 
-- [ ] T013 [US2] Extend `StreamingChatEndpointIntegrationTest.scala` with SC-005: two streamed turns on
+- [x] T013 [US2] Extend `StreamingChatEndpointIntegrationTest.scala` with SC-005: two streamed turns on
   one `sessionId`, then a third on a different id. Assert what the **mock** can actually show —
   retention and isolation — and do **not** assert recall: capability 4 and 6 established that a mocked
   model sees only the current turn, so recall is a live claim, not an offline one.
-- [ ] T014 [US2] Strengthen the existing Java probe's `aStreamedTurnIsWrittenToSessionMemory` from
+- [x] T014 [US2] Strengthen the existing Java probe's `aStreamedTurnIsWrittenToSessionMemory` from
   *logging* its measurement to *asserting* it: after a streamed turn, session memory holds one user and
   one AI message, and the AI text equals the **whole** streamed answer. Reuse this class rather than
   adding a second Java one — reading `SessionMemoryEntity` needs Java (capability 4 §6) and it lands in
@@ -186,6 +186,15 @@ single class is Java are all stated.
 - [ ] T022 [US4] `README.md` §13 — sharpen the existing claim that `dynamicCall(String)` exists on
   `AgentClientInSession` **only**: still true, and now shown to be insufficient, because it does not
   cover `tokenStream`. Same file as T018, so **not** parallel with it.
+
+- [x] T027 [P] [US4] `docs/streaming-vs-request-response.md` — when to stream an agent and when not
+  to, written for someone choosing between capability 4's surface and this one. Covers what a chunked
+  response actually is (with the measured three-chunk example), what streaming buys, what it costs (no
+  `onFailure`, no status after the first byte, mandatory guards, reassembly on the client, nothing
+  appendable, one Java class), why **payload size is not a reason** to stream (the agent stream is
+  text by type; binaries go to `of`/`staticResource`/`ObjectStorage`), and how far backpressure
+  verifiably reaches. *(Added 2026-09-12 at the user's request, mid-Phase 4 — hence the out-of-order
+  id; it belongs to US4.)*
 
 **Checkpoint**: the capability's headline deliverable is published.
 
