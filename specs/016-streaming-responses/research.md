@@ -159,3 +159,34 @@ grow.
    provider produces the whole reply and tokenizes afterwards, so an injected failure always lands
    before the first token. FR-005 is therefore designed against the guard, and the mid-stream case is
    an explicit live-only unknown rather than a silent assumption.
+
+---
+
+## Q-E — How does a **Java** caller read the Scala domain API? **Cleanly, measured at T009.**
+
+Left open deliberately in `StreamQuestion`'s scaladoc rather than pre-empted: the endpoint is Java by
+force (Q-B), so it is the first consumer in this project whose language the **SDK** chose rather than
+we did — which is the case README §8's language-of-consumer guidance never covered.
+
+Measured by compiling it, from clean:
+
+```java
+Either<String, StreamQuestion> validated =
+    StreamQuestion.validate(Option.apply(request == null ? null : request.message()));
+if (validated.isLeft()) return HttpResponses.badRequest(((Left<String, StreamQuestion>) validated).value());
+var question = ((Right<String, StreamQuestion>) validated).value().question();
+```
+
+- `StreamQuestion.validate(...)` resolves **without** `StreamQuestion$.MODULE$` — scalac emits a static
+  forwarder on the class for its companion's method, and javac finds it.
+- `scala.Option.apply(x)` converts a nullable Java value at the boundary, so the domain never sees
+  `null` (CLAUDE.md's Scala-idioms rule) even though the caller is Java.
+- The only friction is **two casts**: `Either` has `isLeft()` but no Java-friendly accessor, so reading
+  the value needs `((Left<..>) e).value()` / `((Right<..>) e).value()`.
+
+**Verdict**: an idiomatic Scala `Option`/`Either` domain API is usable from Java at the cost of two
+casts — not enough friction to justify a Java-shaped façade, and far less than the alternative of
+moving the rule into Java, which would have grown the quarantine the wall forced (FR-013). So the
+language-of-consumer guidance holds with one clarification: **when the SDK forces the consumer's
+language, keep the domain idiomatic and pay the cast at the boundary.**
+

@@ -84,7 +84,7 @@ fragment arrives (incrementality) and that the fragments concatenated equal the 
 
 ### Tests for User Story 1 ⚠️ write first, must fail
 
-- [ ] T008 [US1] `src/test/scala/com/gwgs/akkaagentic/streaming/api/StreamingChatEndpointIntegrationTest.scala`
+- [x] T008 [US1] `src/test/scala/com/gwgs/akkaagentic/streaming/api/StreamingChatEndpointIntegrationTest.scala`
   — **Scala**, because `httpClient` holds no method reference (the wall claims only the endpoint, as in
   capability 11). Three assertions: (a) SC-002 parity — the response body equals the scripted reply
   exactly; (b) SC-001 incrementality — the body arrives as **more than one** chunk, asserted from the
@@ -93,7 +93,7 @@ fragment arrives (incrementality) and that the fragments concatenated equal the 
 
 ### Implementation for User Story 1
 
-- [ ] T009 [US1] `src/main/java/com/gwgs/akkaagentic/streaming/api/StreamingChatEndpoint.java` — the
+- [x] T009 [US1] `src/main/java/com/gwgs/akkaagentic/streaming/api/StreamingChatEndpoint.java` — the
   **only** Java class in this capability (FR-013). `@HttpEndpoint`, `@Acl(INTERNET)`,
   `@Post("/stream-chat/{sessionId}")`, its own request record. It must:
   validate through the Scala `StreamQuestion` first and return `400` before touching the agent;
@@ -102,12 +102,12 @@ fragment arrives (incrementality) and that the fragments concatenated equal the 
   (FR-007, research D3); apply `initialTimeout` **and** `idleTimeout` (FR-005/FR-006 — without the
   first, a pre-token failure hangs the caller forever, measured at 240 s); return
   `HttpResponses.streamText(...)` (research D4).
-- [ ] T010 [US1] Add `com.gwgs.akkaagentic.streaming.api.StreamingChatEndpoint` under `http-endpoint`
+- [x] T010 [US1] Add `com.gwgs.akkaagentic.streaming.api.StreamingChatEndpoint` under `http-endpoint`
   in the descriptor, with a comment saying **why this one is Java** and that the agent beside it is
   Scala — the descriptor is where a reader meets the capability first.
-- [ ] T011 [US1] Make T008 green; keep the guard durations in one place in the endpoint so the tests in
+- [x] T011 [US1] Make T008 green; keep the guard durations in one place in the endpoint so the tests in
   US3 can drive them down without touching production behaviour for real callers.
-- [ ] T012 [US1] `src/test/scala/com/gwgs/akkaagentic/streaming/api/JavaQuarantineTest.scala` — pins
+- [x] T012 [US1] `src/test/scala/com/gwgs/akkaagentic/streaming/api/JavaQuarantineTest.scala` — pins
   FR-013 mechanically, the way capability 12 pinned "the agent names no rule": exactly **one** `.java`
   file exists under `src/main/java/com/gwgs/akkaagentic/streaming/`, and it is the endpoint. A failure
   means the quarantine grew, which must be a recorded finding rather than a silent drift.
