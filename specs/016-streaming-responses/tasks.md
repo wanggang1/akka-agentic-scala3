@@ -214,9 +214,9 @@ single class is Java are all stated.
   terminate the stream, and whether a **mid-stream** failure is reachable at all. Also confirm by eye
   that the answer visibly types out, which is the point of the capability and the one thing no
   assertion captures.
-- [ ] T024 `mvn clean verify` — **clean**, not incremental (a stale `target/classes` once hid a
+- [x] T024 `mvn clean verify` — **clean**, not incremental (a stale `target/classes` once hid a
   capability 11 build that failed from clean).
-- [ ] T025 FR-009 check, mechanical: `git diff --stat main -- src/main/scala/com/gwgs/akkaagentic/{application,team,assistant,chat,approvals,a2a,activities,docs,mcp,mcpclient,todos,eval} src/main/java src/test` must show **no** change outside this capability's own packages, the one descriptor file, and the Java endpoint's new directory. Report it, do not assert it in prose.
+- [x] T025 FR-009 check, mechanical: `git diff --stat main -- src/main/scala/com/gwgs/akkaagentic/{application,team,assistant,chat,approvals,a2a,activities,docs,mcp,mcpclient,todos,eval} src/main/java src/test` must show **no** change outside this capability's own packages, the one descriptor file, and the Java endpoint's new directory. Report it, do not assert it in prose.
 - [ ] T026 Walk `quickstart.md` end to end against the running service and fix anything that has drifted.
 
 ---
