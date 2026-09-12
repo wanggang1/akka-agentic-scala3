@@ -35,10 +35,11 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 > *configuration*, evaluation by *being a component*. **(b)** The whole capability is **offline-provable,
 > including the SDK's own judge** — `LlmAsJudge` sets its model explicitly, but `AgentImpl` reads
 > `overrideModelProvider(id).getOrElse(...)`, so the TestKit's per-agent override **wins**; even the
-> `errored` outcome has an SDK-supplied deterministic trigger. **(c)** **Capability 8 is byte-identical**,
-> and that is a research result rather than discipline: there is no `Consume.From*` source for a
-> request-based agent, so evaluation *could not* have been a background hook — its own surface was the
-> only shape available. **(d)** Two sharp edges: the documented call form compiles from Scala and then
+> `errored` outcome has an SDK-supplied deterministic trigger. **(c)** **Evaluation could only ever have
+> had its own surface**, as a research result rather than discipline: there is no `Consume.From*` source
+> for a request-based agent, so it *could not* have been a background hook. That left capability 8
+> **byte-identical at merge** — a property given up in PR review, deliberately, to stop a failed turn
+> being judged as a decline (see "Ideas / follow-ups"). **(d)** Two sharp edges: the documented call form compiles from Scala and then
 > blames *the caller's own class* for not being an `Agent` (`MethodRefResolver` reads the
 > `SerializedLambda`'s `implClass`), and verdict telemetry is **not observable offline** — FR-011 is
 > verified by mechanism, not by watching it happen.
@@ -103,7 +104,7 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 | 10 | **MCP client** — a request-based `McpClientAgent` grounds via the **remote `retrieve` MCP tool** of this service's own cap-9 `/mcp` (agentic RAG — the model decides when to retrieve); closes the loop in-process, fully offline; `POST /grounded-ask`. **Scala-clean** — `.mcpTools(RemoteMcpTools.fromService(...))` is a URL-string builder, no method-ref wall; no cap-9 ACL edit; no citations (model owns retrieval). The tool loop **is** offline-testable (real `retrieve` round-trip via `TestModelProvider`) — a positive contrast to cap-7 D9 | [`specs/012-mcp-client`](specs/012-mcp-client/) | ✅ Done — merged (PR #19) |
 | 11 | **Views / read-model** — a `View` projects cap-6's `TodoEntity` state into one summary row per username; keyed lookup + the cross-user "who has open work" query an entity can't answer; `GET /todo-summaries/...`, read-only, **no model anywhere** (first fully model-free capability). **First split across the component/caller boundary:** the View is **Scala** (its `TableUpdater` in the companion `object` — a **bytecode-shape** requirement, a new hazard class), only the querying **endpoint** is Java (`ViewClient` is method-ref-only) — the rows are Jackson-annotated **Scala** case classes, once a build-order fix made Java→Scala references compile. Keyed query returns `Optional`; new `view` descriptor key | [`specs/013-views-read-model`](specs/013-views-read-model/) | ✅ Done — merged (PR #23) |
 | 12 | **Agent guardrails** — runtime-enforced governance around cap-8's `DocsAgent`: a request-side jailbreak rule (refused **before any model call**), plus response-side rules, one enforcing and one record-only; new `422` outcome on `POST /ask`, `200` answer / `200` decline / `400` validation untouched. Rules are declared in **configuration** and built reflectively from a class-name string — **not components**, so the descriptor is unchanged; the guarded agent names no rule (asserted by a test that reads its source). **All three Scala class forms load**, including `object` — the predicted failure was wrong (`setAccessible` opens the private ctor), which **corrects** cap-11's bytecode-shape rule to "does a ctor with those param types exist", not "is it public". Jailbreak = **one config line, zero Scala, no new dependency**. Two measured limits: a block can't be rethrown (type erased at the client → reply-channel sentinel), and a rule's name/category never reach application code (traces only → rules self-tag their explanation) | [`specs/014-agent-guardrails`](specs/014-agent-guardrails/) | ✅ Done — merged (PR #25) |
-| 13 | **LLM-as-judge evaluation** — judges cap-8's answers with the SDK's built-in **`hallucination-evaluator`** (is the answer supported by its passages?) and an authored **`decline-judge`** (was declining — or not declining — right?); `POST /evaluate` over the same pipeline, four outcomes (`passed`/`failed`/`errored`/`not-applicable`), nothing gated. **Capability 8 is byte-identical** — not discipline but a research result: there is no `Consume.From*` source for a request-based agent, so evaluation could only ever have had its own surface. **Headline: `dynamicCall` reaches components the SDK OWNS** — the built-in evaluators are ordinary Agents *and* provided components, so the escape hatch resolves them off `agentClassById`; caps 4/6/11 each quarantined Java for a runtime-owned component, cap-13 has **no Java at all**. An authored evaluator is an ordinary agent whose **return type** implementing `EvaluationResult` (not an annotation) is what routes verdicts to metrics/traces — **one** descriptor line, against cap-12's zero. Fully offline-tested **including the SDK's own judge** (the TestKit's per-agent model override beats `LlmAsJudge`'s explicit `.model(...)`) | [`specs/015-llm-judge-evaluation`](specs/015-llm-judge-evaluation/) | ✅ Done — merged (PR #27) |
+| 13 | **LLM-as-judge evaluation** — judges cap-8's answers with the SDK's built-in **`hallucination-evaluator`** (is the answer supported by its passages?) and an authored **`decline-judge`** (was declining — or not declining — right?); `POST /evaluate` over the same pipeline, four outcomes (`passed`/`failed`/`errored`/`not-applicable`), nothing gated. **Evaluation could only ever have had its own surface** — not discipline but a research result: there is no `Consume.From*` source for a request-based agent. That left cap-8 **byte-identical at merge**; the judge-timeout follow-up then edited `DocsAgent` deliberately, so a failed turn is no longer judged as a decline. **Headline: `dynamicCall` reaches components the SDK OWNS** — the built-in evaluators are ordinary Agents *and* provided components, so the escape hatch resolves them off `agentClassById`; caps 4/6/11 each quarantined Java for a runtime-owned component, cap-13 has **no Java at all**. An authored evaluator is an ordinary agent whose **return type** implementing `EvaluationResult` (not an annotation) is what routes verdicts to metrics/traces — **one** descriptor line, against cap-12's zero. Fully offline-tested **including the SDK's own judge** (the TestKit's per-agent model override beats `LlmAsJudge`'s explicit `.model(...)`) | [`specs/015-llm-judge-evaluation`](specs/015-llm-judge-evaluation/) | ✅ Done — merged (PR #27) |
 
 **Status legend:** ✅ done · 📋 planned (spec written) · 🚧 in progress · ⬜ not started
 
@@ -183,27 +184,30 @@ Not on the four-capability path, captured so they're not forgotten:
   component-serialized **stays Java-shaped**. Consequence: capabilities 2–4 below can't use
   idiomatic `Option` wire types either — keep them Java-shaped. See README "Scala interop notes" §3.
 
-- **Capability 13 — run the two judges concurrently** *(open; raised in PR #27 review).*
-  `AnswerEvaluator.judge` builds its verdicts in a `List(...)` literal, which Scala evaluates strictly
-  left to right, so `hallucination-evaluator` completes before `decline-judge` starts. The two calls are
-  **independent** — same three inputs, neither feeds the other — so an evaluation is **three sequential
-  model calls where two would do**. This was never weighed: specs/015 acknowledges the latency
-  (`plan.md`, `quickstart.md`: "not a low-latency surface") but never discusses concurrency, so it is an
-  omission rather than a decision. Blocking is *not* the obstacle — the SDK runs handlers on virtual
-  threads and injects a virtual-thread `Executor` for exactly this. The one constraint:
-  `EvaluationEndpointIntegrationTest` pins verdict order
-  (`"hallucination-evaluator:passed, decline-judge:passed"`), so results must be reassembled in fixed
-  order, not in completion order.
+- **Capability 13 — run the two judges concurrently** — ✅ *done on `fix/cap13-judge-timeout`
+  (2026-09-11).* `AnswerEvaluator.judge` built its verdicts in a `List(...)` literal, which Scala
+  evaluates strictly left to right, so `hallucination-evaluator` completed before `decline-judge`
+  started: three sequential model calls where two would do. It had never been weighed — specs/015
+  acknowledged the latency but never discussed concurrency. Both judges are now started with
+  `invokeAsync` before either is awaited, so an evaluation costs the **slower** judge, and verdicts are
+  reassembled in fixed order because `EvaluationEndpointIntegrationTest` pins it. Measured, not
+  assumed: two judges scripted at 2.5s each finish inside 4.2s.
 
-- **Capability 13 — bound the chained model calls with a timeout** *(open; raised in PR #27 review).*
-  `POST /evaluate` makes three chained LLM calls with **no configured bound anywhere** — grepping
-  specs/015 for "timeout" returns nothing. On a slow local model that can outlast a default client or
-  platform HTTP timeout, and there is no partial-result path (an answer with the verdicts still pending
-  is a perfectly reasonable degraded reply, and is not expressible today). Note `AnswerEvaluator.verdictOf`
-  does **not** cover this: it turns a judge *failure* into an `errored` verdict, and a hang is not a
-  failure. No test covers a judge that never returns. This is the weakest part of the capability's error
-  story, and the more important of these two follow-ups — the concurrency one is a performance
-  improvement, this one is a correctness gap.
+- **Capability 13 — bound the chained model calls with a timeout** — ✅ *done on
+  `fix/cap13-judge-timeout` (2026-09-11), and the original claim here was wrong.* This said there was
+  **no configured bound anywhere**. In fact every model call already inherited the provider's
+  `response-timeout = 1m`, `connection-timeout = 15s` and `max-retries = 2` from the SDK's
+  `reference.conf` — so one call gave up after about three minutes. What was genuinely missing was a
+  bound a *caller* could reason about, and one honest report of what had happened: `eval.judge-timeout`
+  (default `60s`) now bounds each judge, and a judge that misses it is `errored` — *"the judge did not
+  respond within 60s"* — while the other still reports.
+
+  The same follow-up fixed two **misreports** that mattered more than the bound. A turn that failed
+  *inside* capability 8's agent arrived as `"I don't know"` and was judged as a decline (a slow model
+  reported as a bad decision); a call that failed *outside* it threw and returned a generic `500`,
+  contradicting the documented contract that every `/evaluate` outcome except invalid input is `200`.
+  Both now end `not-applicable` with no judge called. The first cost a deliberate edit to capability 8,
+  which is why its "byte-identical" property no longer holds.
 
 ## Candidate next capabilities
 

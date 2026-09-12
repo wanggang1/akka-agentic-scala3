@@ -197,6 +197,13 @@ through an entirely unrelated mechanism. It **corrects** that axis rather than c
   adding a rule to any agent, read that agent's `onFailure`.** This was found by a discovery test written
   *before* any production edit, which is why it cost one test instead of a redesign.
 
+  **It recurred, which is what makes it a class rather than an incident.** Cap-13's follow-up found the
+  *same* handler reporting a **model timeout** as a decline — harmless to `/ask`, which shows a decline
+  either way, but `/evaluate` then had a judge rate a decision the assistant never made. So
+  `.onFailure` now sorts three outcomes, not two, and the general rule is sharper than "read
+  `onFailure`": **a catch-all that maps every failure onto a legitimate answer is a lie waiting for a
+  second consumer.** Cap-8 had exactly one consumer when it was written.
+
 A modelling limit worth carrying: `TextGuardrail.evaluate` receives **text only** — no question, no
 retrieved passages — so a guardrail structurally *cannot* check grounding. Cap-12 ships a documented proxy
 instead of faking one, and that gap is the clearest argument for an evaluation/LLM-judge capability next.
@@ -228,10 +235,14 @@ question and no passages. An evaluator's request carries all three.
   sets its model *explicitly*, but `AgentImpl` reads
   `overrideModelProvider(id).getOrElse(requestModel.modelProvider)`, so the TestKit's per-agent
   override wins. Better than cap-6 (recall live-only) or cap-7 (delegation not faithfully mockable).
-- **Cap-8 is byte-identical, as a research result rather than as discipline.** There is no
-  `Consume.From*` source for a request-based agent — the SDK's documented `EvaluationConsumer` consumes
-  `TaskEntity`, which cap-8 does not have — so evaluation could only ever have had its own surface.
-  Cap-12 earned one line of change in `DocsAgent`; cap-13 earned none.
+- **Evaluation could only ever have had its own surface, as a research result rather than as
+  discipline.** There is no `Consume.From*` source for a request-based agent — the SDK's documented
+  `EvaluationConsumer` consumes `TaskEntity`, which cap-8 does not have. At merge that left cap-8
+  **byte-identical**, provable by `git diff`. The property did not survive PR review: a turn that
+  failed *inside* cap-8's agent arrived as `"I don't know"` and was judged as a decline, so
+  `DocsAgent` now replies behind a failure sentinel that `DocsEndpoint` maps back (see the guardrail
+  collision above). Worth stating plainly — **byte-identical was the cheaper claim; not judging a
+  timeout as a decision was the more valuable one.**
 
 Two limits carried forward: the documented Java-method-ref form fails from Scala with an error naming
 **the developer's own class** as "not a subclass of `Agent`" (the worst diagnostic this project has met

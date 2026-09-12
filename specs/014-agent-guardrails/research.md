@@ -819,3 +819,17 @@ Two conclusions, neither flattering to a single-layer reading of this capability
 
 This is exactly why the enforcing behaviour is pinned by offline tests with a deterministic prompt: the
 live variability is then visible *as* variability, rather than being mistaken for the contract.
+
+## Addendum — 2026-09-11: "every other throwable" no longer degrades to the decline sentinel
+
+R3/T007 narrowed `DocsAgent.onFailure` so a guardrail block replies behind `BlockedPrefix`, and stated
+that every other throwable keeps degrading to `DontKnow`. The capability-13 judge-timeout follow-up
+(branch `fix/cap13-judge-timeout`) narrowed the same handler a second time: non-guardrail failures now
+reply behind `FailedPrefix = "__turn-failed__:"`. It uses exactly the reply-channel technique this
+feature established, for the same reason: a failure reported as an honest decline misleads whoever
+consumes it, and capability 13's decline judge was consuming it.
+
+What this feature relied on still holds. A block is still discriminated first and still becomes a
+`422`. `DocsAgent` still names no rule — `AgentDeclaresNoGuardrailsTest` passes unchanged, because the
+new code lines contain no `Guardrail` reference. And `POST /ask` still returns `"I don't know"` for a
+failed turn, because `DocsEndpoint` maps the new sentinel back.

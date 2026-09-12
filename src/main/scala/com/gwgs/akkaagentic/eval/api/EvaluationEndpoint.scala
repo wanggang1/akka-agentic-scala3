@@ -26,8 +26,10 @@ import com.gwgs.akkaagentic.eval.application.AnswerEvaluator
   * This surface exists rather than a background hook because the SDK has no interaction-completion
   * source for a request-based agent — `@Consume.From*` covers entities, workflows, topics and service
   * streams only, and the documented `EvaluationConsumer` actually consumes `TaskEntity`, which
-  * capability 8 does not have (research R4). The consequence is favourable: capability 8's sources are
-  * not touched at all (SC-003).
+  * capability 8 does not have (research R4). The consequence was favourable: at merge, evaluation had
+  * needed no change to capability 8 (SC-003). The judge-timeout follow-up later changed `DocsAgent`
+  * deliberately, so that a failed turn is not judged as a decline (specs/015 research, addendum
+  * 2026-09-11).
   */
 object EvaluationEndpoint:
 
@@ -51,6 +53,9 @@ object EvaluationEndpoint:
   /** The config key that turns the judges off without a code change (FR-009). Defaulting to `true`
     * when absent keeps a configuration that predates this capability working. */
   private val EnabledKey = "eval.enabled"
+
+  /** How long one judge may take before its verdict is `errored` (see application.conf). */
+  private val JudgeTimeoutKey = "eval.judge-timeout"
 
   /** `referenceText` is deliberately **not** on the wire: it can be large, and `citedSources` already
     * identifies what grounded the answer. That the judges saw exactly those passages is proven by a
@@ -76,12 +81,20 @@ class EvaluationEndpoint(
 ):
   import EvaluationEndpoint.*
 
-  private val evaluator = new AnswerEvaluator(componentClient, knowledgeStore)
+  private val evaluator = new AnswerEvaluator(componentClient, knowledgeStore, judgeTimeout)
 
   /** Judges cost model calls, so they are switchable off by configuration alone (FR-009, SC-005).
     * Read per request rather than cached, so an override applies without a restart. */
   private def judgesEnabled: Boolean =
     Try(config.getBoolean(EnabledKey)).getOrElse(true)
+
+  /** Read per request, like [[judgesEnabled]] (an endpoint instance is per request). A missing,
+    * malformed, zero or negative value falls back to the default rather than failing the request or
+    * timing every judge out instantly. */
+  private def judgeTimeout: java.time.Duration =
+    Try(config.getDuration(JudgeTimeoutKey)).toOption
+      .filter(d => !d.isNegative && !d.isZero)
+      .getOrElse(AnswerEvaluator.DefaultJudgeTimeout)
 
   /** Answer, then judge. Validation runs **first** — a blank or absent question is rejected before
     * retrieval, before the assistant, and before any judge (FR-010). Capability 8's `AskQuestion` is

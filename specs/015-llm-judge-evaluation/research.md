@@ -828,3 +828,40 @@ Two honest readings, and the second is the important one:
 
 This is also the reason the design forbids acting on a verdict (FR-008): a judge's opinion is
 non-deterministic, and nothing here has established a base rate for it.
+
+## Addendum — 2026-09-11: capability 8 is no longer byte-identical, by decision
+
+R4's finding stands: there is no `Consume.From*` source for a request-based agent, so evaluation could
+only ever have had its own surface, and at merge (PR #27) capability 8's sources were byte-identical.
+That property did not survive the follow-up, and it was given up deliberately.
+
+The judge-timeout follow-up from PR #27 review (branch `fix/cap13-judge-timeout`) found two failure
+paths this capability misreported:
+
+1. **A turn that fails inside the agent** (a model timeout, a rate limit, an unusable reply) reached
+   `AnswerEvaluator` as `"I don't know"`, because capability 8's `DocsAgent.onFailure` degraded every
+   non-guardrail failure to the decline sentinel. `decline-judge` then rated a decline the assistant
+   never made. `AnswerEvaluator` cannot tell the two apart — they arrive as the same string — so the
+   fix had to be in capability 8: `DocsAgent` now replies behind a new `FailedPrefix`, and
+   `DocsEndpoint` maps it back so `POST /ask` is unchanged.
+2. **A call that fails outside the agent** threw out of `evaluate`, so `POST /evaluate` returned the
+   runtime's generic `500`, contradicting this feature's own contract that every outcome except
+   invalid input is `200`. It is now caught, and needed no capability 8 change.
+
+Both now end `not-applicable` ("the assistant failed to answer") with no judge called. The user chose
+the capability 8 edit over documenting the misreport (2026-09-11). The alternative would have kept
+SC-003 at the cost of a verdict that reported a slow model as a bad decision.
+
+One claim in the follow-up notes written at merge (ROADMAP, README) was also wrong: "no timeout
+anywhere". Each model call already inherits the provider's `response-timeout = 1m`,
+`connection-timeout = 15s` and `max-retries = 2` from the SDK's `reference.conf`. What was missing was
+a bound on the whole request, not on each call.
+
+The same follow-up also settled a question this research never asked: the judges were called one after
+the other, and nothing bounded one that did not answer. They now run **concurrently** (`invokeAsync`
+before either is awaited, verdicts reassembled in `judgeIds` order), each bounded by
+`eval.judge-timeout` (default `60s`), past which that judge's verdict is `errored` and the other still
+reports. The deadline is client-side: `orTimeout` completes our future, and the abandoned model call
+runs on until the provider's `response-timeout`. The **answer** call is deliberately left to the
+provider's timeout — a deadline of ours there would convert a slow answer into a failed call, which is
+path 2 above.

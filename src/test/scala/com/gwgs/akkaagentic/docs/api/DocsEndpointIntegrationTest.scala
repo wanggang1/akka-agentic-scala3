@@ -60,6 +60,23 @@ class DocsEndpointIntegrationTest extends TestKitSupport:
     assertThat(reply.body().answer).isEqualTo(DocsAgent.DontKnow)
     assertThat(reply.body().citedSources.isEmpty).isTrue() // decline cites nothing (FR-005)
 
+  /** Capability-13 timeout follow-up — a failed turn now replies behind `DocsAgent.FailedPrefix`, but
+    * `/ask`'s contract must not move: callers still see a decline that cites nothing, exactly as
+    * before. The distinct sentinel is for `POST /evaluate`, not for this surface. */
+  @Test
+  def aFailedTurnStillReachesAskCallersAsADecline(): Unit =
+    docsModel.whenMessage((_: String) => true).failWith(new RuntimeException("simulated model timeout"))
+
+    val reply = httpClient
+      .POST("/ask")
+      .withRequestBody(DocsEndpoint.AskRequest(Some("what makes agent work survive a restart without writing persistence code?")))
+      .responseBodyAs(classOf[DocsEndpoint.AskReply])
+      .invoke()
+
+    assertThat(reply.status()).isEqualTo(StatusCodes.OK)
+    assertThat(reply.body().answer).isEqualTo(DocsAgent.DontKnow)
+    assertThat(reply.body().citedSources.isEmpty).isTrue()
+
   /** US3/SC-005: a blank question is rejected up front — `400`, no model call. (No `responseBodyAs`,
     * per the httpClient failure-status pattern: it would throw on a non-2xx status.) */
   @Test

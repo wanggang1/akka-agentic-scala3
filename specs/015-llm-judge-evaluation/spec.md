@@ -347,3 +347,10 @@ prose alone.
   evaluator authored in Scala works end to end and whether it needs a descriptor entry; and what the
   documented Java method-reference form does when attempted from Scala — recorded in the project's
   findings, README, and roadmap.
+
+## Addendum — 2026-09-11
+
+**SC-003 was met at merge (PR #27) and has since been given up deliberately.** The judge-timeout
+follow-up changed capability 8's `DocsAgent` and `DocsEndpoint` so that a failed assistant turn is no
+longer indistinguishable from a decline; without that, `POST /evaluate` judged a timeout as a bad
+decision. `POST /ask`'s observable contract is unchanged. See research.md, "Addendum — 2026-09-11".

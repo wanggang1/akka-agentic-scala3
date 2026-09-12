@@ -214,3 +214,24 @@ live/mocked model.**
   compiles and injects) and R1's startup-cost note (ONNX load time in the test suite).
 - **Deferred (out of scope, noted)**: durable/runtime indexing via a Workflow (Java-only §4) — we seed
   at bootstrap; `EmbeddingStoreContentRetriever`/`RetrievalAugmentor` production plumbing (R2).
+
+## Addendum — 2026-09-11: a failed turn no longer replies "I don't know"
+
+Recorded after the fact rather than by rewriting the decisions above, which describe what was built.
+
+R4 settled the agent's reply as a bare `String` whose one non-answer value was the decline sentinel
+`DontKnow`, and `DocsAgent` ended with `.onFailure(_ => DontKnow)`: a failed turn degraded to a
+decline. That is no longer the agent's behaviour.
+
+- Capability 12 (specs/014) first narrowed `onFailure` so a guardrail block replies behind
+  `BlockedPrefix` instead.
+- The capability-13 judge-timeout follow-up (branch `fix/cap13-judge-timeout`) narrowed it again.
+  Every other failure — a model timeout, a rate limit, an unusable reply — now replies behind
+  `FailedPrefix = "__turn-failed__:"`. The reason: capability 13's `POST /evaluate` judges declines,
+  and a timed-out answer arriving as "I don't know" was being judged as a decision the assistant
+  never made.
+
+**`POST /ask`'s contract did not change.** `DocsEndpoint` maps `FailedPrefix` straight back to
+`DontKnow` with no citations, so a caller of this feature sees exactly what this research specified;
+`aFailedTurnStillReachesAskCallersAsADecline` pins it. What changed is that the agent's reply channel
+now carries three non-answer values instead of one, and `DocsEndpoint` collapses two of them.
