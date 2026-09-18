@@ -92,14 +92,14 @@ This phase only records where the capability starts.
 
 ### Tests for User Story 2
 
-- [ ] T016 [P] [US2] Write `src/test/scala/com/gwgs/akkaagentic/reminders/api/ReminderCancellationIntegrationTest.scala` — SC-003: after a `200` cancel, wait **past** the delay and assert 0 firings. Proving a negative costs one real wait; state that cost in a comment
-- [ ] T017 [P] [US2] In `src/test/scala/com/gwgs/akkaagentic/reminders/api/ReminderCancellationIntegrationTest.scala`, pin all three outcomes distinctly (FR-006): `200 {"state":"cancelled"}`, `409` carrying the **actual** terminal state for an already-fired reminder, `404` for an unknown id — and assert the `409` body names `fired`, not `cancelled`, since reporting success for a cancellation that cancelled nothing is the specific failure this requirement exists to prevent
+- [x] T016 [P] [US2] Write `src/test/scala/com/gwgs/akkaagentic/reminders/api/ReminderCancellationIntegrationTest.scala` — SC-003: after a `200` cancel, wait **past** the delay and assert 0 firings. Proving a negative costs one real wait; state that cost in a comment
+- [x] T017 [P] [US2] In `src/test/scala/com/gwgs/akkaagentic/reminders/api/ReminderCancellationIntegrationTest.scala`, pin all three outcomes distinctly (FR-006): `200 {"state":"cancelled"}`, `409` carrying the **actual** terminal state for an already-fired reminder, `404` for an unknown id — and assert the `409` body names `fired`, not `cancelled`, since reporting success for a cancellation that cancelled nothing is the specific failure this requirement exists to prevent
 
 ### Implementation for User Story 2
 
-- [ ] T018 [US2] Add `DELETE /reminders/{id}` to `src/main/scala/com/gwgs/akkaagentic/reminders/api/ReminderEndpoint.scala` — `timers.delete(name)` (string-keyed, Scala-clean per D2/Q-B) guarded by `ReminderStore.cancel`, mapping `Cancelled → 200`, `AlreadyTerminal(s) → 409` with `s`, `Unknown → 404`
-- [ ] T019 [US2] Handle the fire/cancel race explicitly in `src/main/scala/com/gwgs/akkaagentic/reminders/application/ReminderStore.scala` and `src/main/scala/com/gwgs/akkaagentic/reminders/api/ReminderEndpoint.scala` (spec Edge Cases): decide and implement which side wins when a cancel arrives while the action is running, and comment the decision at the call site so the window is documented rather than discovered
-- [ ] T020 [US2] Run `mvn clean verify`
+- [x] T018 [US2] Add `DELETE /reminders/{id}` to `src/main/scala/com/gwgs/akkaagentic/reminders/api/ReminderEndpoint.scala` — `timers.delete(name)` (string-keyed, Scala-clean per D2/Q-B) guarded by `ReminderStore.cancel`, mapping `Cancelled → 200`, `AlreadyTerminal(s) → 409` with `s`, `Unknown → 404`
+- [x] T019 [US2] Handle the fire/cancel race explicitly in `src/main/scala/com/gwgs/akkaagentic/reminders/application/ReminderStore.scala` and `src/main/scala/com/gwgs/akkaagentic/reminders/api/ReminderEndpoint.scala` (spec Edge Cases): decide and implement which side wins when a cancel arrives while the action is running, and comment the decision at the call site so the window is documented rather than discovered
+- [x] T020 [US2] Run `mvn clean verify`
 
 **Checkpoint**: US1 and US2 both work independently. The interop asymmetry is now visible in the surface — Java schedules, Scala cancels. **Gate → commit + push.**
 
