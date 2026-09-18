@@ -37,8 +37,8 @@ revisited by any task below:
 **Purpose**: nothing to scaffold — the package, the action and the descriptor key exist from Phase 0.
 This phase only records where the capability starts.
 
-- [ ] T001 Confirm the Phase 0 baseline is green and unchanged: `mvn clean verify` passes, and `src/main/scala/com/gwgs/akkaagentic/reminders/` contains `application/ReminderAction.scala` + `application/ReminderLog.scala` + `probe/`
-- [ ] T002 Confirm `timed-action = ["com.gwgs.akkaagentic.reminders.application.ReminderAction"]` is present in `src/main/resources/META-INF/akka-javasdk-components_com.gwgs_akka-agentic-scala3.conf` (FR-014)
+- [x] T001 Confirm the Phase 0 baseline is green and unchanged: `mvn clean verify` passes, and `src/main/scala/com/gwgs/akkaagentic/reminders/` contains `application/ReminderAction.scala` + `application/ReminderLog.scala` + `probe/`
+- [x] T002 Confirm `timed-action = ["com.gwgs.akkaagentic.reminders.application.ReminderAction"]` is present in `src/main/resources/META-INF/akka-javasdk-components_com.gwgs_akka-agentic-scala3.conf` (FR-014)
 
 **Checkpoint**: baseline green; no production behaviour added yet.
 
@@ -50,12 +50,12 @@ This phase only records where the capability starts.
 
 **⚠️ CRITICAL**: no user story can begin until this phase is complete.
 
-- [ ] T003 [P] Create `ReminderRequest` in `src/main/scala/com/gwgs/akkaagentic/reminders/domain/ReminderRequest.scala` — `validate(note: Option[String], delaySeconds: Option[Int]): Either[String, ReminderRequest]`, trimming the note, rejecting blank/over-500-character notes and delays outside 1 s…24 h. **No Akka import** (Constitution II), no `null`, messages exactly as in data-model.md
-- [ ] T004 [P] Create `ReminderState` in `src/main/scala/com/gwgs/akkaagentic/reminders/domain/ReminderState.scala` — a pure enum `Pending | Fired | Cancelled | Failed` plus `isTerminal`, with the transition rule that a terminal state never moves again (FR-003, FR-006)
-- [ ] T005 [P] Unit-test the validation in `src/test/scala/com/gwgs/akkaagentic/reminders/domain/ReminderRequestTest.scala` — each rejection message pinned verbatim (so the HTTP contract cannot drift from the rule), plus trimming and the boundary values 1 / 86400 / 0 / -1 / 86401 (FR-007, SC-005)
-- [ ] T006 [P] Unit-test the state machine in `src/test/scala/com/gwgs/akkaagentic/reminders/domain/ReminderStateTest.scala` — the three legal transitions out of `Pending`, and that no terminal state transitions again (SC-004)
-- [ ] T007 Create `ReminderStore` in `src/main/scala/com/gwgs/akkaagentic/reminders/application/ReminderStore.scala` — promote `ReminderLog` into the real instrument: `ConcurrentHashMap`-backed, keyed by reminder id, with `record` / `markFired` / `markFailed` / `cancel: CancelOutcome` / `get: Option[Reminder]`. Document the in-process lifetime and **why** (D5 / Q-C), so it reads as a decision rather than an oversight
-- [ ] T008 Unit-test `ReminderStore` in `src/test/scala/com/gwgs/akkaagentic/reminders/application/ReminderStoreTest.scala` — `cancel` returns `Cancelled` on a pending reminder, `AlreadyTerminal(state)` on a fired/cancelled/failed one, and `Unknown` on an unseen id (FR-006)
+- [x] T003 [P] Create `ReminderRequest` in `src/main/scala/com/gwgs/akkaagentic/reminders/domain/ReminderRequest.scala` — `validate(note: Option[String], delaySeconds: Option[Int]): Either[String, ReminderRequest]`, trimming the note, rejecting blank/over-500-character notes and delays outside 1 s…24 h. **No Akka import** (Constitution II), no `null`, messages exactly as in data-model.md
+- [x] T004 [P] Create `ReminderState` in `src/main/scala/com/gwgs/akkaagentic/reminders/domain/ReminderState.scala` — a pure enum `Pending | Fired | Cancelled | Failed` plus `isTerminal`, with the transition rule that a terminal state never moves again (FR-003, FR-006)
+- [x] T005 [P] Unit-test the validation in `src/test/scala/com/gwgs/akkaagentic/reminders/domain/ReminderRequestTest.scala` — each rejection message pinned verbatim (so the HTTP contract cannot drift from the rule), plus trimming and the boundary values 1 / 86400 / 0 / -1 / 86401 (FR-007, SC-005)
+- [x] T006 [P] Unit-test the state machine in `src/test/scala/com/gwgs/akkaagentic/reminders/domain/ReminderStateTest.scala` — the three legal transitions out of `Pending`, and that no terminal state transitions again (SC-004)
+- [x] T007 Create `ReminderStore` in `src/main/scala/com/gwgs/akkaagentic/reminders/application/ReminderStore.scala` — promote `ReminderLog` into the real instrument: `ConcurrentHashMap`-backed, keyed by reminder id, with `record` / `markFired` / `markFailed` / `cancel: CancelOutcome` / `get: Option[Reminder]`. Document the in-process lifetime and **why** (D5 / Q-C), so it reads as a decision rather than an oversight
+- [x] T008 Unit-test `ReminderStore` in `src/test/scala/com/gwgs/akkaagentic/reminders/application/ReminderStoreTest.scala` — `cancel` returns `Cancelled` on a pending reminder, `AlreadyTerminal(state)` on a fired/cancelled/failed one, and `Unknown` on an unseen id (FR-006)
 
 **Checkpoint**: domain + store complete and unit-tested with no runtime, no model, no Akka in `domain/`. **Gate → commit.**
 
@@ -69,16 +69,16 @@ This phase only records where the capability starts.
 
 ### Tests for User Story 1
 
-- [ ] T009 [P] [US1] Write `src/test/scala/com/gwgs/akkaagentic/reminders/api/ReminderSchedulingIntegrationTest.scala` covering SC-001 (pending before the delay, fired after — both observed, not argued) and SC-002 (the note comes back byte-identical). Delays **1–1.5 s**: D6's 300 ms floor was the *probe's* measurement, but `POST /reminders` rejects anything under `ReminderRequest.MinDelay` (1 s), so HTTP-level tests cannot go lower. `Awaitility` for the fired assertion, a direct read for the pending one
-- [ ] T010 [P] [US1] Write the validation-first cases in `src/test/scala/com/gwgs/akkaagentic/reminders/api/ReminderSchedulingIntegrationTest.scala`: blank note, absent note, `delaySeconds` 0 / negative / absent / over-max each return `400` **and leave nothing scheduled** — assert the store has no entry afterwards, since "rejected" and "rejected without side effects" are different claims (FR-007, SC-005)
+- [x] T009 [P] [US1] Write `src/test/scala/com/gwgs/akkaagentic/reminders/api/ReminderSchedulingIntegrationTest.scala` covering SC-001 (pending before the delay, fired after — both observed, not argued) and SC-002 (the note comes back byte-identical). Delays **1–1.5 s**: D6's 300 ms floor was the *probe's* measurement, but `POST /reminders` rejects anything under `ReminderRequest.MinDelay` (1 s), so HTTP-level tests cannot go lower. `Awaitility` for the fired assertion, a direct read for the pending one
+- [x] T010 [P] [US1] Write the validation-first cases in `src/test/scala/com/gwgs/akkaagentic/reminders/api/ReminderSchedulingIntegrationTest.scala`: blank note, absent note, `delaySeconds` 0 / negative / absent / over-max each return `400` **and leave nothing scheduled** — assert the store has no entry afterwards, since "rejected" and "rejected without side effects" are different claims (FR-007, SC-005)
 
 ### Implementation for User Story 1
 
-- [ ] T011 [US1] Rewire `ReminderAction.fire` in `src/main/scala/com/gwgs/akkaagentic/reminders/application/ReminderAction.scala` to take the **reminder id** and call `ReminderStore.markFired`; drop the note-keyed `ReminderLog` coupling. Move `failAlways` out to `src/main/scala/com/gwgs/akkaagentic/reminders/probe/FailingReminderAction.scala` (a second `TimedAction`, the Q-D instrument) so the production action has exactly one handler
-- [ ] T012 [US1] Create `src/main/java/com/gwgs/akkaagentic/reminders/api/ReminderSchedulingEndpoint.java` — `POST /reminders`, `@Acl` INTERNET, validating through the Scala `ReminderRequest.validate` (cap-14's Q-E shape: `Option.apply` at the boundary, two casts on the `Either`), then `componentClient.forTimedAction().method(ReminderAction::fire).deferred(id)` and `timers().createSingleTimer(name, delay, maxRetries, deferred)` — **the 4-arg overload, always** (D4). Returns `201` + `Location`
-- [ ] T013 [US1] Create `src/main/scala/com/gwgs/akkaagentic/reminders/api/ReminderEndpoint.scala` — `GET /reminders/{id}` returning `200` with the reminder or `404`, with `firedAt` / `cancelledAt` / `failure` as omitted-when-empty `Option` fields (idiomatic Scala bodies; the two-mapper boundary does not bite, since nothing crosses the internal mapper)
-- [ ] T014 [US1] Register both endpoints under `http-endpoint` in `src/main/resources/META-INF/akka-javasdk-components_com.gwgs_akka-agentic-scala3.conf`, and add `FailingReminderAction` under `timed-action` (FR-014). Comment each entry with the measurement that put it there
-- [ ] T015 [US1] Run `mvn clean verify`; record the added wall-clock cost of the real-time waits in the test's own comment (FR-011, SC-009)
+- [x] T011 [US1] Rewire `ReminderAction.fire` in `src/main/scala/com/gwgs/akkaagentic/reminders/application/ReminderAction.scala` to take the **reminder id** and call `ReminderStore.markFired`; drop the note-keyed `ReminderLog` coupling. Move `failAlways` out to `src/main/scala/com/gwgs/akkaagentic/reminders/probe/FailingReminderAction.scala` (a second `TimedAction`, the Q-D instrument) so the production action has exactly one handler
+- [x] T012 [US1] Create `src/main/java/com/gwgs/akkaagentic/reminders/api/ReminderSchedulingEndpoint.java` — `POST /reminders`, `@Acl` INTERNET, validating through the Scala `ReminderRequest.validate` (cap-14's Q-E shape: `Option.apply` at the boundary, two casts on the `Either`), then `componentClient.forTimedAction().method(ReminderAction::fire).deferred(id)` and `timers().createSingleTimer(name, delay, maxRetries, deferred)` — **the 4-arg overload, always** (D4). Returns `201` + `Location`
+- [x] T013 [US1] Create `src/main/scala/com/gwgs/akkaagentic/reminders/api/ReminderEndpoint.scala` — `GET /reminders/{id}` returning `200` with the reminder or `404`, with `firedAt` / `cancelledAt` / `failure` as omitted-when-empty `Option` fields (idiomatic Scala bodies; the two-mapper boundary does not bite, since nothing crosses the internal mapper)
+- [x] T014 [US1] Register both endpoints under `http-endpoint` in `src/main/resources/META-INF/akka-javasdk-components_com.gwgs_akka-agentic-scala3.conf`, and add `FailingReminderAction` under `timed-action` (FR-014). Comment each entry with the measurement that put it there
+- [x] T015 [US1] Run `mvn clean verify`; record the added wall-clock cost of the real-time waits in the test's own comment (FR-011, SC-009)
 
 **Checkpoint**: the capability is usable end to end — schedule, observe pending, observe fired. **Gate → commit + push.**
 
