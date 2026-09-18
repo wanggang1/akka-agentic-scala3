@@ -29,7 +29,9 @@ class ReminderProbeEndpoint(componentClient: ComponentClient, timers: TimerSched
           .forTimedAction()
           .method[ReminderAction, String, Any]((action, n) => action.fire(n))
           .deferred(name)
-        timers.createSingleTimer(name, Duration.ofMillis(ms.toLong), deferred)
+        // Four-argument, like everything in this capability (FR-008). It is never reached — the
+        // failure this route exists to record happens one line up, in `deferred()`.
+        timers.createSingleTimer(name, Duration.ofMillis(ms.toLong), 1, deferred)
       } match
         case Success(_) => "SCHEDULED"
         case Failure(t) => s"FAILED: ${ReminderProbeEndpoint.chain(t)}"

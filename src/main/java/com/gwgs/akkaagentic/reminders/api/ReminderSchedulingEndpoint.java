@@ -8,8 +8,10 @@ import akka.javasdk.client.ComponentClient;
 import akka.javasdk.http.HttpResponses;
 import akka.javasdk.timer.TimerScheduler;
 import com.gwgs.akkaagentic.reminders.application.ReminderAction;
+import com.gwgs.akkaagentic.reminders.application.ReminderSettings;
 import com.gwgs.akkaagentic.reminders.application.ReminderStore;
 import com.gwgs.akkaagentic.reminders.domain.ReminderRequest;
+import com.typesafe.config.Config;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
@@ -39,13 +41,6 @@ import scala.util.Right;
 @Acl(allow = @Acl.Matcher(principal = Acl.Principal.INTERNET))
 public class ReminderSchedulingEndpoint {
 
-  /**
-   * Retries a failing firing gets before the reminder is abandoned. Always passed explicitly: the
-   * three-argument {@code createSingleTimer} was measured still retrying at 30 seconds (research Q-D),
-   * so FR-008 forbids relying on its default. Becomes configurable in T025.
-   */
-  static final int MAX_RETRIES = 2;
-
   public record ScheduleRequest(String note, Integer delaySeconds) {}
 
   public record ScheduledReminder(
@@ -54,9 +49,18 @@ public class ReminderSchedulingEndpoint {
   private final ComponentClient componentClient;
   private final TimerScheduler timers;
 
-  public ReminderSchedulingEndpoint(ComponentClient componentClient, TimerScheduler timers) {
+  /**
+   * Retries a failing firing gets before the reminder is abandoned, from {@code reminders.max-retries}.
+   * Always passed explicitly: the three-argument {@code createSingleTimer} was measured still retrying
+   * at 30 seconds (research Q-D), so FR-008 forbids relying on its default.
+   */
+  private final int maxRetries;
+
+  public ReminderSchedulingEndpoint(
+      ComponentClient componentClient, TimerScheduler timers, Config config) {
     this.componentClient = componentClient;
     this.timers = timers;
+    this.maxRetries = ReminderSettings.maxRetries(config);
   }
 
   @Post("/reminders")
@@ -84,7 +88,7 @@ public class ReminderSchedulingEndpoint {
       // The FOUR-argument overload, always (FR-008). The timer is named by the reminder id, which is
       // what lets the Scala side cancel it with nothing but that string.
       timers.createSingleTimer(
-          reminderId, Duration.ofSeconds(valid.delay().toSeconds()), MAX_RETRIES, deferred);
+          reminderId, Duration.ofSeconds(valid.delay().toSeconds()), maxRetries, deferred);
     } catch (RuntimeException e) {
       // Nothing will fire, so the record must not keep claiming `pending`.
       ReminderStore.markFailed(reminderId, "could not be scheduled: " + e.getMessage());
