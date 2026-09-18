@@ -1,9 +1,8 @@
 package com.gwgs.akkaagentic.reminders.application
 
-import scala.concurrent.duration.DurationInt
+import java.util.concurrent.{CountDownLatch, Executors, TimeUnit}
 
-import com.gwgs.akkaagentic.reminders.application.ReminderStore.CancelOutcome
-import com.gwgs.akkaagentic.reminders.domain.ReminderState
+import com.gwgs.akkaagentic.reminders.domain.{CancelOutcome, ReminderState}
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.{BeforeEach, Test}
 
@@ -20,14 +19,14 @@ class ReminderStoreTest:
 
   @Test
   def aRecordedReminderIsPendingAndCarriesItsNote(): Unit =
-    val reminder = ReminderStore.record("r-1", "stand up", 5.seconds)
+    val reminder = ReminderStore.record("r-1", "stand up")
     assertThat(reminder.state).isEqualTo(ReminderState.Pending)
     assertThat(reminder.note).isEqualTo("stand up")
     assertThat(ReminderStore.get("r-1").map(_.note).orNull).isEqualTo("stand up")
 
   @Test
   def cancellingAPendingReminderReportsCancelled(): Unit =
-    ReminderStore.record("r-2", "cancel me", 5.seconds)
+    ReminderStore.record("r-2", "cancel me")
     ReminderStore.cancel("r-2") match
       case CancelOutcome.Cancelled(reminder) =>
         assertThat(reminder.state).isEqualTo(ReminderState.Cancelled)
@@ -37,7 +36,7 @@ class ReminderStoreTest:
   @Test
   def cancellingAFiredReminderReportsTheStateItIsActuallyIn(): Unit =
     // The failure this guards against: answering "cancelled" to a request that cancelled nothing.
-    ReminderStore.record("r-3", "already fired", 5.seconds)
+    ReminderStore.record("r-3", "already fired")
     ReminderStore.markFired("r-3")
     ReminderStore.cancel("r-3") match
       case CancelOutcome.AlreadyTerminal(reminder) =>
@@ -46,7 +45,7 @@ class ReminderStoreTest:
 
   @Test
   def cancellingTwiceReportsAlreadyTerminalTheSecondTime(): Unit =
-    ReminderStore.record("r-4", "twice", 5.seconds)
+    ReminderStore.record("r-4", "twice")
     assertThat(ReminderStore.cancel("r-4").isInstanceOf[CancelOutcome.Cancelled]).isTrue()
     ReminderStore.cancel("r-4") match
       case CancelOutcome.AlreadyTerminal(reminder) =>
@@ -60,21 +59,21 @@ class ReminderStoreTest:
   @Test
   def aCancelledReminderCannotThenFire(): Unit =
     // The fire-versus-cancel window: the cancel got there first, so firing must not overwrite it.
-    ReminderStore.record("r-5", "raced", 5.seconds)
+    ReminderStore.record("r-5", "raced")
     ReminderStore.cancel("r-5")
     assertThat(ReminderStore.markFired("r-5").isDefined).isFalse()
     assertThat(ReminderStore.get("r-5").map(_.state).orNull).isEqualTo(ReminderState.Cancelled)
 
   @Test
   def aFiredReminderCannotThenFail(): Unit =
-    ReminderStore.record("r-6", "done", 5.seconds)
+    ReminderStore.record("r-6", "done")
     ReminderStore.markFired("r-6")
     assertThat(ReminderStore.markFailed("r-6", "too late").isDefined).isFalse()
     assertThat(ReminderStore.get("r-6").map(_.state).orNull).isEqualTo(ReminderState.Fired)
 
   @Test
   def failingRecordsTheReasonAndCountsTheAttempt(): Unit =
-    ReminderStore.record("r-7", "doomed", 5.seconds)
+    ReminderStore.record("r-7", "doomed")
     ReminderStore.recordAttempt("r-7")
     val failed = ReminderStore.markFailed("r-7", "deliberate failure")
     assertThat(failed.map(_.state).orNull).isEqualTo(ReminderState.Failed)
@@ -87,3 +86,21 @@ class ReminderStoreTest:
     assertThat(ReminderStore.markFailed("ghost", "reason").isDefined).isFalse()
     assertThat(ReminderStore.recordAttempt("ghost").isDefined).isFalse()
     assertThat(ReminderStore.get("ghost").isDefined).isFalse()
+
+  @Test
+  def concurrentCancelsOfOneReminderHaveExactlyOneWinner(): Unit =
+    // The claim the single-cell design makes, tested with real threads rather than argued: however
+    // many callers race to cancel the same pending reminder, exactly one is told it cancelled it.
+    val racers = 32
+    ReminderStore.record("r-race", "contended")
+    val pool = Executors.newFixedThreadPool(racers)
+    val start = CountDownLatch(1)
+    try
+      val futures = (1 to racers).map { _ =>
+        pool.submit(() => { start.await(); ReminderStore.cancel("r-race") })
+      }
+      start.countDown()
+      val outcomes = futures.map(_.get(10, TimeUnit.SECONDS))
+      assertThat(outcomes.count(_.isInstanceOf[CancelOutcome.Cancelled])).isEqualTo(1)
+      assertThat(outcomes.count(_.isInstanceOf[CancelOutcome.AlreadyTerminal])).isEqualTo(racers - 1)
+    finally pool.shutdownNow()
