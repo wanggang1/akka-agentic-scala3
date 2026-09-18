@@ -8,8 +8,10 @@ import akka.javasdk.client.ComponentClient;
 import akka.javasdk.http.HttpResponses;
 import akka.javasdk.timer.TimerScheduler;
 import com.gwgs.akkaagentic.reminders.application.ReminderAction;
+import com.gwgs.akkaagentic.reminders.application.ReminderStore;
 
 import java.time.Duration;
+import java.time.Instant;
 
 /**
  * Phase 0 probe surface, Java side — the <strong>control</strong>.
@@ -38,6 +40,8 @@ public class JavaReminderProbeEndpoint {
   @Post("/probe/java-schedule/{name}/{ms}")
   public HttpResponse javaSchedule(String name, Integer ms) {
     try {
+      // Recorded first, so the probe observes firing through the same store the capability uses.
+      ReminderStore.record(name, name, Instant.now());
       var deferred = componentClient
           .forTimedAction()
           .method(ReminderAction::fire)
@@ -57,9 +61,10 @@ public class JavaReminderProbeEndpoint {
   @Post("/probe/java-schedule-failing/{name}/{ms}/{maxRetries}")
   public HttpResponse javaScheduleFailing(String name, Integer ms, Integer maxRetries) {
     try {
+      ReminderStore.record(name, name, Instant.now());
       var deferred = componentClient
           .forTimedAction()
-          .method(ReminderAction::failAlways)
+          .method(FailingReminderAction::fail)
           .deferred(name);
       if (maxRetries < 0) {
         timers.createSingleTimer(name, Duration.ofMillis(ms), deferred);

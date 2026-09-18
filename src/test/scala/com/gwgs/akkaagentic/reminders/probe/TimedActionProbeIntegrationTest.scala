@@ -4,7 +4,8 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 import akka.javasdk.testkit.{TestKit, TestKitSupport}
-import com.gwgs.akkaagentic.reminders.application.ReminderLog
+import com.gwgs.akkaagentic.reminders.application.ReminderStore
+import com.gwgs.akkaagentic.reminders.domain.ReminderState
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility
 import org.junit.jupiter.api.{BeforeEach, Test}
@@ -23,7 +24,11 @@ class TimedActionProbeIntegrationTest extends TestKitSupport:
     TestKit.Settings.DEFAULT.withAdditionalConfig("akka.javasdk.agent.googleai-gemini.api-key = n/a")
 
   @BeforeEach
-  def reset(): Unit = ReminderLog.clear()
+  def reset(): Unit = ReminderStore.clear()
+
+  /** Observed through the capability's own store — the probe's ReminderLog instrument is retired. */
+  private def hasFired(name: String): Boolean = ReminderStore.get(name).exists(_.state == ReminderState.Fired)
+  private def attempts(name: String): Int = ReminderStore.get(name).map(_.attempts).getOrElse(0)
 
   private def post(path: String): String =
     httpClient.POST(path).invoke().body().utf8String
@@ -39,7 +44,7 @@ class TimedActionProbeIntegrationTest extends TestKitSupport:
 
     val firedWithin2s =
       try
-        Awaitility.await().atMost(2, TimeUnit.SECONDS).until(() => ReminderLog.timesFired(name) > 0)
+        Awaitility.await().atMost(2, TimeUnit.SECONDS).until(() => hasFired(name))
         true
       catch case _: Throwable => false
     logger.info("Q-A probe >>> did the Scala-scheduled timer fire within 2s? {}", firedWithin2s)
@@ -57,11 +62,11 @@ class TimedActionProbeIntegrationTest extends TestKitSupport:
 
     val fired =
       try
-        Awaitility.await().atMost(5, TimeUnit.SECONDS).until(() => ReminderLog.timesFired(name) > 0)
+        Awaitility.await().atMost(5, TimeUnit.SECONDS).until(() => hasFired(name))
         true
       catch case _: Throwable => false
     logger.info("Q-A control >>> Java-scheduled timer fired? {} (note carried = {})",
-      fired, ReminderLog.noteFor(name))
+      fired, ReminderStore.get(name).map(_.note))
     assertThat(verdict).isNotEmpty()
 
   /** Q-B — cancel from Scala a timer that Java scheduled. If scheduling is Java-only and cancelling is
@@ -75,8 +80,8 @@ class TimedActionProbeIntegrationTest extends TestKitSupport:
 
     // Wait past the delay: if cancellation worked, it never fires.
     Thread.sleep(2500)
-    val firedAnyway = ReminderLog.timesFired(name)
-    logger.info("Q-B probe >>> after waiting past the delay, times fired = {} (0 means cancel worked)",
+    val firedAnyway = hasFired(name)
+    logger.info("Q-B probe >>> after waiting past the delay, fired = {} (false means cancel worked)",
       firedAnyway)
     assertThat(cancelled).isNotEmpty()
 
@@ -87,7 +92,7 @@ class TimedActionProbeIntegrationTest extends TestKitSupport:
     val bounded = unique("bounded")
     post(s"/probe/java-schedule-failing/$bounded/300/2")
     Thread.sleep(6000)
-    val boundedAttempts = ReminderLog.timesFired(bounded)
+    val boundedAttempts = attempts(bounded)
 
     logger.info("Q-D probe >>> attempts with maxRetries=2 after 6s: {}", boundedAttempts)
 
@@ -107,7 +112,7 @@ class TimedActionProbeIntegrationTest extends TestKitSupport:
       post(s"/probe/java-schedule/$name/$ms")
       val fired =
         try
-          Awaitility.await().atMost(10, TimeUnit.SECONDS).until(() => ReminderLog.timesFired(name) > 0)
+          Awaitility.await().atMost(10, TimeUnit.SECONDS).until(() => hasFired(name))
           (System.nanoTime() - start) / 1_000_000
         catch case _: Throwable => -1L
       s"requested ${ms}ms -> fired after ${fired}ms"
