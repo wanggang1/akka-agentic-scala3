@@ -69,7 +69,7 @@ This phase only records where the capability starts.
 
 ### Tests for User Story 1
 
-- [ ] T009 [P] [US1] Write `src/test/scala/com/gwgs/akkaagentic/reminders/api/ReminderSchedulingIntegrationTest.scala` covering SC-001 (pending before the delay, fired after — both observed, not argued) and SC-002 (the note comes back byte-identical). Delays 300 ms–1.5 s per D6; `Awaitility` for the fired assertion, a direct read for the pending one
+- [ ] T009 [P] [US1] Write `src/test/scala/com/gwgs/akkaagentic/reminders/api/ReminderSchedulingIntegrationTest.scala` covering SC-001 (pending before the delay, fired after — both observed, not argued) and SC-002 (the note comes back byte-identical). Delays **1–1.5 s**: D6's 300 ms floor was the *probe's* measurement, but `POST /reminders` rejects anything under `ReminderRequest.MinDelay` (1 s), so HTTP-level tests cannot go lower. `Awaitility` for the fired assertion, a direct read for the pending one
 - [ ] T010 [P] [US1] Write the validation-first cases in `src/test/scala/com/gwgs/akkaagentic/reminders/api/ReminderSchedulingIntegrationTest.scala`: blank note, absent note, `delaySeconds` 0 / negative / absent / over-max each return `400` **and leave nothing scheduled** — assert the store has no entry afterwards, since "rejected" and "rejected without side effects" are different claims (FR-007, SC-005)
 
 ### Implementation for User Story 1
@@ -111,16 +111,22 @@ This phase only records where the capability starts.
 
 **Independent Test**: schedule the always-failing action with `maxRetries = 2`, wait, count the attempts, and read the reminder as `failed`.
 
+> **Ordering note (amended in review, 2026-09-18).** The Java probe is retired *inside* this phase, between
+> the retry test and the pin, so the pin covers the whole capability — `probe/` included — with no
+> exemption. It cannot be retired earlier: the probe is the only route that schedules the always-failing
+> action until T021 provides another, and that route needs a Java method reference.
+
 ### Tests for User Story 3
 
-- [ ] T021 [P] [US3] Write `src/test/scala/com/gwgs/akkaagentic/reminders/application/BoundedRetryIntegrationTest.scala` — SC-006: attempts **counted** (not inspected) and capped, then the reminder reads `failed` and never claims success. Do **not** re-run the 30 s sampling loop: research.md Q-D already records the unbounded series, and re-deriving it every build is 30 s per run for a known number
-- [ ] T022 [P] [US3] Write `src/test/scala/com/gwgs/akkaagentic/reminders/NoUnboundedTimerTest.scala` — read the capability's production sources and fail if any of them calls the **3-argument** `createSingleTimer`. This is capability 12's "the agent names no rule" technique applied to FR-008: a shipping rule that a future edit could quietly break becomes a test, not a comment
+- [ ] T021 [US3] Write `src/test/java/com/gwgs/akkaagentic/reminders/application/BoundedRetryIntegrationTest.java` — SC-006: schedule `FailingReminderAction` through the testkit's own `getTimerScheduler()` with the **4-arg** overload, then assert attempts **counted** (not inspected) and capped, and the reminder reads `failed` and never claims success. **Java, by the same measurement as the endpoint**: scheduling the failing action needs a `FailingReminderAction::…` method reference. It is a *test*, so it does not count against the production quarantine (capability 4 and 11 precedent). Do **not** re-run the 30 s sampling loop — research.md Q-D records the unbounded series
+- [ ] T022 [US3] Retire the Java probe: delete `src/main/java/com/gwgs/akkaagentic/reminders/probe/JavaReminderProbeEndpoint.java` and its descriptor line, since the real `ReminderSchedulingEndpoint.java` now *is* the Java control. Switch `src/main/scala/com/gwgs/akkaagentic/reminders/probe/ScalaScheduleAttempt.scala` to the **4-arg** overload — the evidence it carries is unaffected, because the failure it demonstrates happens in `deferred()`, before `createSingleTimer` is reached. Rewire `src/test/scala/com/gwgs/akkaagentic/reminders/probe/TimedActionProbeIntegrationTest.scala`: Q-A's control → `POST /reminders`; Q-B → `POST /reminders` then Scala `DELETE /reminders/{id}` (itself a Scala cancel of a Java-scheduled timer); Q-D → removed (T021 covers it); Q-E → removed (a measurement log, recorded in research.md, not a regression check)
+- [ ] T023 [US3] Write `src/test/scala/com/gwgs/akkaagentic/reminders/NoUnboundedTimerTest.scala` — read **every** source under the capability's `src/main` tree, `probe/` included, and fail if any calls the **3-argument** `createSingleTimer`. No exemption list: after T022 there is nothing to exempt. This is capability 12's "the agent names no rule" technique applied to FR-008 — a shipping rule a future edit could quietly break becomes a test, not a comment
 
 ### Implementation for User Story 3
 
-- [ ] T023 [US3] Make the failure path reach the caller in `src/main/scala/com/gwgs/akkaagentic/reminders/probe/FailingReminderAction.scala`: it marks the reminder `failed` in `ReminderStore` on its **final** attempt, so an exhausted retry is readable through `GET` rather than only visible in logs (FR-008, SC-006)
-- [ ] T024 [US3] Read `maxRetries` from config in `src/main/resources/application.conf` (`reminders.max-retries`, env-overridable) rather than hard-coding it, so the bound is operable without a recompile — and document that **no value makes it unbounded**
-- [ ] T025 [US3] Run `mvn clean verify`
+- [ ] T024 [US3] Make the failure path reach the caller in `src/main/scala/com/gwgs/akkaagentic/reminders/probe/FailingReminderAction.scala`: it records each attempt via `ReminderStore.recordAttempt` and marks the reminder `failed` on its **final** permitted attempt, so an exhausted retry is readable through `GET` rather than only visible in logs (FR-008, SC-006)
+- [ ] T025 [US3] Read `maxRetries` from config in `src/main/resources/application.conf` (`reminders.max-retries`, env-overridable) rather than hard-coding it, so the bound is operable without a recompile — and document that **no value makes it unbounded**
+- [ ] T026 [US3] Run `mvn clean verify`
 
 **Checkpoint**: all three behavioural stories independently functional; FR-008 is enforced by a test rather than by discipline. **Gate → commit + push.**
 
@@ -132,11 +138,11 @@ This phase only records where the capability starts.
 
 **Independent Test**: read FINDINGS / README / ROADMAP — which half of scheduling is Scala-clean, which is not, why, and how far the Java reaches.
 
-- [ ] T026 [P] [US4] Add **§17** to `README.md` — the capability's own section: the two-endpoint surface, the `curl` walkthrough from quickstart.md, and the headline stated plainly: *one component family, both sides of the method-reference wall, split by operation — you can cancel what you cannot schedule*
-- [ ] T027 [P] [US4] Add the interop entry to `FINDINGS.md` — Q-A's verdict with the **verbatim** diagnostic (`Use dedicated builder for calling Object component method ReminderProbeEndpoint::$anonfun$1`), the Java control that makes it a statement about Scala rather than about our usage, and Q-B's cancel result
-- [ ] T028 [P] [US4] Update `ROADMAP.md` — flip A1 (Timed Action) to merged, and record what it settles about the remaining untouched families
-- [ ] T029 [P] [US4] Add two entries to `docs/sdk-3.6.0-limitations.md` — (a) a pending timer does **not** survive a restart in local dev mode, with the measurement and the explicit scope caveat that a deployed service is untested here and claimed neither way; (b) the 3-argument `createSingleTimer` retried indefinitely in measurement, with the 5 s-interval series
-- [ ] T030 [US4] Amend §16's method-ref-wall paragraph in `README.md` with one sentence pointing to §17 — the wall's shape is now "which client, which method, **and which operation**". Additive only; do not rewrite capability 14's finding
+- [ ] T027 [P] [US4] Add **§17** to `README.md` — the capability's own section: the two-endpoint surface, the `curl` walkthrough from quickstart.md, and the headline stated plainly: *one component family, both sides of the method-reference wall, split by operation — you can cancel what you cannot schedule*
+- [ ] T028 [P] [US4] Add the interop entry to `FINDINGS.md` — Q-A's verdict with the **verbatim** diagnostic (`Use dedicated builder for calling Object component method ReminderProbeEndpoint::$anonfun$1`), the Java control that makes it a statement about Scala rather than about our usage, and Q-B's cancel result
+- [ ] T029 [P] [US4] Update `ROADMAP.md` — flip A1 (Timed Action) to merged, and record what it settles about the remaining untouched families
+- [ ] T030 [P] [US4] Add two entries to `docs/sdk-3.6.0-limitations.md` — (a) a pending timer does **not** survive a restart in local dev mode, with the measurement and the explicit scope caveat that a deployed service is untested here and claimed neither way; (b) the 3-argument `createSingleTimer` retried indefinitely in measurement, with the 5 s-interval series
+- [ ] T031 [US4] Amend §16's method-ref-wall paragraph in `README.md` with one sentence pointing to §17 — the wall's shape is now "which client, which method, **and which operation**". Additive only; do not rewrite capability 14's finding
 
 **Checkpoint**: the interop verdict is public and evidenced. **Gate → commit + push.**
 
@@ -146,9 +152,8 @@ This phase only records where the capability starts.
 
 **Purpose**: retire the scaffolding without losing the evidence, and prove the constraints rather than assert them.
 
-- [ ] T031 Delete `src/main/java/com/gwgs/akkaagentic/reminders/probe/JavaReminderProbeEndpoint.java` — its role as the Java control is now filled by the real `ReminderSchedulingEndpoint.java`, so keeping it would grow the quarantine to two for no evidential gain
 - [ ] T032 **Keep** `src/main/scala/com/gwgs/akkaagentic/reminders/probe/ScalaScheduleAttempt.scala` and trim `ReminderProbeEndpoint.scala` to the single route that exercises it (FR-013). The failed Scala attempt is deliverable evidence — it is the only executable proof that the documented form fails, and a prose claim would decay
-- [ ] T033 Rewrite `src/test/scala/com/gwgs/akkaagentic/reminders/probe/TimedActionProbeIntegrationTest.scala` down to the evidence it still carries: the Scala schedule attempt's runtime failure (Q-A) and the Scala cancel of a Java-scheduled timer (Q-B). Drop what the US1/US2 tests now cover, so the suite proves each thing once
+- [ ] T033 Final pass over `src/test/scala/com/gwgs/akkaagentic/reminders/probe/TimedActionProbeIntegrationTest.scala` after T022's rewiring: it should now carry only the evidence nothing else carries — Q-A's Scala schedule failing at run time. Remove anything the US1/US2/US3 tests already prove, so the suite proves each thing once
 - [ ] T034 [P] Add `src/test/scala/com/gwgs/akkaagentic/reminders/api/JavaQuarantineTest.scala` — capability 14's shape: assert **exactly one** `.java` under `src/main/java/com/gwgs/akkaagentic/reminders/`, and that it is the scheduling endpoint. If it ever fails, the wall reaches further than measured, which is a finding to record rather than a line to update (FR-013)
 - [ ] T035 [P] Verify FR-010 / SC-007 mechanically: `git diff --stat main -- src/main/scala/com/gwgs/akkaagentic src/main/java/com/gwgs/akkaagentic src/test ':!*reminders*'` must be **empty**. Prose cannot prove this and a diff can
 - [ ] T036 Walk `specs/017-timed-action/quickstart.md` against a running service (`mvn compile exec:java`) — every command and every response shape, including the `409` on a second cancel and the `404` after a restart. Correct the doc where reality differs; do not correct reality to match the doc
@@ -165,9 +170,9 @@ This phase only records where the capability starts.
 - **Phase 2 (Foundational)**: depends on Phase 1 — **blocks every user story**
 - **Phase 3 (US1)**: depends on Phase 2. The MVP
 - **Phase 4 (US2)**: depends on Phase 2; shares `ReminderEndpoint.scala` with US1, so T018 follows T013
-- **Phase 5 (US3)**: depends on Phase 2; independent of US2
+- **Phase 5 (US3)**: depends on Phase 3 **and** Phase 4 — T022 rewires the probe test onto `POST /reminders` and `DELETE /reminders/{id}`, so both must exist before the Java probe can be retired
 - **Phase 6 (US4)**: depends on the behaviour being final — documentation written earlier would document intentions
-- **Phase 7 (Polish)**: depends on all of the above; T031–T033 must not run before US1/US2 tests cover what the probe used to
+- **Phase 7 (Polish)**: depends on all of the above; T032–T033 must not run before US1–US3 tests cover what the probe used to (the Java probe itself is already retired in T022)
 
 ### Within Each Story
 
@@ -178,7 +183,7 @@ This phase only records where the capability starts.
 
 - **Phase 2**: T003, T004, T005, T006 are four separate files — all parallel; T007 then T008
 - **Phase 3**: T009 and T010 in parallel; T012 (Java) and T013 (Scala) touch different files and can proceed together once T011 lands
-- **Phase 6**: T026–T029 are four different documents — fully parallel
+- **Phase 6**: T027–T030 are four different documents — fully parallel
 - **Phase 7**: T034 and T035 are independent of each other
 
 ---
@@ -216,6 +221,6 @@ Task: "Unit-test the state machine in src/test/scala/com/gwgs/akkaagentic/remind
 
 ## Notes
 
-- 38 tasks: 2 setup, 6 foundational, 7 US1, 5 US2, 5 US3, 5 US4, 8 polish
+- 38 tasks: 2 setup, 6 foundational, 7 US1, 5 US2, 6 US3, 5 US4, 7 polish
 - No model anywhere, mocked or live — this is the project's second fully model-free capability
 - No new dependency; the descriptor gains two `http-endpoint` lines and one `timed-action` line
