@@ -12,9 +12,16 @@ import akka.javasdk.http.HttpResponses
 import akka.javasdk.timer.TimerScheduler
 import com.gwgs.akkaagentic.reminders.application.ReminderAction
 
-/** Phase 0 probe surface, Scala side. Every route answers `200` with a **verdict string** rather than
-  * failing, so a test can read what happened instead of only that something went wrong — the shape
-  * capabilities 12–14 used for their probes.
+/** The **executed** Q-A evidence (FR-013): a Scala caller attempting to schedule a timed action.
+  *
+  * It answers `200` with a **verdict string** rather than failing, so a test can read *what* happened —
+  * the shape capabilities 12–14 used for their probes. The verdict is the run-time failure quoted in
+  * specs/017 research Q-A, and it names this class's lambda, `ReminderProbeEndpoint::$anonfun$1`. That is
+  * why the lambda stays inlined here rather than delegating to `ScalaScheduleAttempt` (the compile-time
+  * half of the same evidence): moving it would change the class the diagnostic names.
+  *
+  * Phase 0 also had a `/probe/scala-cancel` route here (Q-B). It was retired once `DELETE /reminders/{id}`
+  * — itself a Scala cancel of a Java-scheduled timer — made it redundant.
   */
 @HttpEndpoint
 @Acl(allow = Array(new Acl.Matcher(principal = Acl.Principal.INTERNET)))
@@ -34,16 +41,6 @@ class ReminderProbeEndpoint(componentClient: ComponentClient, timers: TimerSched
         timers.createSingleTimer(name, Duration.ofMillis(ms.toLong), 1, deferred)
       } match
         case Success(_) => "SCHEDULED"
-        case Failure(t) => s"FAILED: ${ReminderProbeEndpoint.chain(t)}"
-    )
-
-  /** Q-B — cancel from Scala. `delete` is keyed on a plain string, so nothing here should touch the
-    * wall; whether it actually stops a timer that **Java** scheduled is the measurement. */
-  @Post("/probe/scala-cancel/{name}")
-  def scalaCancel(name: String): HttpResponse =
-    HttpResponses.ok(
-      Try(timers.delete(name)) match
-        case Success(_) => "CANCELLED"
         case Failure(t) => s"FAILED: ${ReminderProbeEndpoint.chain(t)}"
     )
 

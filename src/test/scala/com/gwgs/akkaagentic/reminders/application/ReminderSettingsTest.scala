@@ -2,7 +2,7 @@ package com.gwgs.akkaagentic.reminders.application
 
 import scala.util.{Failure, Try}
 
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{ConfigException, ConfigFactory}
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -23,10 +23,12 @@ class ReminderSettingsTest:
   @Test
   def valuesOutsideTheRangeAreRefusedNotClamped(): Unit =
     // Zero and negatives are where "unbounded" or "never" conventions hide; refuse them outright.
+    // Refused as a CONFIG error, not an IllegalArgumentException: the SDK reports the latter from a
+    // failing endpoint constructor as 400, blaming the caller for the server's configuration.
     // (Asserted via Try rather than assertThatThrownBy: AssertJ's chained methods return SELF, which
     // Scala cannot resolve past the first call — the same edge as describedAs.)
     for n <- List(0, -1, 11) do
       Try(ReminderSettings.maxRetries(withMaxRetries(n))) match
-        case Failure(e: IllegalArgumentException) =>
+        case Failure(e: ConfigException.BadValue) =>
           assertThat(e.getMessage).contains(ReminderSettings.MaxRetriesKey)
         case other => throw AssertionError(s"max-retries = $n should be refused, got $other")

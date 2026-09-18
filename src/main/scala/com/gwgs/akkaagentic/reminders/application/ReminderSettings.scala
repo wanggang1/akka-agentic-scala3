@@ -1,6 +1,6 @@
 package com.gwgs.akkaagentic.reminders.application
 
-import com.typesafe.config.Config
+import com.typesafe.config.{Config, ConfigException}
 
 /** The capability's one operational setting, read in one place so the timer and the action cannot
   * disagree about it.
@@ -18,10 +18,15 @@ object ReminderSettings:
   val MaxRetriesCeiling: Int = 10
 
   /** Reads and checks the bound. Out-of-range values are refused outright rather than clamped — a
-    * silently corrected setting is one an operator believes is in force when it is not. */
+    * silently corrected setting is one an operator believes is in force when it is not.
+    *
+    * **Why `ConfigException.BadValue` and not `require`** — found walking the quickstart live. `require`
+    * throws `IllegalArgumentException`, and the SDK reports an endpoint that fails to construct with one
+    * as **`400 Bad Request`**: a server misconfiguration told to the *caller* as their mistake, with an
+    * internal setting's name in the body. A bad setting is the server's fault, and Typesafe Config has an
+    * exception type for exactly this. */
   def maxRetries(config: Config): Int =
     val value = config.getInt(MaxRetriesKey)
-    require(
-      value >= 1 && value <= MaxRetriesCeiling,
-      s"$MaxRetriesKey must be between 1 and $MaxRetriesCeiling, was $value")
+    if value < 1 || value > MaxRetriesCeiling then
+      throw ConfigException.BadValue(MaxRetriesKey, s"must be between 1 and $MaxRetriesCeiling, was $value")
     value

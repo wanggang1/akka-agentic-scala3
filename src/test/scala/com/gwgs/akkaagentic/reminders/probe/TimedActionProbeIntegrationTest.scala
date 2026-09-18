@@ -1,30 +1,25 @@
 package com.gwgs.akkaagentic.reminders.probe
 
 import java.util.UUID
-import java.util.concurrent.TimeUnit
 
-import akka.http.javadsl.model.ContentTypes
 import akka.javasdk.testkit.{TestKit, TestKitSupport}
-import com.gwgs.akkaagentic.reminders.api.ReminderSchedulingEndpoint.ScheduledReminder
 import com.gwgs.akkaagentic.reminders.application.ReminderStore
 import com.gwgs.akkaagentic.reminders.domain.ReminderState
 import org.assertj.core.api.Assertions.assertThat
-import org.awaitility.Awaitility
 import org.junit.jupiter.api.{BeforeEach, Test}
 import org.slf4j.LoggerFactory
 
-/** Phase 0's discovery probe, kept as evidence after the capability replaced its scaffolding (FR-013).
+/** Phase 0's discovery probe, reduced to the one piece of evidence nothing else carries (FR-013): **a
+  * Scala caller cannot schedule a timed action.**
   *
-  * It now answers the two interop questions **against the real surface**, so the evidence and the
-  * shipped code cannot drift apart:
-  *   - **Q-A** — a Scala caller cannot schedule. The Scala attempt still runs through
-  *     `/probe/scala-schedule` and its run-time failure is logged verbatim; the Java control is now the
-  *     production `POST /reminders` itself.
-  *   - **Q-B** — a Scala caller can cancel what Java scheduled: `POST /reminders` (Java) then
-  *     `DELETE /reminders/{id}` (Scala).
-  *
-  * Q-D (the retry contract) moved to `BoundedRetryIntegrationTest`; Q-E (the smallest reliable delay)
-  * was a measurement log rather than a regression check, and lives in research.md.
+  * The rest of what this class used to measure now lives in the tests that ship the capability, so the
+  * suite proves each thing once:
+  *   - Q-A's **Java control** — the same action, scheduled from Java, fires — is
+  *     `ReminderSchedulingIntegrationTest`: every reminder there is scheduled by the Java endpoint.
+  *   - **Q-B** — Scala cancels a timer Java scheduled — is `ReminderCancellationIntegrationTest`.
+  *   - **Q-D** — the retry bound — is `BoundedRetryIntegrationTest`.
+  *   - **Q-C** (durability) and **Q-E** (timing) were measurements, not regression checks; they are
+  *     recorded in specs/017 research.md.
   */
 class TimedActionProbeIntegrationTest extends TestKitSupport:
 
@@ -36,47 +31,18 @@ class TimedActionProbeIntegrationTest extends TestKitSupport:
   @BeforeEach
   def reset(): Unit = ReminderStore.clear()
 
-  private def hasFired(id: String): Boolean = ReminderStore.get(id).exists(_.state == ReminderState.Fired)
-
-  private def scheduleFromJava(note: String): String =
-    httpClient
-      .POST("/reminders")
-      .withRequestBody(ContentTypes.APPLICATION_JSON, s"""{"note":"$note","delaySeconds":1}""".getBytes("UTF-8"))
-      .responseBodyAs(classOf[ScheduledReminder])
-      .invoke()
-      .body()
-      .reminderId
-
-  /** Q-A — can a Scala caller schedule at all? It compiles; this records what happens at run time. */
+  /** Q-A — the documented scheduling form, written as a Scala lambda, compiles and then fails at run
+    * time. Asserted, not only logged: if a future SDK let Scala schedule, this is the test that says so. */
   @Test
-  def recordWhetherScalaCanSchedule(): Unit =
+  def aScalaCallerCannotScheduleATimedAction(): Unit =
     val name = s"scala-${UUID.randomUUID().toString.take(8)}"
     val verdict = httpClient.POST(s"/probe/scala-schedule/$name/300").invoke().body().utf8String
     logger.info("Q-A probe >>> Scala schedule verdict: {}", verdict)
 
-    // The verdict IS the evidence, so it is asserted rather than only logged: the failure happens in
-    // `deferred()`, and it names the synthetic lambda (research Q-A).
+    // The failure happens in `deferred()` and names the synthetic lambda (research Q-A).
     assertThat(verdict).startsWith("FAILED: java.lang.IllegalArgumentException")
-    assertThat(verdict).contains("$anonfun$")
+    assertThat(verdict).contains("ReminderProbeEndpoint::$anonfun$")
 
+    // And nothing was scheduled: no timer fires for it.
     Thread.sleep(1000)
-    assertThat(hasFired(name)).isFalse()
-
-  /** Q-A control — the same action, scheduled from Java, fires. That is what makes Q-A a statement
-    * about the Scala caller rather than about our usage. */
-  @Test
-  def theJavaPathIsTheControl(): Unit =
-    val id = scheduleFromJava("java-control")
-    Awaitility.await().atMost(5, TimeUnit.SECONDS).until(() => hasFired(id))
-    logger.info("Q-A control >>> Java-scheduled timer fired; note carried = {}", ReminderStore.get(id).map(_.note))
-
-  /** Q-B — ONE FAMILY, BOTH SIDES OF THE WALL: Scala cancels a timer Java scheduled. */
-  @Test
-  def scalaCancelsATimerJavaScheduled(): Unit =
-    val id = scheduleFromJava("cancel-me")
-    val status = httpClient.DELETE(s"/reminders/$id").invoke().status().intValue()
-    assertThat(status).isEqualTo(200)
-
-    Thread.sleep(2000)
-    assertThat(hasFired(id)).isFalse()
-    logger.info("Q-B probe >>> Java-scheduled, Scala-cancelled: fired after the delay? {}", hasFired(id))
+    assertThat(ReminderStore.get(name).exists(_.state == ReminderState.Fired)).isFalse()

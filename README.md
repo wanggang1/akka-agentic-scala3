@@ -2382,6 +2382,12 @@ curl -i -X POST http://localhost:9000/reminders \
 REMINDERS_MAX_RETRIES=3 mvn compile exec:java
 ```
 
+An out-of-range value is refused as the **server's** fault: `POST /reminders` answers `500` with a
+correlation id (`ConfigException$BadValue: Invalid value at 'reminders.max-retries'` in the log), not a
+`400` that would tell the caller they sent something wrong — see
+[`docs/sdk-3.6.0-limitations.md`](docs/sdk-3.6.0-limitations.md) §7d for why that distinction had to be
+engineered rather than assumed.
+
 > **A restart loses pending reminders — by measurement, and by design.** A pending timer did not survive
 > a restart in local dev mode, so reminder state lives in process to match: after a restart, `GET` on an
 > old id is `404` rather than a stale `pending` that can no longer fire. A deployed service has a real
@@ -2390,6 +2396,15 @@ REMINDERS_MAX_RETRIES=3 mvn compile exec:java
 > **Where the interop line falls.** `POST` is the capability's one Java class, because scheduling needs a
 > Java method reference; `GET`, `DELETE` and the timed action itself are Scala (§17). You can cancel from
 > Scala a reminder that could only have been scheduled from Java.
+>
+> *Verified live* (`mvn compile exec:java`, no model needed), every quickstart command as written. A 5 s
+> reminder read `pending` immediately and `fired` (with `firedAt`) at 6 s. A 30 s reminder cancelled at
+> once still read `cancelled` 31 s later, and the service log showed its action **never executed** — the
+> Scala `DELETE` removed the Java-scheduled timer itself. A second cancel was `409 {"state":"cancelled"}`,
+> cancelling the fired one `409 {"state":"fired"}`, an unknown id `404`; a blank note and a zero delay
+> were `400` with the domain's exact messages. After a restart the fired reminder's id answered `404`, as
+> documented. The walk also caught a real defect, now fixed: an out-of-range `REMINDERS_MAX_RETRIES`
+> first surfaced as `400` (see above); it is now `500`, and `REMINDERS_MAX_RETRIES=3` is honoured.
 
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.

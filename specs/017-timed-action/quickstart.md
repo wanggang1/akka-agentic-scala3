@@ -83,6 +83,12 @@ Fully offline and deterministic. Timer firing is observed by waiting 1–1.5 s (
 invokes the action *directly*, which proves what the action does but never that a timer fired, so the
 timer itself has to be waited for. Cancellation costs one wait past a delay to prove a negative.
 
+Measured on the final `mvn clean verify` (2026-09-18): the whole suite takes **3:42**, and capability 15's
+tests **~29 s** of it — unit tests effectively zero, integration tests 3.6 s (scheduling), 5.8 s
+(cancellation), 3.7 s (probe) and **15.8 s** (the retry bound). About 18.5 s of that is deliberate
+waiting; the largest single piece is the retry test's settle, three times the ~3 s backoff it observes,
+because proving that work *stopped* means outlasting the retry that did not come.
+
 ## Where the interop line falls
 
 **Scheduling is Java, cancelling is Scala** — one component family, both sides of the method-reference

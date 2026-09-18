@@ -346,3 +346,30 @@ the timer's bound at or above its own.
 
 **Re-test on upgrade**: whether `CommandContext` gains an attempt/retry count, or whether exhaustion
 becomes observable. Either would let the action stop counting for itself.
+
+### 7d. An endpoint constructor that throws `IllegalArgumentException` is reported as `400`
+
+Not timer-specific — found while walking capability 15's quickstart live, and it applies to any endpoint.
+`ReminderSchedulingEndpoint` reads `reminders.max-retries` in its constructor. With the value validated by
+Scala's `require` (which throws `IllegalArgumentException`) and set out of range, a `POST` answered:
+
+```text
+HTTP/1.1 400 Bad Request
+requirement failed: reminders.max-retries must be between 1 and 10, was 0
+```
+
+and the log said `ERROR … Failed to create instance of HTTP Endpoint [...ReminderSchedulingEndpoint]`.
+So a **server misconfiguration was reported to the caller as the caller's mistake**, with an internal
+setting's name in the body. Throwing `com.typesafe.config.ConfigException.BadValue` instead produced
+`500 Internal Server Error` with a correlation id (the detail appears only in dev mode).
+
+| Exception from the endpoint constructor | Caller sees |
+|---|---|
+| `IllegalArgumentException` (e.g. `require`) | **`400`**, message in the body |
+| `ConfigException.BadValue` | `500`, correlation id |
+
+**Rule of thumb**: validate *configuration* with a config exception, never with `require` — `require` is
+right for arguments a caller controls, which is exactly the meaning the SDK gives it. **Re-test on
+upgrade**: whether construction failures stop being mapped through the request-error path. Endpoints are
+constructed per request, so this surfaces on the first request, not at startup; startup validation would
+need `ServiceSetup`, which is shared across capabilities.
