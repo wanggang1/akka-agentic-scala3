@@ -72,10 +72,13 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 > verified by mechanism, not by watching it happen.
 >
 >
-> **⏭️ Next:** undecided — capability 14 is the last of the four candidates from PR #21, so the roadmap
-> is open again. The forks this capability recorded are the obvious seeds: a streaming **grounded**
-> answer (retrieval before the stream, and the citation problem it creates), or **SSE** framing so a
-> mid-stream failure can describe itself.
+> **⏭️ Next:** undecided — capability 14 was the last of the four candidates from PR #21, so the roadmap
+> is open again. "Candidate next capabilities" below now lists two kinds and orders them: **four SDK
+> component families never built here** (Timed Action, Consumer, Event Sourced Entity, gRPC endpoint)
+> and **five forks recorded when they were declined**. Recommended run: **A1 Timed Action** (smallest,
+> and the one interop outcome nobody can call in advance) → **A2 Consumer** (largest coverage gap, and
+> it carries cap-7's observability follow-up with it) → **B1 session compaction** (the only candidate
+> that fixes a known defect instead of adding surface).
 >
 > Capabilities 1–14 are **✅ done and merged**; 5–14 were exploratory follow-ups beyond the original four.
 >
@@ -212,32 +215,63 @@ Not on the four-capability path, captured so they're not forgotten:
 
 ## Candidate next capabilities
 
-The roadmap is **open** — caps 1–13 are merged, so **guardrails and evaluation below are done** (PR #25,
-PR #27) and are kept only for the framing they record. **Streaming is the standing pick for cap-14.**
-Each candidate is framed by what it explores and the project's signature question:
-*is it Scala-clean, or does it hit the method-reference wall?* (See [`FINDINGS.md`](FINDINGS.md) for the
-wall — the single `dynamicCall` property that has predicted every Scala-vs-Java outcome so far.) None is
-specced yet; pick one and start via `/akka.specify`.
+The roadmap is **open**: capabilities 1–14 are merged, and the three candidates this section used to
+list were all built — **guardrails** (cap-12, PR #25), **evaluation** (cap-13, PR #27) and **streaming**
+(cap-14, PR #29). Worth recording before they were deleted: two of their three interop bets were
+*wrong*, and instructively so. Guardrails were predicted to hit the bytecode-shape hazard and every
+Scala class form loaded instead; streaming was predicted Scala-clean-with-friction and turned out to
+split the agent client in half. **The interop bet is the part that keeps being worth writing down.**
 
-| Candidate | What it explores | Fit in this sandbox | Interop bet |
+Candidates now come in two kinds, and they answer different questions. None is specced; pick one and
+start with `/akka.specify` (never by writing code — see
+[`AGENTS.md`](AGENTS.md) and the SDD workflow).
+
+### A. Untouched component families — the project's own axis
+
+Fourteen capabilities in, **four SDK component families have never been built here**. This project
+exists to answer "which of them can be authored in Scala 3, and what decides it", so these are the
+candidates that still extend the map rather than decorate it.
+
+| # | Candidate | What it explores | Interop bet |
 |---|---|---|---|
-| **Guardrails** | SDK-enforced constraints around a model call — input (reject/sanitize a prompt) and output (block/redact/rewrite a reply): moderation, PII filtering, jailbreak/injection detection, topic allow/deny, "must be grounded" | Harden an existing agent (e.g. cap-8 `DocsAgent` / cap-10 `McpClientAgent`) — block off-policy input, refuse ungrounded output | **Likely Scala-clean** (class/annotation-registered like tools) — verify it's not method-ref wired. Offline-testable via `TestModelProvider` scripting a violating reply |
-| **Evaluation / LLM-as-judge** | A second model call scores a first agent's output against criteria (relevance, groundedness, tone, correctness) — the automated quality-gate / regression-test pattern | A `JudgeAgent` scoring whether `DocsAgent`'s answer is *actually* grounded in retrieved passages — attacks cap-8's **soft-grounding** gap (we instruct grounding but don't prove it) | **Scala-clean** (just another `Agent`). Testing caveat: judgment is model-driven → offline only mocks the verdict, real judging is live (like cap-7's delegation) |
-| **Streaming** | Stream the reply token-by-token — `StreamEffect` instead of `Effect<T>`, endpoint emitting SSE / chunked responses (the "typing" UX) | A streaming variant of cap-4 chat or cap-10 grounded-ask | **Unknown — highest novelty.** Stresses the HTTP-endpoint-as-framework-boundary finding; Scala `Source`/stream interop with the SDK streaming API is the open question. Highest-risk, highest-learning pick |
+| **A1** | **Timed Action** | Scheduling: `TimerScheduler.createSingleTimer(name, delay, deferred)`, plus the rescheduling-on-failure hazard AGENTS.md warns about. A natural fit is a delayed follow-up on cap-5's approval gate, or expiring a stale case. | **The sharpest bet left, and genuinely unpredictable.** The `deferred` argument is built from the component client — if it is a `DeferredCall` produced from a **method reference**, the wall bites a family we have never tested; if it is id-keyed like `TaskClient`, it is Scala-clean. Nothing in the project so far predicts which. New descriptor key `timed-action`. |
+| **A2** | **Consumer** (`@Consume.From*` / `@Produce.ToTopic`) | The largest remaining hole: reacting to entity events or a topic, and publishing to one. It is also where cap-13's "there is **no** `Consume.FromAgent`" finding came from — this is that family, approached from the side that *does* exist. Natural fit: consume cap-6's `TodoEntity` events, or finally give cap-7's delegation **ground-truth** observability. | Component likely **Scala-clean** (`@Consume` is annotation-keyed, like `@McpEndpoint`). The open question is the **handler's event type**: a Scala sealed trait with `@TypeName` has never crossed the internal mapper (§3). New descriptor key `consumer`. |
+| **A3** | **Event Sourced Entity, authored by us in Scala** | Cap-6 has a *key-value* entity, in Java. An event-sourced one means a sealed event hierarchy, `applyEvent`, and snapshots — the persistence model [`docs/akka-persistence-models.md`](docs/akka-persistence-models.md) describes but the repo has never written. | **Two known walls collide.** The entity *client* is method-ref-only, so the caller is Java (cap-11's shape); events cross the internal mapper, so they must be Java-*shaped*. The new question is whether a **Scala 3 `enum` or sealed trait** survives that mapper at all, or whether `@TypeName` + Jackson polymorphism forces Java-*authored* events. New descriptor key `event-sourced-entity`. |
+| **A4** | **gRPC endpoint** | A `.proto` in `src/main/proto` and a Scala class implementing the protoc-generated **Java** interface, with `toApi` converters. | **A different axis from the wall: build ordering.** Generated Java sources must interleave with cap-11's scalac-then-javac arrangement (§13 R3) — the one part of this build that has already broken twice. Lower interop novelty, higher build risk. |
 
-**Views** is no longer a candidate — it was built as **capability 11** (see the path table above), and it
-closed the biggest component-coverage gap while overturning its own interop bet: the prediction was
-"likely Java", but only the *caller* turned out to be Java while the View component stayed Scala.
+### B. Forks recorded along the way
 
-**Strongest remaining pick for this project's theme (Scala-on-Java-SDK interop):** **guardrails** — it is
-the one candidate that wraps a model call with SDK-registered machinery, so it directly re-tests the
-"is it `Class`-keyed or method-ref-keyed?" question on a new surface. **Streaming** is the genuinely
-unknown interop territory; **guardrails** and **eval/LLM-judge** harden or extend existing agents and are
-likely Scala-clean.
+Each of these was written down *when it was declined*, with the reason. They are smaller, and only the
+first fixes something that is actually wrong today.
 
-Relevant docs already in-repo: `akka-context/sdk/agents/guardrails.html.md`,
-`akka-context/sdk/agents/llm_eval.html.md`, `akka-context/sdk/agents/streaming.html.md`,
-`akka-context/sdk/views.html.md`.
+| # | Fork | Where it was recorded | Why it was declined then |
+|---|---|---|---|
+| **B1** | **Session compaction** — summarise old turns instead of keeping full history | cap-6 (README §8, live caveat) | `readLast(N)` orphans tool-call pairs and breaks tool-using sessions, so cap-6 keeps **full history** and accepts unbounded token growth. Compaction is the real bound. **The only candidate that closes a known defect rather than adding surface.** |
+| **B2** | **SSE framing for the streaming surface** | cap-14 (research, contract, `docs/streaming-vs-request-response.md`) | Deliberately not taken: it would make a pre-token failure self-describing instead of a normally-completed empty `200`, but it changes the wire format for **every** client, for a failure path. |
+| **B3** | **Delegation observability via runtime notifications** | cap-7 (D6) | `consultedSpecialists` is **model self-reported** and small models under-report it. Ground truth needs the runtime's notification stream — which pairs naturally with **A2**, and is the reason to consider them together. |
+| **B4** | **Usage-accurate citations** | cap-8 (README, "Future work") | Cap-8 cites what was **retrieved**, not what was **used**. Fixing it means asking the model which sources it used — reintroducing exactly the self-report unreliability cap-8 was built to avoid. A genuine tension, not a free upgrade. |
+| **B5** | **Streaming + grounded answer** | cap-14 (spec, Assumptions) | Forked out of cap-14 on purpose: a tool call *inside* a stream is undocumented on this SDK, and citations cannot honestly follow text already sent. |
+
+### How these are ordered, and why
+
+**A1 → A2 → B1** is the recommended run.
+
+- **A1 (Timed Action) first** because it is small, it is a whole untouched family, and its outcome is
+  the one nobody can call in advance. Cap-14 proved the wall still holds surprises fourteen capabilities
+  in, and an unpredictable answer is worth more here than a broad one.
+- **A2 (Consumer) next** because it is the biggest coverage gap, it composes with entities already in the
+  repo, and it would let **B3** finally land as a by-product rather than as its own capability.
+- **B1 (compaction) whenever correctness matters more than coverage.** It is the only item on either
+  list that fixes something the project knows is broken.
+- **A3** is the most *interesting* remaining question (can Scala 3 sealed traits cross the internal
+  mapper?) but the least *new* shape — two walls already understood, meeting. Good third pick.
+- **A4 and B2–B5 are deliberately last.** A4 risks the build for little interop news; B2 and B5 are
+  design problems rather than interop ones; B4 reopens a tension cap-8 settled on purpose.
+
+Relevant docs already in-repo: `akka-context/sdk/timed-actions.html.md`,
+`akka-context/sdk/consuming-producing.html.md`, `akka-context/sdk/event-sourced-entities.html.md`,
+`akka-context/sdk/grpc-endpoints.html.md`, and
+`akka-context/sdk/agents/memory.html.md` for B1.
 
 ### Evaluated, not pursued (as an agent-safety capability)
 
