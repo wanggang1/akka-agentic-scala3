@@ -158,7 +158,7 @@ This phase only records where the capability starts.
 - [x] T035 [P] Verify FR-010 / SC-007 mechanically: `git diff --stat main -- src/main/scala/com/gwgs/akkaagentic src/main/java/com/gwgs/akkaagentic src/test ':!*reminders*'` must be **empty**. Prose cannot prove this and a diff can
 - [x] T036 Walk `specs/017-timed-action/quickstart.md` against a running service (`mvn compile exec:java`) — every command and every response shape, including the `409` on a second cancel and the `404` after a restart. Correct the doc where reality differs; do not correct reality to match the doc
 - [x] T037 Final `mvn clean verify` from a clean tree, and record the suite's total wall-clock cost plus the portion attributable to this capability's unavoidable real-time waits (FR-011, SC-009)
-- [ ] T038 Draft the PR body (handed to the user directly — no file committed, per this project's no-`gh`-CLI workflow) — the finding first (the family split by operation), then the feature, then the boundaries: no durability, bounded retries by construction, and what the live walkthrough did and did not cover
+- [x] T038 Draft the PR body (handed to the user directly — no file committed, per this project's no-`gh`-CLI workflow) — the finding first (the family split by operation), then the feature, then the boundaries: no durability, bounded retries by construction, and what the live walkthrough did and did not cover
 
 ---
 
