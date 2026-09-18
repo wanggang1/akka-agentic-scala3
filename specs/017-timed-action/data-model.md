@@ -82,3 +82,25 @@ This is the same "least-interop" position capability 4 holds: **no Java-shaped t
 capability**, which is worth noting given that the capability nonetheless contains a Java class. The
 Java is there for the *method reference*, not for serialization — two different walls, and only one
 of them bites here.
+
+---
+
+## Addendum — 2026-09-18, the store as shipped
+
+§3 above describes a `ConcurrentHashMap`-backed store with `record(id, note, delay)`. What shipped, after
+PR review asked for idiomatic Scala without mutable state:
+
+- **The rules moved into the domain**, as one immutable value, `Reminders(byId: Map[String, Reminder])`.
+  Every operation returns the next value *and* what happened — `fire`, `fail`, `attempt`:
+  `(Reminders, Option[Reminder])`; `cancel`: `(Reminders, CancelOutcome)` — and never changes the value
+  it was called on. A no-op returns the identical value.
+- **`CancelOutcome` moved to the domain** with the rules that produce it: `Cancelled(reminder)`,
+  `AlreadyTerminal(reminder)`, `Unknown`.
+- **`ReminderStore` holds exactly one `AtomicReference[Reminders]`** and commits each rule with a
+  compare-and-set, retrying against the winner on a lost race. Because a rule may be re-run, it must be
+  pure — timestamps are taken once, before the retry loop.
+- **`record(id, note)`** — the unused `delay` parameter is gone.
+- **`attempts`** counts invocations of the work: `fired`, `failed` and `attempted` each add one. It is
+  what makes the retry bound demonstrable by count (SC-006).
+
+Terminal still wins: whichever transition commits first stands, and the loser is told what did.

@@ -279,3 +279,70 @@ no value can replace text the caller has already read.
 client interprets a short body), not in the effect. Worth re-checking if a later SDK adds a stream-level
 failure hook.
 
+
+---
+
+## 7. Timed actions (capability 15, measured on 3.6.3)
+
+Three behaviours to re-test on any SDK upgrade. **None is Scala-specific** — a Java service meets all three
+identically. (The Scala-specific finding, that *scheduling* is method-reference-only while *cancelling* is
+not, is structural and lives in [`FINDINGS.md`](../FINDINGS.md), not here.)
+
+### 7a. A pending timer does not survive a restart in local dev mode
+
+| Step | Time |
+|---|---|
+| scheduled a 60 s timer, `-Dakka.javasdk.dev-mode.persistence.enabled=true` | 09:52:17 |
+| killed the service 10 s later, `db.mv.db` present | 09:52:27 |
+| restarted on the same store, healthy | 09:52:35 |
+| watched 100 s, past the 09:53:17 due time | **never fired** |
+
+A first attempt that killed the service in the same second as scheduling was **discarded**, because "not
+durable" could then have meant "never persisted". Capabilities 3 and 5 observed *tasks* surviving under the
+same flag, so this is specifically about **timers**.
+
+**Scope, stated rather than glossed:** local dev mode with the H2 store only. A deployed service has a real
+datastore and may behave differently; that is **untested here and claimed neither way**.
+
+**What depends on it**: capability 15 keeps reminder state in process *because* of this — durable state over
+a volatile timer would read `pending` for ever. If an upgrade (or a deployed test) shows timers surviving,
+revisit that decision: the state would then have to survive too.
+
+### 7b. The three-argument `createSingleTimer` retries indefinitely
+
+`createSingleTimer(name, delay, deferred)` on work that always fails, sampled every 5 s:
+
+```text
+5s=2  10s=3  15s=3  20s=3  25s=4  30s=4   — still climbing, gaps widening
+```
+
+A 6-second observation had read "2 attempts, bounded" — **wrongly**; the gaps simply widen. The
+four-argument `createSingleTimer(name, delay, maxRetries, deferred)` with `maxRetries = 2` stopped at 2
+invocations. AGENTS.md's warning ("handle errors in Timed Actions to avoid infinite rescheduling") is
+therefore not theoretical.
+
+**Consequence**: capability 15 uses the four-argument form everywhere, and `NoUnboundedTimerTest` fails the
+build on any three-argument call under the capability. Re-test the default on upgrade; if it becomes
+bounded, the test can relax — but the explicit bound should stay.
+
+### 7c. An exhausted timer is silent, and an action is not told its attempt number
+
+Two gaps that combine badly:
+
+1. When a timer exhausts its `maxRetries`, **nothing is recorded or signalled** — the work simply stops
+   being attempted.
+2. A timed action has **no way to know which attempt it is on**: `TimedAction.commandContext()` returns a
+   `CommandContext` carrying only `tracing()` and metadata; nothing attempt- or retry-shaped exists in
+   `akka.javasdk.timedaction` or `akka.javasdk.timer`.
+
+So "bounded" is not enough on its own: bounded *and silent* leaves any state the work was meant to update
+exactly where it was — for capability 15, a reminder reading `pending` for ever. **Workaround**: the action
+counts its own attempts (in the store) and, on the last permitted one, records the failure and returns
+`effects().done()` instead of throwing; the timer's `maxRetries` stays as a backstop.
+
+The SDK does not document how `maxRetries` counts (whether `2` means two attempts or two *re*-tries).
+Measured: `maxRetries = 2` produced **two** invocations. The workaround does not depend on that — it sets
+the timer's bound at or above its own.
+
+**Re-test on upgrade**: whether `CommandContext` gains an attempt/retry count, or whether exhaustion
+becomes observable. Either would let the action stop counting for itself.

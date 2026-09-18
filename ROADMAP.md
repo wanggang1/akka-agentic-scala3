@@ -7,7 +7,25 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 ## Where we are
 
-> **You are here:** Feature 14 (streaming responses) — **✅ merged to `main` 2026-09-12 (PR #29)**
+> **You are here:** Feature 15 (scheduled reminders — **Timed Action**, candidate A1) — **🚧 in progress on
+> branch `017-timed-action`** ([`specs/017-timed-action`](specs/017-timed-action/)). `POST /reminders`
+> schedules a note to fire after a delay; `GET`/`DELETE /reminders/{id}` read and cancel it. No model
+> anywhere.
+>
+> **Interop verdict — one family, both sides of the wall, split by OPERATION.** Scheduling needs a
+> `DeferredCall`, and only a Java method reference produces one (`TimedActionClient` has no id-keyed form;
+> `DynamicMethodRef` has no `deferred()`), so `POST` is the capability's one Java class. Cancelling is
+> `TimerScheduler.delete(String)`, so `DELETE` — and `GET`, and the timed action itself — are Scala. **You
+> can cancel from Scala what you could not have scheduled from Scala.** The Scala lambda compiles and fails
+> at run time with the clearest diagnostic yet: it names `ReminderProbeEndpoint::$anonfun$1` outright.
+>
+> Measured alongside, none Scala-specific: the three-argument `createSingleTimer` **retries indefinitely**
+> (still climbing at 30 s); a timer that exhausts the four-argument form's `maxRetries` **stops silently**
+> and the SDK gives an action **no attempt number**, so the action records its own final failure; and a
+> pending timer **did not survive a restart** in local dev mode, so reminder state lives in process to
+> match — a restart yields an honest `404`, not a `pending` that can never fire.
+>
+> **Previously:** Feature 14 (streaming responses) — **✅ merged to `main` 2026-09-12 (PR #29)**
 > ([`specs/016-streaming-responses`](specs/016-streaming-responses/)).
 > `POST /stream-chat/{sessionId}` delivers a reply **as it is generated**: the agent's handler returns
 > `StreamEffect` instead of `Effect[String]`, and the endpoint writes the fragments as a chunked
@@ -72,12 +90,8 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 > verified by mechanism, not by watching it happen.
 >
 >
-> **⏭️ Next:** undecided — capability 14 was the last of the four candidates from PR #21, so the roadmap
-> is open again. "Candidate next capabilities" below now lists two kinds and orders them: **four SDK
-> component families never built here** (Timed Action, Consumer, Event Sourced Entity, gRPC endpoint)
-> and **five forks recorded when they were declined**. Recommended run: **A1 Timed Action** (smallest,
-> and the one interop outcome nobody can call in advance) → **A2 Consumer** (largest coverage gap, and
-> it carries cap-7's observability follow-up with it) → **B1 session compaction** (the only candidate
+> **⏭️ Next:** after capability 15, the recommended run continues **A2 Consumer** (largest coverage gap,
+> and it carries cap-7's observability follow-up with it) → **B1 session compaction** (the only candidate
 > that fixes a known defect instead of adding surface).
 >
 > Capabilities 1–14 are **✅ done and merged**; 5–14 were exploratory follow-ups beyond the original four.
@@ -111,6 +125,7 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 | 13 | **LLM-as-judge evaluation** — judges cap-8's answers with the SDK's built-in **`hallucination-evaluator`** (is the answer supported by its passages?) and an authored **`decline-judge`** (was declining — or not declining — right?); `POST /evaluate` over the same pipeline, four outcomes (`passed`/`failed`/`errored`/`not-applicable`), nothing gated. **Evaluation could only ever have had its own surface** — not discipline but a research result: there is no `Consume.From*` source for a request-based agent. That left cap-8 **byte-identical at merge**; the judge-timeout follow-up then edited `DocsAgent` deliberately, so a failed turn is no longer judged as a decline. **Headline: `dynamicCall` reaches components the SDK OWNS** — the built-in evaluators are ordinary Agents *and* provided components, so the escape hatch resolves them off `agentClassById`; caps 4/6/11 each quarantined Java for a runtime-owned component, cap-13 has **no Java at all**. An authored evaluator is an ordinary agent whose **return type** implementing `EvaluationResult` (not an annotation) is what routes verdicts to metrics/traces — **one** descriptor line, against cap-12's zero. Fully offline-tested **including the SDK's own judge** (the TestKit's per-agent model override beats `LlmAsJudge`'s explicit `.model(...)`) | [`specs/015-llm-judge-evaluation`](specs/015-llm-judge-evaluation/) | ✅ Done — merged (PR #27) |
 
 | 14 | **Streaming responses** — `StreamEffect` instead of `Effect[T]`: `POST /stream-chat/{sessionId}` writes the reply as it is generated (chunked), beside cap-4's untouched one-piece `/chat`. **Headline: `dynamicCall` covers request/response ONLY** — it returns a `DynamicMethodRef` with no streaming member, so the agent client is on **both** sides of the method-ref wall; the Scala lambda compiles then fails at runtime blaming the caller's own class, while Java works. The wall took **one class** (the endpoint), pinned by a test; agent, domain and the endpoint's own test stay Scala. Streams are not the axis — `AutonomousAgentClient`/`TaskClient.notificationStream()` are zero-arg and clean. Also: **no `onFailure` on a stream**; a stream can hang (240 s under a scripted failure — though a *real* provider error ends it in ~178 ms, so that silence was a test-provider artifact and the guards cover the "never answers, never errors" case); and a pre-token failure is **undetectable** (`200`, chunked, 0 bytes, `curl_exit=0`). Fully offline-provable: 57 fragments, exact parity | [`specs/016-streaming-responses`](specs/016-streaming-responses/) | ✅ Done — merged (PR #29) |
+| 15 | **Scheduled reminders — Timed Action** (candidate A1, the first untouched family) — `POST /reminders` schedules a note to fire after a delay, `GET`/`DELETE /reminders/{id}` read and cancel it; four states (`pending`/`fired`/`cancelled`/`failed`) kept distinct, and a cancel that cancelled nothing is a `409` naming what stood. **Headline: one family on both sides of the wall, split by OPERATION** — scheduling is `TimedActionClient.method(...)`→`deferred()`, method-ref only (`DynamicMethodRef` has no `deferred()`), so `POST` is the one Java class; cancelling is `TimerScheduler.delete(String)`, Scala-clean — measured cancelling a *Java*-scheduled timer. The Scala lambda compiles then fails naming `$anonfun$1` outright — the clearest diagnostic yet. Also: the 3-arg `createSingleTimer` **retries indefinitely**; an exhausted timer is **silent** and an action gets **no attempt number**, so the action records its own final failure; a pending timer **did not survive a restart** (dev mode), so state is in-process by design. No model anywhere | [`specs/017-timed-action`](specs/017-timed-action/) | 🚧 In progress |
 
 **Status legend:** ✅ done · 📋 planned (spec written) · 🚧 in progress · ⬜ not started
 
@@ -234,7 +249,7 @@ candidates that still extend the map rather than decorate it.
 
 | # | Candidate | What it explores | Interop bet |
 |---|---|---|---|
-| **A1** | **Timed Action** | Scheduling: `TimerScheduler.createSingleTimer(name, delay, deferred)`, plus the rescheduling-on-failure hazard AGENTS.md warns about. A natural fit is a delayed follow-up on cap-5's approval gate, or expiring a stale case. | **The sharpest bet left, and genuinely unpredictable.** The `deferred` argument is built from the component client — if it is a `DeferredCall` produced from a **method reference**, the wall bites a family we have never tested; if it is id-keyed like `TaskClient`, it is Scala-clean. Nothing in the project so far predicts which. New descriptor key `timed-action`. |
+| **A1** | **Timed Action** — 🚧 **in flight as capability 15; the bet is resolved** (both sides of the wall, split by operation — see row 15) | Scheduling: `TimerScheduler.createSingleTimer(name, delay, deferred)`, plus the rescheduling-on-failure hazard AGENTS.md warns about. A natural fit is a delayed follow-up on cap-5's approval gate, or expiring a stale case. | **The sharpest bet left, and genuinely unpredictable.** The `deferred` argument is built from the component client — if it is a `DeferredCall` produced from a **method reference**, the wall bites a family we have never tested; if it is id-keyed like `TaskClient`, it is Scala-clean. Nothing in the project so far predicts which. New descriptor key `timed-action`. |
 | **A2** | **Consumer** (`@Consume.From*` / `@Produce.ToTopic`) | The largest remaining hole: reacting to entity events or a topic, and publishing to one. It is also where cap-13's "there is **no** `Consume.FromAgent`" finding came from — this is that family, approached from the side that *does* exist. Natural fit: consume cap-6's `TodoEntity` events, or finally give cap-7's delegation **ground-truth** observability. | Component likely **Scala-clean** (`@Consume` is annotation-keyed, like `@McpEndpoint`). The open question is the **handler's event type**: a Scala sealed trait with `@TypeName` has never crossed the internal mapper (§3). New descriptor key `consumer`. |
 | **A3** | **Event Sourced Entity, authored by us in Scala** | Cap-6 has a *key-value* entity, in Java. An event-sourced one means a sealed event hierarchy, `applyEvent`, and snapshots — the persistence model [`docs/akka-persistence-models.md`](docs/akka-persistence-models.md) describes but the repo has never written. | **Two known walls collide.** The entity *client* is method-ref-only, so the caller is Java (cap-11's shape); events cross the internal mapper, so they must be Java-*shaped*. The new question is whether a **Scala 3 `enum` or sealed trait** survives that mapper at all, or whether `@TypeName` + Jackson polymorphism forces Java-*authored* events. New descriptor key `event-sourced-entity`. |
 | **A4** | **gRPC endpoint** | A `.proto` in `src/main/proto` and a Scala class implementing the protoc-generated **Java** interface, with `toApi` converters. | **A different axis from the wall: build ordering.** Generated Java sources must interleave with cap-11's scalac-then-javac arrangement (§13 R3) — the one part of this build that has already broken twice. Lower interop novelty, higher build risk. |

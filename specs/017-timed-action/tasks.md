@@ -138,11 +138,11 @@ This phase only records where the capability starts.
 
 **Independent Test**: read FINDINGS / README / ROADMAP — which half of scheduling is Scala-clean, which is not, why, and how far the Java reaches.
 
-- [ ] T027 [P] [US4] Add **§17** to `README.md` — the capability's own section: the two-endpoint surface, the `curl` walkthrough from quickstart.md, and the headline stated plainly: *one component family, both sides of the method-reference wall, split by operation — you can cancel what you cannot schedule*
-- [ ] T028 [P] [US4] Add the interop entry to `FINDINGS.md` — Q-A's verdict with the **verbatim** diagnostic (`Use dedicated builder for calling Object component method ReminderProbeEndpoint::$anonfun$1`), the Java control that makes it a statement about Scala rather than about our usage, and Q-B's cancel result
-- [ ] T029 [P] [US4] Update `ROADMAP.md` — flip A1 (Timed Action) to merged, and record what it settles about the remaining untouched families
-- [ ] T030 [P] [US4] Add two entries to `docs/sdk-3.6.0-limitations.md` — (a) a pending timer does **not** survive a restart in local dev mode, with the measurement and the explicit scope caveat that a deployed service is untested here and claimed neither way; (b) the 3-argument `createSingleTimer` retried indefinitely in measurement, with the 5 s-interval series
-- [ ] T031 [US4] Amend §16's method-ref-wall paragraph in `README.md` with one sentence pointing to §17 — the wall's shape is now "which client, which method, **and which operation**". Additive only; do not rewrite capability 14's finding
+- [x] T027 [P] [US4] Add **§17** to `README.md` — the capability's own section: the two-endpoint surface, the `curl` walkthrough from quickstart.md, and the headline stated plainly: *one component family, both sides of the method-reference wall, split by operation — you can cancel what you cannot schedule*
+- [x] T028 [P] [US4] Add the interop entry to `FINDINGS.md` — Q-A's verdict with the **verbatim** diagnostic (`Use dedicated builder for calling Object component method ReminderProbeEndpoint::$anonfun$1`), the Java control that makes it a statement about Scala rather than about our usage, and Q-B's cancel result
+- [x] T029 [P] [US4] Update `ROADMAP.md` — add row 15 as **🚧 In progress** with the verdict, point "You are here" at capability 15, and mark candidate A1 as in flight. The flip to ✅ is a separate commit after merge, as capability 14's was (amended: the original wording said "flip to merged", which cannot be true inside the PR)
+- [x] T030 [P] [US4] Add two entries to `docs/sdk-3.6.0-limitations.md` — (a) a pending timer does **not** survive a restart in local dev mode, with the measurement and the explicit scope caveat that a deployed service is untested here and claimed neither way; (b) the 3-argument `createSingleTimer` retried indefinitely in measurement, with the 5 s-interval series
+- [x] T031 [US4] Amend §16's method-ref-wall paragraph in `README.md` with one sentence pointing to §17 — the wall's shape is now "which client, which method, **and which operation**". Additive only; do not rewrite capability 14's finding
 
 **Checkpoint**: the interop verdict is public and evidenced. **Gate → commit + push.**
 
@@ -152,7 +152,7 @@ This phase only records where the capability starts.
 
 **Purpose**: retire the scaffolding without losing the evidence, and prove the constraints rather than assert them.
 
-- [ ] T032 **Keep** `src/main/scala/com/gwgs/akkaagentic/reminders/probe/ScalaScheduleAttempt.scala` and trim `ReminderProbeEndpoint.scala` to the single route that exercises it (FR-013). The failed Scala attempt is deliverable evidence — it is the only executable proof that the documented form fails, and a prose claim would decay
+- [ ] T032 Trim `src/main/scala/com/gwgs/akkaagentic/reminders/probe/ReminderProbeEndpoint.scala` to its `/probe/scala-schedule` route — the executed Q-A evidence — dropping `/probe/scala-cancel`, which `DELETE /reminders/{id}` now covers. **Keep** `ScalaScheduleAttempt.scala` (decided in review): it is the *compile-time* half of Q-A, and its scaladoc now says explicitly that nothing executes it and that the run-time diagnostic comes from the endpoint's lambda
 - [ ] T033 Final pass over `src/test/scala/com/gwgs/akkaagentic/reminders/probe/TimedActionProbeIntegrationTest.scala` after T022's rewiring: it should now carry only the evidence nothing else carries — Q-A's Scala schedule failing at run time. Remove anything the US1/US2/US3 tests already prove, so the suite proves each thing once
 - [ ] T034 [P] Add `src/test/scala/com/gwgs/akkaagentic/reminders/api/JavaQuarantineTest.scala` — capability 14's shape: assert **exactly one** `.java` under `src/main/java/com/gwgs/akkaagentic/reminders/`, and that it is the scheduling endpoint. If it ever fails, the wall reaches further than measured, which is a finding to record rather than a line to update (FR-013)
 - [ ] T035 [P] Verify FR-010 / SC-007 mechanically: `git diff --stat main -- src/main/scala/com/gwgs/akkaagentic src/main/java/com/gwgs/akkaagentic src/test ':!*reminders*'` must be **empty**. Prose cannot prove this and a diff can

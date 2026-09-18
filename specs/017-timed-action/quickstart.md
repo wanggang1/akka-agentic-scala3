@@ -79,7 +79,7 @@ the three-argument form appears nowhere in its production code.
 mvn clean verify
 ```
 
-Fully offline and deterministic. Timer firing is observed by waiting 300 ms–1.5 s — `TimedActionTestkit`
+Fully offline and deterministic. Timer firing is observed by waiting 1–1.5 s (the HTTP floor) — `TimedActionTestkit`
 invokes the action *directly*, which proves what the action does but never that a timer fired, so the
 timer itself has to be waited for. Cancellation costs one wait past a delay to prove a negative.
 
