@@ -142,6 +142,20 @@ src/main/java/com/gwgs/akkaagentic/streaming/api/          # StreamingChatEndpoi
 # imposes initialTimeout/idleTimeout (a real provider error the runtime ends itself, in ~178 ms). Fully offline-tested incl. incrementality (57 fragments, exact parity).
 # See §16 and docs/streaming-vs-request-response.md.
 
+# Capability 15 — Scala action + ONE Java scheduler (scheduled reminders; see "Scala interop notes" §17)
+src/main/scala/com/gwgs/akkaagentic/reminders/domain/      # ReminderRequest (validation), ReminderState, Reminder, Reminders (pure rules), CancelOutcome
+src/main/scala/com/gwgs/akkaagentic/reminders/application/ # ReminderAction (TimedAction), BoundedAttempts, ReminderStore (one atomic cell), ReminderSettings
+src/main/java/com/gwgs/akkaagentic/reminders/api/          # ReminderSchedulingEndpoint (POST /reminders) — the ONE Java class
+src/main/scala/com/gwgs/akkaagentic/reminders/api/         # ReminderEndpoint (GET + DELETE /reminders/{id})
+src/main/scala/com/gwgs/akkaagentic/reminders/probe/       # FR-013 evidence: the failed Scala schedule + the always-failing FR-008 instrument
+# Note: ONE component family on BOTH sides of the method-ref wall, split by OPERATION. SCHEDULING needs a
+# DeferredCall, obtainable only from a Java method reference (TimedActionClient has no id-keyed form and
+# DynamicMethodRef has no deferred()), so POST is Java. CANCELLING is TimerScheduler.delete(String), so
+# DELETE — and GET, and the TimedAction itself — are Scala. The split is visible in the tree on purpose.
+# Reminder state is IN-PROCESS by decision: a pending timer did not survive a restart in dev mode, and
+# durable state over a volatile timer would read "pending" for ever. New descriptor key `timed-action`.
+# No model anywhere, mocked or live. See §17.
+
 src/main/resources/application.conf                 # default model-provider config
 src/test/{scala,java}/com/gwgs/akkaagentic/...       # tests (TestModelProvider, no live model)
 ```
@@ -880,6 +894,11 @@ writing components in Scala needs explicit workarounds:
       `tokenStream` and the entity/workflow `notificationStream(Function)` are method-ref-keyed. What
       decides is the same thing it always was: whether the API takes a Java method reference.
 
+      > **Sharpened again by capability 15 — and by operation, across two APIs.** A timed action is
+      > scheduled through `TimedActionClient` (method-reference only) and cancelled through
+      > `TimerScheduler.delete(String)`, so one family lands on both sides of the wall at once: you can
+      > cancel from Scala what you could not have scheduled from Scala. See §17.
+
     - **The wall took one class, and a test keeps it that way.**
       [`StreamingChatEndpoint`](src/main/java/com/gwgs/akkaagentic/streaming/api/StreamingChatEndpoint.java)
       is Java; the agent, the domain rule, and even this capability's own endpoint test are Scala
@@ -926,6 +945,91 @@ writing components in Scala needs explicit workarounds:
     specs/016 research Q-A–Q-E and
     [`docs/streaming-vs-request-response.md`](docs/streaming-vs-request-response.md) for when to stream
     at all — including why payload size is *not* a reason.
+
+17. **Timed actions put one component family on both sides of the wall — split by *operation*.**
+    Capability 15 (`com.gwgs.akkaagentic.reminders.*`) schedules a reminder to fire after a delay, lets
+    a caller read it, and lets them cancel it before it fires. It is the first of the four SDK component
+    families this project had never built, and the one whose interop outcome nothing earlier predicted.
+    All five open questions were answered by a **discovery probe that ran before any design** (specs/017
+    research Q-A–Q-E). Six findings:
+
+    - **The headline: scheduling is Java-only, cancelling is Scala-clean.**
+
+      | Operation | API | From Scala |
+      |---|---|---|
+      | schedule | `TimedActionClient.method(japi.Function)` → `.deferred(...)` | **no** |
+      | cancel | `TimerScheduler.delete(String)` | **yes** |
+      | perform the work | `TimedAction` + `effects()` | **yes** — the action is Scala |
+
+      Capability 14 found one *client* with two kinds of method. This is sharper: **two different APIs
+      govern two halves of one feature**, so the wall runs *through* the family rather than around it.
+      Scheduling needs a `DeferredCall`, and the only thing that produces one is a Java method
+      reference — `TimedActionClient` has no id-keyed form, and `dynamicCall`'s `DynamicMethodRef` has
+      **no `deferred()`**. Cancelling takes the timer's name, a plain string.
+
+    - **The clearest diagnostic the project has seen.** The Scala lambda form compiles and then fails at
+      run time — as in capabilities 13 and 14 — but this time the message names the synthetic lambda
+      outright:
+
+      ```text
+      IllegalArgumentException: Use dedicated builder for calling Object component method
+        ReminderProbeEndpoint::$anonfun$1. This builder is meant for Action component calls.
+      ```
+
+      Capabilities 13 and 14 got *"class <the caller's own class> is not a subclass of …"*, which never
+      mentions lambdas. A **Java control** scheduled the same (Scala) action successfully, which is what
+      makes this a statement about the Scala *caller*. The probe now **asserts** that failure rather than
+      logging it, so if a future SDK let Scala schedule, the test would fail and say so.
+
+    - **The wall took one class, and the file tree shows it.** `POST /reminders` is
+      [`ReminderSchedulingEndpoint.java`](src/main/java/com/gwgs/akkaagentic/reminders/api/ReminderSchedulingEndpoint.java),
+      the capability's only Java production class; `GET` and `DELETE /reminders/{id}` are
+      [`ReminderEndpoint.scala`](src/main/scala/com/gwgs/akkaagentic/reminders/api/ReminderEndpoint.scala).
+      The cancellation tests schedule every reminder through the Java endpoint and cancel it through the
+      Scala one, with nothing but the reminder id crossing between them — and the run's log showed the
+      action **never executed** for a cancelled reminder, so the Scala `delete` genuinely removed a
+      Java-scheduled timer rather than merely being papered over by the store.
+
+    - **A timer's retry contract is two traps, and the SDK documents neither.** The three-argument
+      `createSingleTimer` **retries indefinitely**: measured still climbing at 30 s with widening gaps
+      (2, 3, 3, 3, 4, 4 attempts at 5 s intervals — a 6 s look had read "bounded", wrongly). So the
+      four-argument `maxRetries` overload is mandatory here, and a test reads every source in the
+      capability and fails on any three-argument call — no exemption list; mutation-checked. The
+      second trap is quieter: **a timer that exhausts its retries tells nobody**, and the SDK gives a
+      timed action **no attempt number** (`CommandContext` carries only tracing and metadata). So each
+      action counts its own attempts and, on the last permitted one, records the reminder as `failed`
+      and returns `done()` instead of throwing. Without that, a reminder whose work always failed would
+      read `pending` for ever. The timer's `maxRetries` is then a backstop, not the only line. Both timed
+      actions — production and the always-failing instrument — run their work through one helper,
+      [`BoundedAttempts`](src/main/scala/com/gwgs/akkaagentic/reminders/application/BoundedAttempts.scala),
+      so the bound the retry test proves is the shipped code path, not a copy of it.
+
+    - **A pending timer did not survive a restart — so neither does reminder state, on purpose.** A 60 s
+      timer was scheduled with `dev-mode.persistence.enabled=true`, the service killed 10 s later with the
+      on-disk store present, restarted, and watched for 100 s past its due time: **it never fired.** (A
+      first attempt that killed the service in the same second as scheduling was discarded rather than
+      reported.) Capabilities 3 and 5 saw *tasks* survive under the same flag, so this is specifically
+      about timers. Durable reminder *state* over a volatile *timer* would leave a caller reading
+      `pending` for something that can no longer happen, so the state lives in process, in
+      [`ReminderStore`](src/main/scala/com/gwgs/akkaagentic/reminders/application/ReminderStore.scala) —
+      one `AtomicReference` over an immutable value, changed only by pure transitions — and `GET` after a
+      restart honestly answers `404`. **Scope:** local dev mode only; a deployed service has a real
+      datastore and this is claimed neither way.
+
+    - **One new Java↔Scala wrinkle beyond capability 14's.** Scala's `Option[Int]` erases to
+      `Option<Object>` in Java's view, so the Java endpoint needs an `(Object)` cast to pass the delay
+      into the idiomatic Scala validator — one cast more than `Option[String]` needed. Still the right
+      trade: the rule stays in the Scala domain, and the quarantine stays at one class.
+
+    **Testing.** `TimedActionTestkit` invokes an action *directly*, which proves what it does but never
+    that a timer fired, so firing is observed by waiting. Scheduling overhead measured ~100 ms, which
+    keeps that cheap: each firing assertion costs ~1.1 s (1 s is the HTTP floor). The one expensive test
+    is the retry bound (~20 s), because proving work *stopped* means waiting out a ~3 s backoff that
+    widens. It is **Java** — scheduling the failing action needs a method reference too — but it is a
+    test, so it does not count against the production quarantine. No model is involved anywhere; this is
+    the project's second entirely model-free capability after capability 11.
+
+    New descriptor key `timed-action`; no `pom.xml` change. See specs/017 research Q-A–Q-E.
 
 ## Build
 
@@ -978,7 +1082,7 @@ mvn verify
 ```
 
 Tests register a `TestModelProvider`, so **no API key or network is required** — results are
-deterministic. Capability 11 uses no model at all, mocked or live.
+deterministic. Capabilities 11 and 15 use no model at all, mocked or live.
 
 Prefer **`mvn clean verify`** as the final check before calling work done (see the note above).
 
@@ -2229,6 +2333,86 @@ STREAMING_FIRST_TOKEN_TIMEOUT=10s STREAMING_IDLE_TIMEOUT=5s mvn compile exec:jav
 > would have meant killing a running Ollama mid-request, and the offline synthetic-source test covers
 > the operator contract instead — so "what a client sees when generation dies after 20 of 57 tokens"
 > remains unverified rather than assumed.
+
+### Capability 15 — scheduled reminders (`POST /reminders`, `GET`/`DELETE /reminders/{id}`)
+
+Capability 15 does something **later**. A caller schedules a note to fire after a delay, reads it back,
+and can cancel it before it fires. No model is involved: a reminder carries a note and needs no language
+model to do it.
+
+```shell
+curl -i -X POST http://localhost:9000/reminders \
+  -H "Content-Type: application/json" \
+  -d '{"note":"stand up and stretch","delaySeconds":5}'
+# 201 Created · Location: /reminders/8f3c…
+# {"reminderId":"8f3c…","note":"stand up and stretch","delaySeconds":5,"state":"pending"}
+
+curl -s http://localhost:9000/reminders/8f3c…
+# {"reminderId":"8f3c…","note":"stand up and stretch","state":"pending"}
+
+sleep 6
+curl -s http://localhost:9000/reminders/8f3c…
+# {"reminderId":"8f3c…","note":"stand up and stretch","state":"fired","firedAt":"…"}
+```
+
+**Cancel before it fires** — and a second cancel is a `409` naming the state that actually stood, never
+a second success:
+
+```shell
+curl -i -X DELETE http://localhost:9000/reminders/<id>
+# 200 OK — {"reminderId":"…","state":"cancelled"}
+curl -i -X DELETE http://localhost:9000/reminders/<id>
+# 409 Conflict — {"reminderId":"…","state":"cancelled"}
+curl -i -X DELETE http://localhost:9000/reminders/<id-that-already-fired>
+# 409 Conflict — {"reminderId":"…","state":"fired"}
+```
+
+**Validation runs first**, and a rejected request schedules nothing:
+
+```shell
+curl -i -X POST http://localhost:9000/reminders \
+  -H "Content-Type: application/json" -d '{"note":"  ","delaySeconds":60}'
+# 400 Bad Request — note must not be blank
+curl -i -X POST http://localhost:9000/reminders \
+  -H "Content-Type: application/json" -d '{"note":"ok","delaySeconds":0}'
+# 400 Bad Request — delaySeconds must be between 1 and 86400
+```
+
+**Retries are bounded, and tunable without a recompile.** Work that fails is attempted at most
+`reminders.max-retries` times (default 2, must be 1–10) and then recorded as `failed`:
+
+```shell
+REMINDERS_MAX_RETRIES=3 mvn compile exec:java
+```
+
+An out-of-range value is refused as the **server's** fault: `POST /reminders` answers `500` with a
+correlation id (`ConfigException$BadValue: Invalid value at 'reminders.max-retries'` in the log), not a
+`400` that would tell the caller they sent something wrong — see
+[`docs/sdk-3.6.0-limitations.md`](docs/sdk-3.6.0-limitations.md) §7d for why that distinction had to be
+engineered rather than assumed.
+
+> **A restart loses pending reminders — by measurement, and by design.** A pending timer did not survive
+> a restart in local dev mode, so reminder state lives in process to match: after a restart, `GET` on an
+> old id is `404` rather than a stale `pending` that can no longer fire. A deployed service has a real
+> datastore; that case is untested here and claimed neither way.
+>
+> **Known limit — finished reminders are never evicted.** A reminder stays in memory after it fires, is
+> cancelled or fails, until the process restarts, so a long-running service grows without bound. Fine for
+> a sandbox; a production shape would evict finished reminders after a retention window (considered in PR
+> review and deferred). Pending reminders are unaffected either way.
+>
+> **Where the interop line falls.** `POST` is the capability's one Java class, because scheduling needs a
+> Java method reference; `GET`, `DELETE` and the timed action itself are Scala (§17). You can cancel from
+> Scala a reminder that could only have been scheduled from Java.
+>
+> *Verified live* (`mvn compile exec:java`, no model needed), every quickstart command as written. A 5 s
+> reminder read `pending` immediately and `fired` (with `firedAt`) at 6 s. A 30 s reminder cancelled at
+> once still read `cancelled` 31 s later, and the service log showed its action **never executed** — the
+> Scala `DELETE` removed the Java-scheduled timer itself. A second cancel was `409 {"state":"cancelled"}`,
+> cancelling the fired one `409 {"state":"fired"}`, an unknown id `404`; a blank note and a zero delay
+> were `400` with the domain's exact messages. After a restart the fired reminder's id answered `404`, as
+> documented. The walk also caught a real defect, now fixed: an out-of-range `REMINDERS_MAX_RETRIES`
+> first surfaced as `400` (see above); it is now `500`, and `REMINDERS_MAX_RETRIES=3` is honoured.
 
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.

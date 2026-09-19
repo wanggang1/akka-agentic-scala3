@@ -1,8 +1,8 @@
 # Findings — Scala 3 on the Java-first Akka SDK
 
-What building **thirteen capabilities** in Scala 3 on the Java-first Akka SDK taught us,
+What building **fifteen capabilities** in Scala 3 on the Java-first Akka SDK taught us,
 consolidated into one page. The per-capability design detail lives in [`specs/`](specs/); the
-day-to-day interop workarounds live in [`README.md`](README.md) "Scala interop notes" §1–15; the
+day-to-day interop workarounds live in [`README.md`](README.md) "Scala interop notes" §1–17; the
 status table lives in [`ROADMAP.md`](ROADMAP.md). **This page is the synthesis** — the single
 finding that explains every outcome, and the rubric it yields.
 
@@ -28,6 +28,8 @@ reference in the first place (`Class` references, `Task` constants, a URL string
 | `ViewClient` (cap-11) | method-ref **only** | ❌ no |
 | `DependencyProvider` (custom DI, cap-8) | `Class` key (`getDependency[T](Class[T])`) | ✅ yes |
 | `RemoteMcpTools` (MCP client, cap-10) | URL **string** (`fromService`/`fromServer`) | ✅ yes |
+| `TimedActionClient` — **scheduling** (cap-15) | method-ref **only**; `DynamicMethodRef` has no `deferred()` | ❌ no |
+| `TimerScheduler.delete` — **cancelling** (cap-15) | timer name, a plain **string** | ✅ yes |
 
 **Any client keyed solely on a Java method reference is unreachable from Scala.** That is the whole
 story; everything below is a corollary. Crucially, the wall is a property of the *client*, not of
@@ -286,8 +288,9 @@ uncompilable.
 
 - **Reach for `AutonomousAgent` over `Workflow`** when a Scala capability needs the model to drive a
   durable loop — it's *the* Scala-friendly durable-orchestration primitive.
-- **Expect Java only when you must:** (a) author or invoke a Workflow, (b) query an entity directly, or
-  (c) query a View. Everything else — agents, autonomous agents, HTTP endpoints, MCP endpoints, domain,
+- **Expect Java only when you must:** (a) author or invoke a Workflow, (b) query an entity directly,
+  (c) query a View, (d) consume an agent's token stream (cap-14), or (e) **schedule** a timed action
+  (cap-15) — though *cancelling* one, and authoring it, stay Scala. Everything else — agents, autonomous agents, HTTP endpoints, MCP endpoints, domain,
   validation — stays idiomatic Scala. And keep the Java part **as small as the class holding the method
   ref**: a Java caller does not imply a Java component.
 - **Check the reflected *shape*, not only the key type.** When the SDK reflects over a class (nested
@@ -429,3 +432,59 @@ the boundary, and the only cost is two `Left`/`Right` casts. **When the SDK forc
 language, keep the domain idiomatic and pay the cast** — moving the rule into Java would have grown the
 quarantine the wall forced.
 
+## Capability 15 — timed actions: the wall runs through one family, by operation
+
+Capability 14 showed one *client* with two kinds of method. Capability 15 shows something sharper: **two
+different APIs govern two halves of one feature**, and they sit on opposite sides of the wall.
+
+| Operation | API | Scala? |
+|---|---|---|
+| schedule | `TimedActionClient.method(japi.Function)` → `.deferred(...)` | **no** — no id-keyed form; `DynamicMethodRef` has no `deferred()` |
+| cancel | `TimerScheduler.delete(String)` | **yes** — measured cancelling a *Java*-scheduled timer |
+| perform the work | `TimedAction` + `effects()` | **yes** — the action itself is Scala |
+
+**You can cancel from Scala what you could not have scheduled from Scala.** So the precise rule, after
+fifteen capabilities: *the wall is a property of which client, which method on it — and, where a feature
+spans two APIs, which operation.* What decides is still the one thing it always was: whether the API takes
+a Java method reference.
+
+**The diagnostic finally says what happened.** The Scala lambda compiles and fails at run time, as in
+capabilities 13 and 14, but this message names the synthetic lambda outright:
+
+```text
+IllegalArgumentException: Use dedicated builder for calling Object component method
+  ReminderProbeEndpoint::$anonfun$1. This builder is meant for Action component calls.
+```
+
+The earlier form — *"class <the caller's own class> is not a subclass of …"* — never mentioned lambdas.
+A **Java control** scheduled the same Scala action successfully. The probe now *asserts* the failure, so a
+future SDK that lifted the wall would turn a test red rather than go unnoticed.
+
+**The wall took one class.** `POST /reminders` is the capability's only Java production class; `GET`,
+`DELETE`, the timed action, the domain and the store are Scala, and so is every test but one — the
+retry-bound test, which must schedule an always-failing action and therefore needs a method reference of
+its own. A test is not production, so the quarantine still holds at one.
+
+**Two platform findings that are not about Scala** — a Java service meets both identically:
+
+1. **The retry contract has two traps.** The three-argument `createSingleTimer` retries **indefinitely**
+   (still climbing at 30 s, widening gaps — and a 6 s observation had read "bounded", wrongly). And a timer
+   that exhausts the four-argument form's `maxRetries` **stops silently**, while the SDK gives a timed
+   action **no attempt number**. So "bounded" alone is not enough: bounded *and silent* leaves a reminder
+   reading `pending` for ever. Each action counts its own attempts and, on the last one, records the failure
+   and returns `done()` — AGENTS.md's "handle errors in timed actions", made concrete, in one helper
+   (`BoundedAttempts`) that the production action and the test instrument share. A test reads every
+   source in the capability and fails on any three-argument call, with no exemption list.
+2. **A pending timer did not survive a restart in local dev mode**, under the same
+   `persistence.enabled=true` flag with which capabilities 3 and 5 saw *tasks* survive. Measured once
+   validly (a same-second kill was discarded as confounded): scheduled 60 s out, killed 10 s later with the
+   store on disk, restarted, watched 100 s past due — never fired. The design followed the measurement:
+   reminder state lives in process, so a restart yields an honest `404` rather than a `pending` that can
+   no longer fire. **Deployed behaviour is untested and claimed neither way.**
+
+**And a method result worth reusing: prove a guarantee with a witness that takes no part in it.** Once a
+reminder is `failed`, the store ignores later transitions — so the store cannot testify that no retry
+happened afterwards. The retry test uses a separate invocation counter that plays no role in the stop
+decision, which is exactly what makes it a valid check on that decision. The same idea showed up in the
+cancellation test: "still `cancelled`" would hold even if the timer had run (the store guards it), so the
+run's log was checked for the action executing — it never did.
