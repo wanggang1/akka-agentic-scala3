@@ -18,7 +18,7 @@ to capability 6's `TodoEntity` needs a method reference), plus two live runs of 
 | **Q-D** failure | Redelivery is **unbounded** (exponential, ~2×), and one failing message **blocks every other entity**. A handler that gives up and returns `done()` unblocks it within 1 ms |
 | **Q-E** duplicates & restart | Duplicates are delivered; `ce-id` **changes per delivery**. After a restart the consumer **resumes** from its stored position — nothing is replayed |
 | **Q-F** TestKit | The mocked channel does **not** model redelivery: a failing message is dropped and messages around it are lost |
-| **Q-G** runtime-owned tasks | **Reachable.** A Scala consumer receives the SDK's own `TaskEntity` events, `TaskAssigned.assignee` included |
+| **Q-G** runtime-owned tasks | **Reachable** — a Scala consumer receives the SDK's own `TaskEntity` events. **But useless for fork B3**: capability 7's delegation to request-based specialists creates no tasks |
 
 ---
 
@@ -174,9 +174,24 @@ Live, capability 5's autonomous agents showed `assignee` is the **agent instance
 (`<caseId>-draft-agent`). This extends capability 13's finding: `dynamicCall` reaches runtime-owned
 *agents*, and now a consumer reaches a runtime-owned *event stream*.
 
-**Not yet measured — needs a live model:** whether capability 7's `Delegation` to *request-based*
-specialists creates task entities at all. Fork B3's value depends on it; its reachability does not.
-**Adding this source to scope is a user checkpoint.**
+**Its value for fork B3, measured live (Ollama `qwen3:8b`, 2026-09-19): none, for capability 7 as built.**
+One `POST /activities` ran to completion in ~55 s and the model reported
+`consultedSpecialists: ["weather-specialist","activity-specialist"]`. Every task event the consumer saw in
+that run:
+
+```text
+12:05:27.986 [d807e51f-…] TaskCreated(Suggest)
+12:05:27.989 [d807e51f-…] TaskAssigned(Suggest, assignee=8a74c6ab-2c09-403b-82c6-347e318cc7ab)
+12:05:27.990 [d807e51f-…] TaskStarted(Suggest)
+12:06:16.505 [d807e51f-…] TaskCompleted(Suggest)
+distinct task ids seen: 1
+```
+
+**Delegating to request-based specialists creates no task entities.** The only task is the coordinator's
+own, and its `assignee` is the coordinator's instance id. So the task stream carries no record of *which*
+specialists ran — the one thing B3 needed — and capability 7's `consultedSpecialists` remains the model's
+self-report. (Autonomous-agent delegates, which run tasks of their own, would presumably appear; capability
+7 does not use them, and that is untested here.)
 
 ---
 
@@ -197,11 +212,10 @@ specialists creates task entities at all. Fork B3's value depends on it; its rea
 
 ## What remains unverified
 
-1. **Whether capability 7's delegation creates tasks** (Q-G's value) — needs a live model.
-2. **Whether committed messages are ever replayed** after a failure elsewhere in a batch. If they are, D5
+1. **Whether committed messages are ever replayed** after a failure elsewhere in a batch. If they are, D5
    may surface a reversal pair (an older state after a newer one). FR-004 still holds — the latest entry
    reflects the latest state — but exactly-once display is not achievable from a source with no version,
    and the docs say so.
-3. **Head-of-line scope in production.** Measured in local dev mode; a deployed service partitions a
+2. **Head-of-line scope in production.** Measured in local dev mode; a deployed service partitions a
    projection into slices, which may confine blocking to a subset of entities. Claimed neither way.
-4. **A real broker.** Publication is proven against the TestKit's channel and the `logging` sink.
+3. **A real broker.** Publication is proven against the TestKit's channel and the `logging` sink.

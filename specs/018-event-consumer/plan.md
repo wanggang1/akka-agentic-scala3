@@ -115,11 +115,13 @@ No constitution violations. Two deliberate trade-offs, recorded rather than hidd
 | In-process feed that forgets on restart | The consumer resumes (Q-E), so a durable feed needs an entity — a method-reference client, i.e. Java — for a sandbox feed | A durable feed: recorded as a fork |
 | Exactly-once display is not promised | A key-value state carries no version (Q-E); only consecutive duplicates are provably duplicates | Remembering all past states — would swallow a genuine return to an earlier state |
 
-## User checkpoint (before `/akka.tasks`)
+## User checkpoint (before `/akka.tasks`) — resolved by measurement
 
-**Q-G: capability 7's delegation tasks.** A Scala consumer **can** read the SDK's own task entity (measured).
-Whether capability 7's delegation to request-based specialists creates tasks at all is **not yet measured**
-— it needs a live model. Adding this as a second source is **not in this plan** unless approved.
+**Q-G: capability 7's delegation tasks.** A Scala consumer **can** read the SDK's own task entity — but a
+live capability 7 run produced **one** task (the coordinator's own) and none for the specialists it
+delegated to (research Q-G). The source cannot say which specialists ran, so it cannot deliver fork B3.
+**Recommendation: not added.** Recorded as a finding: reachability proven, value absent for request-based
+delegates.
 
 ## Phase 2 preview (owned by `/akka.tasks`)
 
