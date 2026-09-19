@@ -144,7 +144,7 @@ src/main/java/com/gwgs/akkaagentic/streaming/api/          # StreamingChatEndpoi
 
 # Capability 15 — Scala action + ONE Java scheduler (scheduled reminders; see "Scala interop notes" §17)
 src/main/scala/com/gwgs/akkaagentic/reminders/domain/      # ReminderRequest (validation), ReminderState, Reminder, Reminders (pure rules), CancelOutcome
-src/main/scala/com/gwgs/akkaagentic/reminders/application/ # ReminderAction (TimedAction), ReminderStore (one atomic cell), ReminderSettings
+src/main/scala/com/gwgs/akkaagentic/reminders/application/ # ReminderAction (TimedAction), BoundedAttempts, ReminderStore (one atomic cell), ReminderSettings
 src/main/java/com/gwgs/akkaagentic/reminders/api/          # ReminderSchedulingEndpoint (POST /reminders) — the ONE Java class
 src/main/scala/com/gwgs/akkaagentic/reminders/api/         # ReminderEndpoint (GET + DELETE /reminders/{id})
 src/main/scala/com/gwgs/akkaagentic/reminders/probe/       # FR-013 evidence: the failed Scala schedule + the always-failing FR-008 instrument
@@ -996,10 +996,13 @@ writing components in Scala needs explicit workarounds:
       four-argument `maxRetries` overload is mandatory here, and a test reads every source in the
       capability and fails on any three-argument call — no exemption list; mutation-checked. The
       second trap is quieter: **a timer that exhausts its retries tells nobody**, and the SDK gives a
-      timed action **no attempt number** (`CommandContext` carries only tracing and metadata). So the
+      timed action **no attempt number** (`CommandContext` carries only tracing and metadata). So each
       action counts its own attempts and, on the last permitted one, records the reminder as `failed`
       and returns `done()` instead of throwing. Without that, a reminder whose work always failed would
-      read `pending` for ever. The timer's `maxRetries` is then a backstop, not the only line.
+      read `pending` for ever. The timer's `maxRetries` is then a backstop, not the only line. Both timed
+      actions — production and the always-failing instrument — run their work through one helper,
+      [`BoundedAttempts`](src/main/scala/com/gwgs/akkaagentic/reminders/application/BoundedAttempts.scala),
+      so the bound the retry test proves is the shipped code path, not a copy of it.
 
     - **A pending timer did not survive a restart — so neither does reminder state, on purpose.** A 60 s
       timer was scheduled with `dev-mode.persistence.enabled=true`, the service killed 10 s later with the

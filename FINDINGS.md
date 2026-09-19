@@ -471,8 +471,9 @@ its own. A test is not production, so the quarantine still holds at one.
    (still climbing at 30 s, widening gaps — and a 6 s observation had read "bounded", wrongly). And a timer
    that exhausts the four-argument form's `maxRetries` **stops silently**, while the SDK gives a timed
    action **no attempt number**. So "bounded" alone is not enough: bounded *and silent* leaves a reminder
-   reading `pending` for ever. The action counts its own attempts and, on the last one, records the failure
-   and returns `done()` — AGENTS.md's "handle errors in timed actions", made concrete. A test reads every
+   reading `pending` for ever. Each action counts its own attempts and, on the last one, records the failure
+   and returns `done()` — AGENTS.md's "handle errors in timed actions", made concrete, in one helper
+   (`BoundedAttempts`) that the production action and the test instrument share. A test reads every
    source in the capability and fails on any three-argument call, with no exemption list.
 2. **A pending timer did not survive a restart in local dev mode**, under the same
    `persistence.enabled=true` flag with which capabilities 3 and 5 saw *tasks* survive. Measured once

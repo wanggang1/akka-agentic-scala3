@@ -4,24 +4,17 @@ import java.util.concurrent.atomic.AtomicReference
 
 import akka.javasdk.annotations.Component
 import akka.javasdk.timedaction.TimedAction
-import com.gwgs.akkaagentic.reminders.application.{ReminderSettings, ReminderStore}
+import com.gwgs.akkaagentic.reminders.application.BoundedAttempts.Outcome
+import com.gwgs.akkaagentic.reminders.application.{BoundedAttempts, ReminderSettings}
 import com.typesafe.config.Config
 import org.slf4j.LoggerFactory
 
 /** The FR-008 instrument: work that fails on every attempt, so the retry bound can be **counted**.
   *
-  * Moved out of `ReminderAction` so the production action has exactly one handler, and kept in
-  * `probe/` so it stays visibly an instrument.
-  *
-  * **How it ends.** Research Q-D measured two things that together decide this: the three-argument
-  * `createSingleTimer` retries indefinitely, and a timer that exhausts its `maxRetries` stops silently —
-  * nothing records that the work never succeeded. And the SDK gives a timed action no attempt number.
-  * So the action counts its own attempts in the store and, on the **last permitted one**, records the
-  * reminder as `failed` and returns `done()` instead of throwing. That is AGENTS.md's "handle errors in
-  * timed actions to avoid infinite rescheduling", made concrete: the bound is enforced here, and the
-  * timer's `maxRetries` is a backstop rather than the only line.
-  *
-  * Earlier attempts throw, because a retry is exactly what they are asking the runtime for.
+  * Kept in `probe/` so it stays visibly an instrument. It runs its work through `BoundedAttempts` —
+  * **the same helper the production `ReminderAction` uses** — so the bound `BoundedRetryIntegrationTest`
+  * proves here is the production code path, not a copy of it. The only difference is the work itself,
+  * which always throws.
   */
 @Component(id = "failing-reminder-action")
 class FailingReminderAction(config: Config) extends TimedAction:
@@ -30,15 +23,14 @@ class FailingReminderAction(config: Config) extends TimedAction:
 
   def fail(reminderId: String): TimedAction.Effect =
     FailingReminderAction.witness(reminderId)
-    val attempt = ReminderStore.get(reminderId).map(_.attempts + 1).getOrElse(1)
-    if attempt >= limit then
-      ReminderStore.markFailed(reminderId, s"the work failed on all $limit permitted attempts")
-      logger.warn("reminder [{}] failed on its last permitted attempt ({} of {}); stopping", reminderId, attempt, limit)
-      effects().done()
-    else
-      ReminderStore.recordAttempt(reminderId)
-      logger.info("reminder [{}] deliberately failing, attempt {} of {}", reminderId, attempt, limit)
-      throw RuntimeException(s"deliberate failure for [$reminderId], attempt $attempt of $limit")
+    BoundedAttempts.run(reminderId, limit)(throw RuntimeException(s"deliberate failure for [$reminderId]")) match
+      case Outcome.Succeeded => effects().done()
+      case Outcome.WillRetry(attempt, cause) =>
+        logger.info("reminder [{}] deliberately failing, attempt {} of {}", reminderId, attempt, limit)
+        throw cause
+      case Outcome.GaveUp(attempt, _) =>
+        logger.warn("reminder [{}] failed on its last permitted attempt ({} of {}); stopping", reminderId, attempt, limit)
+        effects().done()
 
 object FailingReminderAction:
 

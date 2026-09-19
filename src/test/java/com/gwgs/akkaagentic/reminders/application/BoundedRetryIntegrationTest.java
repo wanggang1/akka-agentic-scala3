@@ -25,6 +25,10 @@ import org.junit.jupiter.api.Test;
  * production quarantine (capability 4 and 11 precedent). It schedules through the testkit's own {@code
  * getTimerScheduler()}, with the four-argument overload.
  *
+ * <p><b>What this proves about production.</b> The instrument runs its work through {@code
+ * BoundedAttempts}, the same helper the production {@code ReminderAction} uses, so the bound shown
+ * here is the shipped code path; only the work differs (it always throws).
+ *
  * <p><b>What makes the stop attributable.</b> The timer's {@code maxRetries} is set deliberately
  * <i>above</i> the action's own limit. If the action did not stop itself, the runtime would keep
  * going — so a stop at exactly the limit can only be the action's doing, not a coincidence of the
