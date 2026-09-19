@@ -2396,6 +2396,11 @@ engineered rather than assumed.
 > old id is `404` rather than a stale `pending` that can no longer fire. A deployed service has a real
 > datastore; that case is untested here and claimed neither way.
 >
+> **Known limit — finished reminders are never evicted.** A reminder stays in memory after it fires, is
+> cancelled or fails, until the process restarts, so a long-running service grows without bound. Fine for
+> a sandbox; a production shape would evict finished reminders after a retention window (considered in PR
+> review and deferred). Pending reminders are unaffected either way.
+>
 > **Where the interop line falls.** `POST` is the capability's one Java class, because scheduling needs a
 > Java method reference; `GET`, `DELETE` and the timed action itself are Scala (§17). You can cancel from
 > Scala a reminder that could only have been scheduled from Java.

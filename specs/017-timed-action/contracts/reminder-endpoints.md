@@ -56,6 +56,11 @@ elsewhere in this project.
 > id returns `404`, and that is the *accurate* answer: the reminder is gone, and reporting it as still
 > `pending` would promise a firing that can no longer happen.
 
+> **Known limit — nothing is evicted.** A finished reminder (`fired`, `cancelled`, `failed`) stays readable
+> until the process restarts; memory grows with every reminder ever scheduled. A retention window for
+> finished reminders was considered in PR review and deferred. If added, `GET` on a finished reminder
+> would become `404` once the window passes.
+
 ## `DELETE /reminders/{id}` — cancel
 
 Three outcomes, kept distinct (FR-006). Answering "cancelled" to a request that cancelled nothing is
