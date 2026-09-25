@@ -36,6 +36,23 @@ top-level component and needs nothing of the kind. The SDK surface confirms why 
 exposes `messageContext()`, `effects()` and `timers()`; the effect builder is `done/ignore/produce/…` —
 **no method reference anywhere**. Descriptor key: `consumer`.
 
+### Q-A addendum — how a handler is selected, and how the two ways of getting it wrong differ
+
+Measured 2026-09-25, after a review question. A handler is chosen by its **parameter type**: `Consumer`
+declares no abstract method, and `ReflectiveConsumerRouter` holds a `Map[payload type, MethodInvoker]`. The
+method name is free (the SDK's own examples use `onChange` and `onEvent`), and a source with several payload
+types may declare one handler per type. `@DeleteHandler` exists because a deletion carries no payload, so
+there is nothing to match on.
+
+| Mistake | Compiles? | Runtime |
+|---|---|---|
+| two handlers taking the same type | yes | **refuses to start**: `Duplicated update methods [onUpdate, onUpdateTwin] for state subscription are not allowed` / `Ambiguous handlers for …TodoList` |
+| handler takes the **wrong** type | yes | **starts normally, and is never called** — nothing is logged or reported |
+
+The second is the dangerous one, and it is why this capability's behaviour is asserted over HTTP rather than
+by unit-testing the consumer class: with a wrong parameter type the integration tests time out, which is the
+only signal there is.
+
 ## Q-B — What arrives, and through which mapper? **Capability 6's Java `TodoList`, whole.**
 
 The handler receives `com.gwgs.akkaagentic.a2a.domain.TodoList` — the entire list, `(todos, nextId)`. A

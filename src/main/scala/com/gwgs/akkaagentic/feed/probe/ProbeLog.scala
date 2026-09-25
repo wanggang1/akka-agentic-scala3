@@ -23,7 +23,10 @@ object ProbeLog:
       atMillis: Long)
 
   /** Which subjects fail, and after how many attempts a failing subject gives up (Int.MaxValue = never). */
-  final case class Switches(poisoned: Set[String] = Set.empty, giveUpAfter: Int = Int.MaxValue)
+  final case class Switches(
+      poisoned: Set[String] = Set.empty,
+      giveUpAfter: Int = Int.MaxValue,
+      failOnce: Set[String] = Set.empty)
 
   final case class State(observations: Vector[Observation] = Vector.empty, switches: Switches = Switches())
 
@@ -38,6 +41,16 @@ object ProbeLog:
 
   def poison(subject: String): Unit = cell.updateAndGet(s => s.copy(switches = s.switches.copy(poisoned = s.switches.poisoned + subject)))
   def cure(subject: String): Unit = cell.updateAndGet(s => s.copy(switches = s.switches.copy(poisoned = s.switches.poisoned - subject)))
+  /** Fail this subject's next delivery once, then let it through — the "fails once and then succeeds" case
+    * (spec US2 scenario 3). The switch clears itself when it fires. */
+  def failOnce(subject: String): Unit = cell.updateAndGet(s => s.copy(switches = s.switches.copy(failOnce = s.switches.failOnce + subject)))
+
+  /** True if this subject was armed to fail once — and clears the arming, atomically, so the next delivery
+    * succeeds. */
+  def consumeFailOnce(subject: String): Boolean =
+    val before = cell.getAndUpdate(s => s.copy(switches = s.switches.copy(failOnce = s.switches.failOnce - subject)))
+    before.switches.failOnce.contains(subject)
+
   def giveUpAfter(n: Int): Unit = cell.updateAndGet(s => s.copy(switches = s.switches.copy(giveUpAfter = n)))
   def switches: Switches = cell.get().switches
 

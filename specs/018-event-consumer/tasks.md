@@ -88,10 +88,10 @@ test-green, committed and pushed as it lands.
 
 **Independent Test**: on the **real** path, make one user's deliveries fail; see the bound, the set-aside, and another user's change arrive after the give-up.
 
-- [ ] T019 [US2] Rewire `src/main/scala/com/gwgs/akkaagentic/feed/probe/TodoProbeConsumer.scala` to run its work through **`BoundedDelivery`** with `feed.max-attempts`, so the always-failing instrument exercises the production code path (capability 15's shared-helper shape); keep `ProbeLog` as the independent witness of how many times the runtime actually delivered
-- [ ] T020 [US2] Write `src/test/java/com/gwgs/akkaagentic/feed/application/BoundedActivityDeliveryIntegrationTest.java` on the **real** path (no mocks; Java because writing `TodoEntity` needs a method reference — research D10): poison one user; assert deliveries == `feed.max-attempts` (by the witness), the set-aside is visible over `GET /todo-activity/set-aside` with its reason, and a **different** user's change, written *after* the stream entered its failure loop, reaches the probe consumer after the give-up (research Q-D: without the bound it waited indefinitely)
-- [ ] T021 [US2] In the same test, US2 scenario 3: a delivery that fails once and then succeeds reaches the witness twice, appears in no set-aside, and records its change once
-- [ ] T022 [US2] Run `mvn clean verify`
+- [x] T019 [US2] Rewire `src/main/scala/com/gwgs/akkaagentic/feed/probe/TodoProbeConsumer.scala` to run its work through **`BoundedDelivery`** with `feed.max-attempts`, so the always-failing instrument exercises the production code path (capability 15's shared-helper shape); keep `ProbeLog` as the independent witness of how many times the runtime actually delivered
+- [x] T020 [US2] Write `src/test/java/com/gwgs/akkaagentic/feed/application/BoundedActivityDeliveryIntegrationTest.java` on the **real** path (no mocks; Java because writing `TodoEntity` needs a method reference — research D10): poison one user; assert deliveries == `feed.max-attempts` (by the witness), the set-aside is visible over `GET /todo-activity/set-aside` with its reason, and a **different** user's change, written *after* the stream entered its failure loop, reaches the probe consumer after the give-up (research Q-D: without the bound it waited indefinitely)
+- [x] T021 [US2] In the same test, US2 scenario 3: a delivery that fails once and then succeeds reaches the witness twice, appears in no set-aside, and records its change once
+- [x] T022 [US2] Run `mvn clean verify`
 
 **Checkpoint**: FR-006/007 enforced and proven where failure is real. **Gate → commit + push.**
 
