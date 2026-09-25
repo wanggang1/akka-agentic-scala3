@@ -1171,7 +1171,7 @@ mvn verify
 ```
 
 Tests register a `TestModelProvider`, so **no API key or network is required** — results are
-deterministic. Capabilities 11 and 15 use no model at all, mocked or live.
+deterministic. Capabilities 11, 15 and 16 use no model at all, mocked or live.
 
 Prefer **`mvn clean verify`** as the final check before calling work done (see the note above).
 

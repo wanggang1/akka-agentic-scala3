@@ -4,7 +4,9 @@ This file provides guidance to AI coding assistant when working with code in thi
 
 ## Project overview
 
-See @README.md for a project overview, and how to build, test and run the application.
+See `README.md` for a project overview, and how to build, test and run the application.
+(Read it on demand — it is intentionally not auto-imported, as it exceeds Claude Code's
+context-file size limit.)
 
 ## Coding guidelines
 

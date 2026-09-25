@@ -7,8 +7,8 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 ## Where we are
 
-> **You are here:** Feature 16 (reacting to activity — **Consumer**, candidate A2) — **🚧 in progress on
-> branch `018-event-consumer`** ([`specs/018-event-consumer`](specs/018-event-consumer/)). A Scala consumer
+> **You are here:** Feature 16 (reacting to activity — **Consumer**, candidate A2) — **✅ merged to `main`
+> 2026-09-25 (PR #33)** ([`specs/018-event-consumer`](specs/018-event-consumer/)). A Scala consumer
 > watches capability 6's to-do lists, keeps an **activity feed** of what changed, and publishes each change
 > to a topic. No model anywhere.
 >
@@ -22,6 +22,14 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 > (a wrong type compiles, starts, and is never called); one `@Produce.ToTopic` stops the whole service
 > booting without topic support (`AK-00406`); the consumer **resumes** after a restart and replays nothing,
 > so the in-process feed states its window.
+>
+> The live walk corrected two documented claims, both now fixed: a brand-new user's **first** delivery
+> already contains the item that created the list, so it is reported inside the `baseline` counts and there
+> is **no `added` entry for it**; and the local broker substitute `eventing.support = "logging"` **prints
+> nothing by default** — it logs at INFO under a `kalix.*` logger the dev-mode logback silences at `WARN`,
+> so a walk that greps for published messages finds none though they were produced. One line in
+> `include-dev-loggers.xml` restores it. **A diagnostic configured off by default reads exactly like a
+> feature that did not run**, and only the bytecode settled which it was.
 >
 > **Previously:** Feature 15 (scheduled reminders — **Timed Action**, candidate A1) — **✅ merged to `main`
 > 2026-09-19 (PR #31)** ([`specs/017-timed-action`](specs/017-timed-action/)). `POST /reminders`
@@ -110,11 +118,12 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 > verified by mechanism, not by watching it happen.
 >
 >
-> **⏭️ Next:** undecided — the recommended run continues with **A2 Consumer** (largest coverage gap,
-> and it carries cap-7's observability follow-up with it) → **B1 session compaction** (the only candidate
-> that fixes a known defect instead of adding surface).
+> **⏭️ Next:** undecided — with A1 and A2 both built, the recommended run reaches **B1 session
+> compaction**, the only candidate that fixes a known defect (cap-6's unbounded history) instead of
+> adding surface. Two untouched families also remain: **A3** an event-sourced entity authored in Scala,
+> and **A4** a gRPC endpoint.
 >
-> Capabilities 1–15 are **✅ done and merged**; 5–15 were exploratory follow-ups beyond the original four.
+> Capabilities 1–16 are **✅ done and merged**; 5–16 were exploratory follow-ups beyond the original four.
 >
 > **📄 Retrospective:** [`FINDINGS.md`](FINDINGS.md) consolidates the single `dynamicCall` finding that
 > explains every Scala-vs-Java outcome, plus the practical rubric. Caps 5–11 extend the through-line: the
@@ -146,7 +155,7 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 | 14 | **Streaming responses** — `StreamEffect` instead of `Effect[T]`: `POST /stream-chat/{sessionId}` writes the reply as it is generated (chunked), beside cap-4's untouched one-piece `/chat`. **Headline: `dynamicCall` covers request/response ONLY** — it returns a `DynamicMethodRef` with no streaming member, so the agent client is on **both** sides of the method-ref wall; the Scala lambda compiles then fails at runtime blaming the caller's own class, while Java works. The wall took **one class** (the endpoint), pinned by a test; agent, domain and the endpoint's own test stay Scala. Streams are not the axis — `AutonomousAgentClient`/`TaskClient.notificationStream()` are zero-arg and clean. Also: **no `onFailure` on a stream**; a stream can hang (240 s under a scripted failure — though a *real* provider error ends it in ~178 ms, so that silence was a test-provider artifact and the guards cover the "never answers, never errors" case); and a pre-token failure is **undetectable** (`200`, chunked, 0 bytes, `curl_exit=0`). Fully offline-provable: 57 fragments, exact parity | [`specs/016-streaming-responses`](specs/016-streaming-responses/) | ✅ Done — merged (PR #29) |
 | 15 | **Scheduled reminders — Timed Action** (candidate A1, the first untouched family) — `POST /reminders` schedules a note to fire after a delay, `GET`/`DELETE /reminders/{id}` read and cancel it; four states (`pending`/`fired`/`cancelled`/`failed`) kept distinct, and a cancel that cancelled nothing is a `409` naming what stood. **Headline: one family on both sides of the wall, split by OPERATION** — scheduling is `TimedActionClient.method(...)`→`deferred()`, method-ref only (`DynamicMethodRef` has no `deferred()`), so `POST` is the one Java class; cancelling is `TimerScheduler.delete(String)`, Scala-clean — measured cancelling a *Java*-scheduled timer. The Scala lambda compiles then fails naming `$anonfun$1` outright — the clearest diagnostic yet. Also: the 3-arg `createSingleTimer` **retries indefinitely**; an exhausted timer is **silent** and an action gets **no attempt number**, so the action records its own final failure; a pending timer **did not survive a restart** (dev mode), so state is in-process by design. No model anywhere | [`specs/017-timed-action`](specs/017-timed-action/) | ✅ Done — merged (PR #31) |
-| 16 | **Reacting to activity — Consumer** (candidate A2) — a Scala `Consumer` over capability 6's `TodoEntity` keeps an activity feed (`GET /todo-activity`, `/{username}`, `/set-aside`) and publishes each change to the `todo-activity` topic. **Headline: the family is Scala-clean end to end — NO JAVA IN PRODUCTION** (first since cap-13), against cap-11's View on the *same* entity needing a Java querying endpoint: same source, two projections, two verdicts. The real finding is the failure contract — a throwing handler is redelivered **without limit** and **blocks every other entity** until it stops (measured schedule, doubling to 27.6 s+), so the consumer bounds its own attempts and sets a delivery aside; the SDK exposes no attempt number and `ce-id` changes per redelivery, so the key is the message's content. Also: the TestKit's key-value mock **drops** failing messages (false green → failure tested on the real path); a handler is chosen by **parameter type** (wrong type = starts, never called); one `@Produce.ToTopic` stops the whole service booting without topic support; the consumer **resumes** after a restart and replays nothing | [`specs/018-event-consumer`](specs/018-event-consumer/) | 🚧 In progress |
+| 16 | **Reacting to activity — Consumer** (candidate A2) — a Scala `Consumer` over capability 6's `TodoEntity` keeps an activity feed (`GET /todo-activity`, `/{username}`, `/set-aside`) and publishes each change to the `todo-activity` topic. **Headline: the family is Scala-clean end to end — NO JAVA IN PRODUCTION** (first since cap-13), against cap-11's View on the *same* entity needing a Java querying endpoint: same source, two projections, two verdicts. The real finding is the failure contract — a throwing handler is redelivered **without limit** and **blocks every other entity** until it stops (measured schedule, doubling to 27.6 s+), so the consumer bounds its own attempts and sets a delivery aside; the SDK exposes no attempt number and `ce-id` changes per redelivery, so the key is the message's content. Also: the TestKit's key-value mock **drops** failing messages (false green → failure tested on the real path); a handler is chosen by **parameter type** (wrong type = starts, never called); one `@Produce.ToTopic` stops the whole service booting without topic support; the consumer **resumes** after a restart and replays nothing | [`specs/018-event-consumer`](specs/018-event-consumer/) | ✅ Done — merged (PR #33) |
 
 **Status legend:** ✅ done · 📋 planned (spec written) · 🚧 in progress · ⬜ not started
 
@@ -251,7 +260,7 @@ Not on the four-capability path, captured so they're not forgotten:
 
 ## Candidate next capabilities
 
-The roadmap is **open**: capabilities 1–15 are merged, and the three candidates this section used to
+The roadmap is **open**: capabilities 1–16 are merged, and the three candidates this section used to
 list were all built — **guardrails** (cap-12, PR #25), **evaluation** (cap-13, PR #27) and **streaming**
 (cap-14, PR #29). Worth recording before they were deleted: two of their three interop bets were
 *wrong*, and instructively so. Guardrails were predicted to hit the bytecode-shape hazard and every
@@ -272,7 +281,7 @@ candidates that still extend the map rather than decorate it.
 | # | Candidate | What it explores | Interop bet |
 |---|---|---|---|
 | **A1** | **Timed Action** — ✅ **built as capability 15 (PR #31); the bet is resolved** (both sides of the wall, split by operation — see row 15) | Scheduling: `TimerScheduler.createSingleTimer(name, delay, deferred)`, plus the rescheduling-on-failure hazard AGENTS.md warns about. A natural fit is a delayed follow-up on cap-5's approval gate, or expiring a stale case. | **The sharpest bet left, and genuinely unpredictable.** The `deferred` argument is built from the component client — if it is a `DeferredCall` produced from a **method reference**, the wall bites a family we have never tested; if it is id-keyed like `TaskClient`, it is Scala-clean. Nothing in the project so far predicts which. New descriptor key `timed-action`. |
-| **A2** | **Consumer** — 🚧 **in flight as capability 16; the bet is resolved** (Scala-clean end to end; the hazard is the unbounded, blocking redelivery — see row 16) | The largest remaining hole: reacting to entity events or a topic, and publishing to one. It is also where cap-13's "there is **no** `Consume.FromAgent`" finding came from — this is that family, approached from the side that *does* exist. Natural fit: consume cap-6's `TodoEntity` events, or finally give cap-7's delegation **ground-truth** observability. | Component likely **Scala-clean** (`@Consume` is annotation-keyed, like `@McpEndpoint`). The open question is the **handler's event type**: a Scala sealed trait with `@TypeName` has never crossed the internal mapper (§3). New descriptor key `consumer`. |
+| **A2** | **Consumer** — ✅ **built as capability 16 (PR #33); the bet is resolved** (Scala-clean end to end; the hazard is the unbounded, blocking redelivery — see row 16) | The largest remaining hole: reacting to entity events or a topic, and publishing to one. It is also where cap-13's "there is **no** `Consume.FromAgent`" finding came from — this is that family, approached from the side that *does* exist. Natural fit: consume cap-6's `TodoEntity` events, or finally give cap-7's delegation **ground-truth** observability. | Component likely **Scala-clean** (`@Consume` is annotation-keyed, like `@McpEndpoint`). The open question is the **handler's event type**: a Scala sealed trait with `@TypeName` has never crossed the internal mapper (§3). New descriptor key `consumer`. |
 | **A3** | **Event Sourced Entity, authored by us in Scala** | Cap-6 has a *key-value* entity, in Java. An event-sourced one means a sealed event hierarchy, `applyEvent`, and snapshots — the persistence model [`docs/akka-persistence-models.md`](docs/akka-persistence-models.md) describes but the repo has never written. | **Two known walls collide.** The entity *client* is method-ref-only, so the caller is Java (cap-11's shape); events cross the internal mapper, so they must be Java-*shaped*. The new question is whether a **Scala 3 `enum` or sealed trait** survives that mapper at all, or whether `@TypeName` + Jackson polymorphism forces Java-*authored* events. New descriptor key `event-sourced-entity`. |
 | **A4** | **gRPC endpoint** | A `.proto` in `src/main/proto` and a Scala class implementing the protoc-generated **Java** interface, with `toApi` converters. | **A different axis from the wall: build ordering.** Generated Java sources must interleave with cap-11's scalac-then-javac arrangement (§13 R3) — the one part of this build that has already broken twice. Lower interop novelty, higher build risk. |
 
@@ -291,7 +300,7 @@ first fixes something that is actually wrong today.
 
 ### How these are ordered, and why
 
-**A1 → A2 → B1** is the recommended run. **A1 is done** (capability 15, PR #31) and **A2 is in flight** (capability 16), so **B1 session compaction** is next — the only candidate that fixes a known defect rather than adding surface.
+**A1 → A2 → B1** is the recommended run. **A1 and A2 are done** (capabilities 15 and 16, PRs #31 and #33), so **B1 session compaction** is next — the only candidate that fixes a known defect rather than adding surface.
 
 - **A1 (Timed Action) first** because it is small, it is a whole untouched family, and its outcome is
   the one nobody can call in advance. Cap-14 proved the wall still holds surprises fourteen capabilities
