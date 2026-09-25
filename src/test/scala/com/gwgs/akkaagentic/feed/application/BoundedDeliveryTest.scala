@@ -22,7 +22,7 @@ class BoundedDeliveryTest:
 
   @Test
   def successSpendsNothingAndLeavesNoSetAside(): Unit =
-    assertThat(run("alice", "fp", 3)(())).isEqualTo(Outcome.Succeeded)
+    assertThat(run("alice", "fp", 3)(())).isEqualTo(Outcome.Succeeded(()))
     assertThat(ActivityStore.feed.attemptsFor(DeliveryKey(consumer, "alice", "fp"))).isEqualTo(0)
     assertThat(ActivityStore.feed.setAsides.isEmpty).isTrue()
 

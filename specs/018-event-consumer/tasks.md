@@ -109,10 +109,10 @@ test-green, committed and pushed as it lands.
 
 ## Phase 6: User Story 4 — The reaction is passed on (P2)
 
-- [ ] T026 [P] [US4] Write `src/test/scala/com/gwgs/akkaagentic/feed/api/TodoActivityPublishIntegrationTest.scala` with `withTopicOutgoingMessages("todo-activity")`: one message per delivery that produced changes, in feed order; `ce-subject` = username; **none** for a duplicate and none for a set-aside (SC-005); the payload's optional fields serialize as plain values (research Q-C)
-- [ ] T027 [US4] Add `@Produce.ToTopic("todo-activity")` to `TodoActivityConsumer`, returning `effects().produce(TodoActivityMessage(...), Metadata.EMPTY.add("ce-subject", username))` when a delivery produced changes and `effects().ignore()` otherwise; define the idiomatic `TodoActivityMessage` in `src/main/scala/com/gwgs/akkaagentic/feed/application/TodoActivityConsumer.scala`
-- [ ] T028 [US4] Start the service with plain `mvn compile exec:java` and confirm it starts (no `AK-00406`) — the one behaviour the TestKit cannot show (research Q-C)
-- [ ] T029 [US4] Run `mvn clean verify`
+- [x] T026 [P] [US4] Write `src/test/scala/com/gwgs/akkaagentic/feed/api/TodoActivityPublishIntegrationTest.scala` with `withTopicOutgoingMessages("todo-activity")`: one message per delivery that produced changes, in feed order; `ce-subject` = username; **none** for a duplicate and none for a set-aside (SC-005); the payload's optional fields serialize as plain values (research Q-C)
+- [x] T027 [US4] Add `@Produce.ToTopic("todo-activity")` to `TodoActivityConsumer`, returning `effects().produce(TodoActivityMessage(...), Metadata.EMPTY.add("ce-subject", username))` when a delivery produced changes and `effects().ignore()` otherwise; define the idiomatic `TodoActivityMessage` in `src/main/scala/com/gwgs/akkaagentic/feed/application/TodoActivityConsumer.scala`
+- [x] T028 [US4] Start the service with plain `mvn compile exec:java` and confirm it starts (no `AK-00406`) — the one behaviour the TestKit cannot show (research Q-C)
+- [x] T029 [US4] Run `mvn clean verify`
 
 **Checkpoint**: both halves of the family — consume and produce — shipped in Scala. **Gate → commit + push.**
 

@@ -22,27 +22,28 @@ import com.gwgs.akkaagentic.feed.domain.DeliveryKey
   */
 object BoundedDelivery:
 
-  enum Outcome:
-    /** The work completed; the delivery's attempt count is spent. */
-    case Succeeded
+  /** Parameterised by what the work produced, so a caller never needs a mutable cell to get it out. */
+  enum Outcome[+A]:
+    /** The work completed, carrying its result; the delivery's attempt count is spent. */
+    case Succeeded(value: A)
 
     /** It failed with attempts left: the caller should rethrow `cause` so the runtime redelivers. */
-    case WillRetry(attempt: Int, cause: Throwable)
+    case WillRetry(attempt: Int, cause: Throwable) extends Outcome[Nothing]
 
     /** It failed on its last permitted attempt: the delivery is recorded as set aside, and the caller
       * should return `done()` so the stream moves on for everyone else. */
-    case GaveUp(attempt: Int, cause: Throwable)
+    case GaveUp(attempt: Int, cause: Throwable) extends Outcome[Nothing]
 
   /** Run one attempt of `work` for a delivery, under a bound of `limit` attempts.
     *
     * Only non-fatal failures are caught, so a fatal JVM error is never mistaken for a poison message.
     */
-  def run(consumer: String, username: String, fingerprint: String, limit: Int)(work: => Unit): Outcome =
+  def run[A](consumer: String, username: String, fingerprint: String, limit: Int)(work: => A): Outcome[A] =
     val key = DeliveryKey(consumer, username, fingerprint)
     Try(work) match
-      case Success(_) =>
+      case Success(value) =>
         ActivityStore.settled(key)
-        Outcome.Succeeded
+        Outcome.Succeeded(value)
       case Failure(cause) =>
         val attempt = ActivityStore.attempted(key)
         if attempt >= limit then

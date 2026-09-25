@@ -47,7 +47,7 @@ class TodoProbeConsumer(config: Config) extends Consumer:
       if ProbeLog.consumeFailOnce(subject) then
         throw RuntimeException(s"probe: first delivery for $subject fails, the next will succeed")
     } match
-      case Outcome.Succeeded => effects().done()
+      case Outcome.Succeeded(_) => effects().done()
       case Outcome.WillRetry(attempt, cause) =>
         logger.info("todo probe: [{}] failed attempt {} of {}; asking for a redelivery", subject, attempt, attemptLimit)
         throw cause
