@@ -1,8 +1,8 @@
 # Findings — Scala 3 on the Java-first Akka SDK
 
-What building **fifteen capabilities** in Scala 3 on the Java-first Akka SDK taught us,
+What building **sixteen capabilities** in Scala 3 on the Java-first Akka SDK taught us,
 consolidated into one page. The per-capability design detail lives in [`specs/`](specs/); the
-day-to-day interop workarounds live in [`README.md`](README.md) "Scala interop notes" §1–17; the
+day-to-day interop workarounds live in [`README.md`](README.md) "Scala interop notes" §1–18; the
 status table lives in [`ROADMAP.md`](ROADMAP.md). **This page is the synthesis** — the single
 finding that explains every outcome, and the rubric it yields.
 
@@ -30,6 +30,7 @@ reference in the first place (`Class` references, `Task` constants, a URL string
 | `RemoteMcpTools` (MCP client, cap-10) | URL **string** (`fromService`/`fromServer`) | ✅ yes |
 | `TimedActionClient` — **scheduling** (cap-15) | method-ref **only**; `DynamicMethodRef` has no `deferred()` | ❌ no |
 | `TimerScheduler.delete` — **cancelling** (cap-15) | timer name, a plain **string** | ✅ yes |
+| `Consumer` — the whole family (cap-16) | an annotation carrying a `Class`; the handler by **parameter type** | ✅ yes — no client at all |
 
 **Any client keyed solely on a Java method reference is unreachable from Scala.** That is the whole
 story; everything below is a corollary. Crucially, the wall is a property of the *client*, not of
@@ -290,7 +291,8 @@ uncompilable.
   durable loop — it's *the* Scala-friendly durable-orchestration primitive.
 - **Expect Java only when you must:** (a) author or invoke a Workflow, (b) query an entity directly,
   (c) query a View, (d) consume an agent's token stream (cap-14), or (e) **schedule** a timed action
-  (cap-15) — though *cancelling* one, and authoring it, stay Scala. Everything else — agents, autonomous agents, HTTP endpoints, MCP endpoints, domain,
+  (cap-15) — though *cancelling* one, and authoring it, stay Scala. A **Consumer** (cap-16) needs none of
+  it: the family holds no method reference anywhere. Everything else — agents, autonomous agents, HTTP endpoints, MCP endpoints, domain,
   validation — stays idiomatic Scala. And keep the Java part **as small as the class holding the method
   ref**: a Java caller does not imply a Java component.
 - **Check the reflected *shape*, not only the key type.** When the SDK reflects over a class (nested
@@ -488,3 +490,49 @@ happened afterwards. The retry test uses a separate invocation counter that play
 decision, which is exactly what makes it a valid check on that decision. The same idea showed up in the
 cancellation test: "still `cancelled`" would hold even if the timer had run (the store guards it), so the
 run's log was checked for the action executing — it never did.
+
+## Capability 16 — consumers: Scala-clean throughout, and the hazard moves somewhere else
+
+Fifteen capabilities asked "which language does this force?". This one answers **neither** — and then shows
+that the question had been hiding a bigger one.
+
+**No Java in production**, the first since capability 13. A `Consumer` is declared by an annotation carrying
+a `Class`, its handler is chosen by **parameter type**, and it returns effects from `effects()`; the reading
+endpoint holds an in-process store rather than a `ViewClient`. There is no client to be keyed on a method
+reference, so the wall never comes up.
+
+**The sharpest comparison in the project so far**: capability 11's View consumes **the same entity**. It
+needed a Java querying endpoint (`ViewClient` is method-ref-only) *and* the companion-object bytecode shape.
+Two projections over one source, two different verdicts — which is what "the wall is a property of the
+client" means in practice, stated as concretely as it can be.
+
+**Handler selection is by type, and the failure modes are asymmetric** (measured): two handlers taking the
+same type compile and stop the service starting; a handler taking the *wrong* type compiles, starts, and is
+simply never called, with nothing logged. The only signal for the second is an integration test timing out —
+worth knowing before trusting a green unit suite.
+
+**The real hazard is not the language boundary at all.** A handler that throws is redelivered **without
+limit** (measured: 0, 277, 789, 1719, 3419, 6985, 13976, 27611 ms, doubling) and **blocks every other
+entity** until it stops. Giving up and returning `done()` released the stream within 1 ms. So a consumer
+must bound its own attempts — and the SDK gives it nothing to count with: no attempt number, and a `ce-id`
+that changes on every redelivery, so the key has to be the message's **content**. A set-aside is not a
+tombstone either: a restart of the failing stream can replay the message with the count starting over.
+
+**Two platform traps worth carrying forward.** The TestKit's key-value mock **never redelivers** a failing
+message, so failure tests belong on the real projection path — a false-green hazard, not a convenience.
+(It was first recorded as also losing the messages behind the failure; that half did not reproduce and is
+now claimed neither way — the absence of redelivery is enough on its own.) And one consumer declaring `@Produce.ToTopic` stops the **whole service** booting when no topic
+support is configured (`AK-00406`), which the suite cannot show because it mocks topics.
+
+**A third, found by the live walk rather than the probe: the local substitute for a broker prints nothing.**
+`eventing.support = "logging"` does log every produced message — at INFO, under a logger named
+`kalix.runtime.eventing.LoggingEventingSupport.<topic>` — but the dev-mode logback config silences the whole
+`kalix` tree at `WARN`. So a walk that greps the service log for published messages finds none and can
+conclude, wrongly, that publishing never happened. One line in `include-dev-loggers.xml` restores it. The
+general shape is worth keeping: **a diagnostic that is configured off by default reads exactly like a
+feature that did not run**, and only the bytecode settled which it was.
+
+**Method result worth reusing.** Capability 15 asked a guarantee to be proven with a witness that takes no
+part in it; capability 16 needed the same trick for a different reason. Once a delivery is set aside its
+attempt count is cleared, so the store cannot testify to how many times the runtime actually delivered — a
+separate counter in the probe does, and it is what the bound is checked against.

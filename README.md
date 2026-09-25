@@ -156,6 +156,20 @@ src/main/scala/com/gwgs/akkaagentic/reminders/probe/       # FR-013 evidence: th
 # durable state over a volatile timer would read "pending" for ever. New descriptor key `timed-action`.
 # No model anywhere, mocked or live. See §17.
 
+# Capability 16 — Scala, end to end (reacting to activity: a Consumer; see "Scala interop notes" §18)
+src/main/scala/com/gwgs/akkaagentic/feed/domain/      # TodoSnapshot (+fingerprint), TodoChange, TodoDiff, ActivityFeed — pure, no Akka import
+src/main/scala/com/gwgs/akkaagentic/feed/application/ # TodoActivityConsumer (@Consume.FromKeyValueEntity + @Produce.ToTopic), ActivityStore (one atomic cell), BoundedDelivery, FeedSettings
+src/main/scala/com/gwgs/akkaagentic/feed/api/         # TodoActivityEndpoint (GET /todo-activity, /{username}, /set-aside)
+src/main/scala/com/gwgs/akkaagentic/feed/probe/       # FR-013 evidence: the always-failing instrument + the runtime-owned TaskEntity probe
+# Note: the first capability since 13 with NO JAVA IN PRODUCTION — the Consumer family takes no method
+# reference anywhere, so unlike cap-11's View over the SAME entity (whose querying endpoint is Java), both
+# the component and its reader are Scala. A key-value source delivers STATE, not events, so the reaction
+# derives changes by comparing against the last state seen; an identical state records nothing, which is
+# what makes a duplicate a no-op. Every delivery runs under a self-counted bound: a failing handler is
+# redelivered WITHOUT LIMIT and blocks every other user until it stops (measured), so a delivery that
+# cannot be processed is set aside and the stream moves on. The feed is in-process and says so (`since`):
+# the consumer resumes after a restart and replays nothing. New descriptor key `consumer`. See §18.
+
 src/main/resources/application.conf                 # default model-provider config
 src/test/{scala,java}/com/gwgs/akkaagentic/...       # tests (TestModelProvider, no live model)
 ```
@@ -999,7 +1013,10 @@ writing components in Scala needs explicit workarounds:
       timed action **no attempt number** (`CommandContext` carries only tracing and metadata). So each
       action counts its own attempts and, on the last permitted one, records the reminder as `failed`
       and returns `done()` instead of throwing. Without that, a reminder whose work always failed would
-      read `pending` for ever. The timer's `maxRetries` is then a backstop, not the only line. Both timed
+      read `pending` for ever. The timer's `maxRetries` is then a backstop, not the only line. **Capability 16 met the same trap in a
+      worse form** — a consumer's failing delivery is redelivered without limit *and* blocks every other
+      entity until it stops, so the same self-counted bound is not a refinement there but a condition of
+      shipping (§18). Both timed
       actions — production and the always-failing instrument — run their work through one helper,
       [`BoundedAttempts`](src/main/scala/com/gwgs/akkaagentic/reminders/application/BoundedAttempts.scala),
       so the bound the retry test proves is the shipped code path, not a copy of it.
@@ -1030,6 +1047,78 @@ writing components in Scala needs explicit workarounds:
     the project's second entirely model-free capability after capability 11.
 
     New descriptor key `timed-action`; no `pom.xml` change. See specs/017 research Q-A–Q-E.
+
+18. **A Consumer is the first component family that is Scala-clean end to end — and the first whose real
+    hazard is not the language boundary at all.** Capability 16 (`com.gwgs.akkaagentic.feed.*`) watches
+    capability 6's to-do lists and keeps an **activity feed** of what changed, publishing each change to a
+    topic. It is the second of the four SDK families this project had never built. Every answer below was
+    measured by a probe that ran **before** the design (specs/018 research Q-A–Q-G).
+
+    - **Nothing in the family takes a method reference, so nothing is forced into Java.** A Consumer is
+      declared by an annotation carrying a class and returns effects from `effects()`; the reading endpoint
+      queries an in-process store, not a `ViewClient`. So this capability has **no Java in production at
+      all** — the first since capability 13. The contrast is exact and worth keeping: capability 11's View
+      consumes the **same entity**, and it needed a Java querying endpoint *and* the companion-object
+      bytecode shape (§13). Same source, two projections, two different interop verdicts.
+
+    - **A handler is selected by its PARAMETER TYPE** — not its name, and not by overriding anything.
+      `Consumer` declares no abstract handler; the SDK's router holds a map from payload type to method.
+      The two ways to get it wrong fail very differently, and both were measured:
+
+      | Mistake | Compiles | Runtime |
+      |---|---|---|
+      | two handlers taking the same type | yes | **refuses to start**: *"Duplicated update methods [onUpdate, onUpdateTwin] … Ambiguous handlers for …TodoList"* |
+      | a handler taking the **wrong** type | yes | **starts normally and is never called** — nothing logs or reports it |
+
+      The second is the dangerous one: the only signal is that the integration tests time out. `@DeleteHandler`
+      exists because a deletion carries no payload, so type-matching has nothing to work with.
+
+    - **The failure contract is the finding that shaped the design.** A handler that throws is redelivered
+      **without limit** — measured schedule in ms: `0, 277, 789, 1719, 3419, 6985, 13976, 27611`, roughly
+      doubling — and while that happens **every other entity's changes wait behind it**: a change for an
+      unrelated user, written after the failure began, arrived only once the failing one stopped failing.
+      A handler that gives up and returns `done()` released the stream **within 1 ms**. So the consumer
+      counts its own attempts and sets a delivery aside at `feed.max-attempts`. The SDK gives it nothing to
+      count with — no attempt number on `MessageContext`, and `ce-id` changes on every redelivery — so the
+      key is (consumer, user, **state fingerprint**). *And a set-aside is not a tombstone*: the stream
+      restarts while failing, so the same message can be replayed afterwards with the count starting over.
+      The bound guarantees that one run of failures ends, not that the message is never seen again.
+
+    - **The TestKit's mocked incoming channel does not model any of that.** Under the mock a failing
+      message is **never redelivered**; on the real projection it is redelivered with backoff and the
+      messages behind it are held. That difference alone makes a failure test written against the mock a
+      false green, so capability 16 tests failure by writing the real entity — which is why its only Java is
+      a *test* (writing capability 6's entity needs a method reference). (A Phase 0 observation that the
+      mock also *loses* messages published behind a failure did not reproduce on a later run; it is
+      recorded as timing-dependent and claimed in neither direction.)
+
+    - **Publishing is Scala-clean, with two sharp edges.** A produced payload goes through the
+      **Scala-aware** mapper — an idiomatic case class with `Option` fields serialises fine, unlike a
+      component payload (§3) — but `None` is written as **`null`** unless the type carries
+      `@JsonInclude(NON_ABSENT)`; a `baseline` message shipped `"itemId":null` until that was added.
+      And the startup trap: with the default `eventing.support = "none"`, **one** consumer declaring
+      `@Produce.ToTopic` stops the **whole service** booting (`AK-00406`), every other capability included —
+      invisible to the suite, because the TestKit mocks topics. `application.conf` sets the dev-mode sink to
+      `logging`, which logs each message and drops it. It is **not a broker**: a consumer reading *from* a
+      topic under `logging` is told, in the runtime's own words, that it *"will not receive any events"*.
+      Nothing in this project has ever published to a real broker. A third edge, found by the live walk
+      rather than by the probe: `logging` **prints nothing by default**. It logs at INFO under
+      `kalix.runtime.eventing.LoggingEventingSupport.<topic>`, and the dev-mode logback config silences the
+      whole `kalix` tree at `WARN` — so a walk that greps the log for published messages finds none and can
+      easily conclude publishing never happened. One line in `include-dev-loggers.xml` restores it.
+
+    - **After a restart the consumer resumes and replays nothing** (measured: zero events re-delivered). So
+      any state a consumer keeps in process is lost and never rebuilt — the feed therefore returns `since`
+      on every read, the window it can actually speak for. A durable feed would need an entity, whose client
+      is method-reference-only, and is recorded as a fork rather than smuggled in.
+
+    - **A Scala consumer can read the SDK's own runtime-owned `TaskEntity`** (`TaskCreated`,
+      `TaskAssigned(assignee)`, `TaskFailed`), which extends capability 13's finding from runtime-owned
+      *agents* to runtime-owned *event streams*. But it is **useless for capability 7's delegation**: a live
+      run produced exactly one task — the coordinator's own — because delegating to request-based specialists
+      creates no tasks. Reachable is not the same as useful, and the ROADMAP fork B3 stays open.
+
+    New descriptor key `consumer`; no `pom.xml` change. See specs/018 research Q-A–Q-G.
 
 ## Build
 
@@ -2413,6 +2502,79 @@ engineered rather than assumed.
 > were `400` with the domain's exact messages. After a restart the fired reminder's id answered `404`, as
 > documented. The walk also caught a real defect, now fixed: an out-of-range `REMINDERS_MAX_RETRIES`
 > first surfaced as `400` (see above); it is now `500`, and `REMINDERS_MAX_RETRIES=3` is honoured.
+
+### Capability 16 — activity feed (`GET /todo-activity`, and a `todo-activity` topic)
+
+Capability 16 **reacts**. Nothing calls it: when capability 6's assistant changes a to-do list, a Consumer
+notices, records what changed, and publishes it. The feed is read-only — writes still happen only through
+the assistant.
+
+```shell
+# Cause activity (needs Ollama — the write path is capability 6's agent)
+curl -s -X POST http://localhost:9000/request/alice \
+  -H "Content-Type: application/json" -d '{"message":"add a to-do to buy milk"}'
+curl -s -X POST http://localhost:9000/request/alice \
+  -H "Content-Type: application/json" -d '{"message":"mark to-do 1 as done"}'
+
+curl -s http://localhost:9000/todo-activity/alice
+# {"since":"2026-09-25T19:10:49Z","entries":[
+#   {"sequence":1,"username":"alice","kind":"baseline","recordedAt":"…","open":1,"completed":0},
+#   {"sequence":2,"username":"alice","kind":"completed","recordedAt":"…","itemId":1,"description":"buy milk"}]}
+```
+
+`kind` is one of `baseline`, `added`, `completed`, `reopened`, `removed`, `list-deleted`. The **first**
+sighting of a user is a `baseline`, not a run of `added`: the feed never claims history it did not observe.
+Note what that means for a brand-new user, and it surprised the live walk — the consumer's first delivery
+**already contains** the item that created the list, so `"buy milk"` shows up inside the `baseline`'s counts
+(`open: 1`) and there is **no `added` entry for it**. `added` appears from the second change onwards.
+
+**Deliveries that could not be processed** are set aside with their reason, and never counted as activity:
+
+```shell
+curl -s http://localhost:9000/todo-activity/set-aside
+# {"since":"…","setAsides":[]}
+```
+
+**What is published** goes to the `todo-activity` topic — one message per change, `ce-subject` = username:
+
+```json
+{"username":"alice","changes":[{"kind":"completed","itemId":1,"description":"buy milk"}],"recordedAt":"…"}
+```
+
+Locally there is no broker: `akka.javasdk.dev-mode.eventing.support = "logging"` logs each message and drops
+it. Without that setting the **whole service refuses to start** (`AK-00406`). The sink logs at INFO under
+`kalix.runtime.eventing.LoggingEventingSupport.<topic>`, and the dev-mode logback config silences the whole
+`kalix` tree at `WARN` — so it prints nothing until that logger is re-enabled, which
+[`include-dev-loggers.xml`](src/main/resources/include-dev-loggers.xml) now does:
+
+```text
+15:11:25.489 INFO  k.r.e.L.todo-activity - DestinationEvent(CloudEvent(…,todo-activity-consumer,…,
+  Some(walk-bob),…,Some(<ByteString size=135 contents="{\"username\":\"walk-bob\",\"changes\":[{\"kind\":\"comp...">),…))
+```
+
+The payload is a **truncated preview**, not the whole message — enough to confirm something was published.
+
+> **The feed covers a window, and says which.** It lives in this process, while the consumer's position is
+> durable: after a restart the consumer resumes and **replays nothing**, so changes recorded before the
+> restart are gone and the first change per user afterwards is a fresh `baseline`. That is why every
+> response carries `since`. Retention is bounded too (500 entries, 100 set-asides, 1000 users).
+>
+> **One bad delivery cannot stall the rest.** A failing handler is redelivered without limit by the platform
+> and holds up every other user until it stops; this consumer gives up after `feed.max-attempts` (default 3,
+> `FEED_MAX_ATTEMPTS`), records a set-aside, and lets the stream move on.
+>
+> **Where the interop line falls: nowhere.** No Java in production — the first capability since 13. The
+> contrast worth noting is capability 11's View, which consumes the *same* entity and needed a Java querying
+> endpoint (§18).
+>
+> *Verified live* (Ollama `qwen3:8b` driving capability 6; the feed itself uses no model). Three requests to
+> `POST /request/walk-alice` — add "buy milk", complete it, add "call mum" — produced, **unasked**, a feed of
+> `baseline {open:1}` → `completed {itemId:1,"buy milk"}` → `added {"call mum"}`, each within a second of the
+> assistant's reply, with `since` on every response and `GET /todo-activity/set-aside` empty throughout. The
+> walk corrected two things now fixed above: a brand-new user's first delivery **already contains** the item,
+> so there is no `added` entry for it (the example claimed one), and the `logging` sink **printed nothing**
+> until its logger was un-silenced — with that line in place, `k.r.e.L.todo-activity - DestinationEvent(…)`
+> appears for each published message, `ce-subject` = the username.
 
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.
