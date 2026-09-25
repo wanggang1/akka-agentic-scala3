@@ -99,6 +99,16 @@ never shows it. `akka.javasdk.dev-mode.eventing.support = "logging"` fixes it (m
 `mvn compile exec:java` up in 8 s, no AK-00406) and logs each produced message. A deployed service needs a
 real broker configured in the Akka project; that is untested here and claimed neither way.
 
+**Correction from the live walk (T039): `logging` prints nothing by default.** The sink logs at INFO under
+a logger named `<class>.<topic>` — `kalix.runtime.eventing.LoggingEventingSupport.todo-activity` — and
+`logback-runtime-dev-mode.xml` (in `akka-runtime-dev`) silences the whole `kalix` tree at `WARN`. The first
+walk therefore greped the service log for published messages and found **none**, though the consumer had
+demonstrably produced three. Dev-mode user loggers are applied last and may override runtime loggers, so
+`include-dev-loggers.xml` now carries
+`<logger name="kalix.runtime.eventing.LoggingEventingSupport" level="INFO"/>`, after which each message
+prints as `k.r.e.L.todo-activity - DestinationEvent(CloudEvent(…))` with the payload as a **truncated
+`ByteString` preview**.
+
 ## Q-D — The failure contract. **Unbounded, and it blocks everyone.** Measured on the real path.
 
 **The mocked path could not answer this** (Q-F), so it was measured by writing to the real `TodoEntity`.
@@ -161,16 +171,22 @@ model.
 ## Q-F — What the TestKit's mocked channel proves. **Delivery and publishing — not failure.**
 
 On the mocked path a failing message was **never redelivered** (`attempts=2`, and the two were two
-*different* messages at 0 ms and 126 ms), a message for another user published during the failure **never
-arrived**, and curing the failure brought nothing back. The real projection redelivers with backoff and
-holds the bystander until it can deliver it. So:
+*different* messages at 0 ms and 126 ms), and curing the failure brought nothing back. The real projection
+redelivers with backoff and holds the bystander until it can deliver it. So:
+
+> **Corrected 2026-09-25 (T035).** Phase 0 also observed that a message published *behind* the failure
+> **never arrived**. Re-run while trimming the probe, that did **not** reproduce: the bystander was
+> delivered within 4 s. So the reproducible property of the mocked channel is **"it never redelivers"** —
+> which is on its own enough to make a failure assertion there a false green. Whether messages published
+> during a failure survive is **timing-dependent and unreliable**, observed both ways, and is no longer
+> claimed in either direction. The test now asserts only the part that reproduces.
 
 | Behaviour | Mocked incoming | Real projection |
 |---|---|---|
 | delivery, input type, metadata, delete | ✅ faithful | ✅ |
 | publishing (outgoing mock) | ✅ observable | needs `eventing.support` |
 | redelivery of a failing message | ❌ none | exponential, unbounded |
-| messages behind a failure | ❌ **lost** | held, then delivered |
+| messages behind a failure | **unreliable** — lost in one run, delivered in another | held, then delivered |
 
 **A test of failure handling on the mocked path would be a false green.** Failure behaviour is tested on
 the real path. Suite cost of the probes: mocked 90 s, real 66 s — both dominated by deliberate 30 s

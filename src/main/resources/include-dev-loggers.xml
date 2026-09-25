@@ -10,4 +10,13 @@
  -->
 <included>
     <logger name="com.gwgs.akkaagentic" level="INFO"/>
+
+    <!--
+      Capability 16 (`@Produce.ToTopic`): with no broker locally, `dev-mode.eventing.support = "logging"`
+      routes every produced message to a logger named `<this class>.<topic>` and logs it at INFO. The
+      dev-mode logback config silences the whole `kalix` tree at WARN, so without this line the messages
+      are emitted and never printed. Dev-mode user loggers are applied last and may override runtime
+      loggers, so this re-enables just that one sink (measured: `… .todo-activity - DestinationEvent(…)`).
+    -->
+    <logger name="kalix.runtime.eventing.LoggingEventingSupport" level="INFO"/>
 </included>

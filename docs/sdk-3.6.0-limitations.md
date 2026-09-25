@@ -405,15 +405,18 @@ projection into slices, which may confine the blocking; claimed neither way.)
 
 ### 8b. The TestKit's key-value mock does not model redelivery — failure tests there are false greens
 
-With `withKeyValueEntityIncomingMessages(...)`, a failing message is **never redelivered**, and messages
-published while it fails are **lost**. The real projection does the opposite: it redelivers and holds the
-others back.
+With `withKeyValueEntityIncomingMessages(...)`, a failing message is **never redelivered**. The real
+projection does the opposite: it redelivers with backoff and holds the others back until it succeeds.
+
+(An early run also saw messages published *during* a failure disappear; a later run delivered them. That
+half is timing-dependent and is claimed in neither direction — the absence of redelivery is what
+reproduces, and it is enough to make a failure test there meaningless.)
 
 | Behaviour | Mocked incoming | Real projection |
 |---|---|---|
 | delivery, input type, delete handler, metadata | faithful | faithful |
 | redelivery of a failing message | **none** | exponential, unbounded |
-| messages behind a failure | **lost** | held, then delivered |
+| messages behind a failure | unreliable (seen both ways) | held, then delivered |
 
 **Consequence**: assert failure behaviour by writing the real entity. If the entity's client is
 method-reference-only, that test must be Java — a *test*, which does not compromise a Scala production claim.
@@ -429,7 +432,30 @@ kalix.runtime.InvalidServiceException
 ```
 
 The suite never shows it, because the TestKit mocks topics. `akka.javasdk.dev-mode.eventing.support =
-"logging"` makes local runs work: each produced message is written to the log and dropped.
+"logging"` makes local runs work: each produced message is logged and dropped.
+
+**But `logging` prints nothing by default, which is worth knowing before concluding it did nothing.** The
+sink logs at INFO under a logger named `<class>.<topic>` —
+`kalix.runtime.eventing.LoggingEventingSupport.todo-activity` — and the dev-mode logback config
+(`logback-runtime-dev-mode.xml`, inside `akka-runtime-dev`) silences the entire `kalix` tree at `WARN`. So
+the messages are emitted and never printed, and a live walk that greps the service log for them finds
+nothing. Dev-mode user loggers are applied **last** and may override runtime loggers, so one line in
+`include-dev-loggers.xml` restores it:
+
+```xml
+<logger name="kalix.runtime.eventing.LoggingEventingSupport" level="INFO"/>
+```
+
+Measured with it in place:
+
+```text
+15:11:25.489 INFO  k.r.e.L.todo-activity - DestinationEvent(CloudEvent(61459a8a-…,todo-activity-consumer,1.0,
+  …TodoActivityConsumer$TodoActivityMessage,application/json,None,Some(walk-bob),Some(2026-09-25T19:11:25Z),
+  Some(<ByteString@7afc059c size=135 contents="{\"username\":\"walk-bob\",\"changes\":[{\"kind\":\"comp...">),…))
+```
+
+Note the payload is a **truncated `ByteString` preview**, not the whole JSON — enough to confirm a message
+was published and see its head, not a substitute for a subscriber.
 
 **`logging` is not a broker, and it is asymmetric.** Producing is tolerated; a consumer reading *from* a
 topic gets the runtime's own warning — *"has a source […] but no message broker is configured (eventing

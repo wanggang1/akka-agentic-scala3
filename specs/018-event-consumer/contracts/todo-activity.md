@@ -13,10 +13,14 @@ silent.
 ```json
 {"since":"2026-09-19T11:07:24Z",
  "entries":[
-   {"sequence":1,"username":"alice","kind":"baseline","open":0,"completed":0,"recordedAt":"…"},
-   {"sequence":2,"username":"alice","kind":"added","itemId":1,"description":"buy milk","recordedAt":"…"},
-   {"sequence":3,"username":"alice","kind":"completed","itemId":1,"description":"buy milk","recordedAt":"…"}]}
+   {"sequence":1,"username":"alice","kind":"baseline","open":1,"completed":0,"recordedAt":"…"},
+   {"sequence":2,"username":"alice","kind":"completed","itemId":1,"description":"buy milk","recordedAt":"…"},
+   {"sequence":3,"username":"alice","kind":"added","itemId":2,"description":"call mum","recordedAt":"…"}]}
 ```
+
+The first entry per user is always a `baseline` carrying the counts of the state the consumer found, and
+those counts **include** whatever created the list — so the item behind `sequence 1` above gets no `added`
+entry of its own. `added` describes changes seen *after* a user's first sighting.
 
 `kind` ∈ `baseline` · `added` · `completed` · `reopened` · `removed` · `list-deleted`. Optional fields are
 omitted when empty. An empty feed is `200` with `"entries":[]` — "nothing has happened" is an answer.
@@ -52,6 +56,8 @@ One message per delivery **that produced changes** (none for a duplicate, none f
 Metadata `ce-subject` = username, so a broker keeps each user's messages in order. The payload is an
 idiomatic Scala type — measured to serialize through the Scala-aware mapper (research Q-C).
 
-**Locally** there is no broker: `akka.javasdk.dev-mode.eventing.support = "logging"` writes each message to
-the service log. Without that setting the **whole service refuses to start** (`AK-00406`, research Q-C).
+**Locally** there is no broker: `akka.javasdk.dev-mode.eventing.support = "logging"` logs each message and
+drops it. Without that setting the **whole service refuses to start** (`AK-00406`, research Q-C). The sink
+logs at INFO under `kalix.runtime.eventing.LoggingEventingSupport.<topic>`, which the dev-mode logback
+config silences at `WARN`, so nothing prints until `include-dev-loggers.xml` re-enables that logger.
 A deployed service needs a broker configured in the Akka project; that is untested here.

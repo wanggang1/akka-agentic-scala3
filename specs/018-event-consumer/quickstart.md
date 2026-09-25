@@ -18,23 +18,28 @@ curl -s -X POST http://localhost:9000/request/alice \
 
 curl -s http://localhost:9000/todo-activity/alice
 # {"since":"…","entries":[
-#   {"sequence":1,"username":"alice","kind":"baseline","open":0,"completed":0,…},   (first sighting)
-#   {"sequence":2,"username":"alice","kind":"added","itemId":1,"description":"buy milk",…},
-#   {"sequence":3,"username":"alice","kind":"completed","itemId":1,"description":"buy milk",…}]}
+#   {"sequence":1,"username":"alice","kind":"baseline","open":1,"completed":0,…},   (first sighting)
+#   {"sequence":2,"username":"alice","kind":"completed","itemId":1,"description":"buy milk",…}]}
 ```
 
 Nothing called the feed. The assistant wrote capability 6's to-do list; the consumer noticed.
 
-Whether the first entry is `baseline` or `added` depends on whether the consumer saw an earlier state for
-alice — both are correct; the feed never invents history it did not observe.
+**There is no `added` entry for "buy milk", and that is correct.** The consumer's first sighting of alice
+already contains the item, so it can only report the state it found — a `baseline` whose counts include it.
+`added` appears from the second change onwards. The feed never invents history it did not observe.
 
 ## See what was published
 
-With no broker locally, each published message is written to the service log (`eventing.support = logging`):
+With no broker locally, each published message is logged and dropped (`eventing.support = logging`) — but
+the sink logs at INFO under a `kalix.*` logger, which the dev-mode logback config silences at `WARN`.
+`include-dev-loggers.xml` re-enables that one logger, so the messages actually print:
 
-```shell
-# in the service log:  … todo-activity … {"username":"alice","changes":[{"kind":"completed",…}],…}
+```text
+15:11:25.489 INFO  k.r.e.L.todo-activity - DestinationEvent(CloudEvent(61459a8a-…,todo-activity-consumer,…,
+  Some(alice),…,Some(<ByteString size=135 contents="{\"username\":\"alice\",\"changes\":[{\"kind\":\"comp...">),…))
 ```
+
+The payload is a truncated preview, not the whole message.
 
 ## Set-asides
 
@@ -63,5 +68,5 @@ mvn clean verify
 ```
 
 No model and no broker. Delivery and publishing use the TestKit's mocked channels; failure is tested by
-writing to the real entity, because the mocked channel **drops** failing messages instead of redelivering
-them (research Q-F) — a failure test there would pass for the wrong reason.
+writing to the real entity, because the mocked channel **never redelivers** a failing message (research
+Q-F) — a failure test there would pass for the wrong reason.

@@ -1085,10 +1085,12 @@ writing components in Scala needs explicit workarounds:
       The bound guarantees that one run of failures ends, not that the message is never seen again.
 
     - **The TestKit's mocked incoming channel does not model any of that.** Under the mock a failing
-      message is **never redelivered** and the messages published around it are **lost**; on the real
-      projection it is redelivered and the others are held. So a failure test written against the mock is a
-      false green, and capability 16 tests failure by writing the real entity — which is why its only Java
-      is a *test* (writing capability 6's entity needs a method reference).
+      message is **never redelivered**; on the real projection it is redelivered with backoff and the
+      messages behind it are held. That difference alone makes a failure test written against the mock a
+      false green, so capability 16 tests failure by writing the real entity — which is why its only Java is
+      a *test* (writing capability 6's entity needs a method reference). (A Phase 0 observation that the
+      mock also *loses* messages published behind a failure did not reproduce on a later run; it is
+      recorded as timing-dependent and claimed in neither direction.)
 
     - **Publishing is Scala-clean, with two sharp edges.** A produced payload goes through the
       **Scala-aware** mapper — an idiomatic case class with `Option` fields serialises fine, unlike a
@@ -1097,9 +1099,13 @@ writing components in Scala needs explicit workarounds:
       And the startup trap: with the default `eventing.support = "none"`, **one** consumer declaring
       `@Produce.ToTopic` stops the **whole service** booting (`AK-00406`), every other capability included —
       invisible to the suite, because the TestKit mocks topics. `application.conf` sets the dev-mode sink to
-      `logging`, which writes each message to the log and drops it. It is **not a broker**: a consumer
-      reading *from* a topic under `logging` is told, in the runtime's own words, that it *"will not receive
-      any events"*. Nothing in this project has ever published to a real broker.
+      `logging`, which logs each message and drops it. It is **not a broker**: a consumer reading *from* a
+      topic under `logging` is told, in the runtime's own words, that it *"will not receive any events"*.
+      Nothing in this project has ever published to a real broker. A third edge, found by the live walk
+      rather than by the probe: `logging` **prints nothing by default**. It logs at INFO under
+      `kalix.runtime.eventing.LoggingEventingSupport.<topic>`, and the dev-mode logback config silences the
+      whole `kalix` tree at `WARN` — so a walk that greps the log for published messages finds none and can
+      easily conclude publishing never happened. One line in `include-dev-loggers.xml` restores it.
 
     - **After a restart the consumer resumes and replays nothing** (measured: zero events re-delivered). So
       any state a consumer keeps in process is lost and never rebuilt — the feed therefore returns `since`
@@ -2511,14 +2517,16 @@ curl -s -X POST http://localhost:9000/request/alice \
   -H "Content-Type: application/json" -d '{"message":"mark to-do 1 as done"}'
 
 curl -s http://localhost:9000/todo-activity/alice
-# {"since":"2026-09-25T15:59:47Z","entries":[
-#   {"sequence":1,"username":"alice","kind":"baseline","recordedAt":"…","open":0,"completed":0},
-#   {"sequence":2,"username":"alice","kind":"added","recordedAt":"…","itemId":1,"description":"buy milk"},
-#   {"sequence":3,"username":"alice","kind":"completed","recordedAt":"…","itemId":1,"description":"buy milk"}]}
+# {"since":"2026-09-25T19:10:49Z","entries":[
+#   {"sequence":1,"username":"alice","kind":"baseline","recordedAt":"…","open":1,"completed":0},
+#   {"sequence":2,"username":"alice","kind":"completed","recordedAt":"…","itemId":1,"description":"buy milk"}]}
 ```
 
 `kind` is one of `baseline`, `added`, `completed`, `reopened`, `removed`, `list-deleted`. The **first**
 sighting of a user is a `baseline`, not a run of `added`: the feed never claims history it did not observe.
+Note what that means for a brand-new user, and it surprised the live walk — the consumer's first delivery
+**already contains** the item that created the list, so `"buy milk"` shows up inside the `baseline`'s counts
+(`open: 1`) and there is **no `added` entry for it**. `added` appears from the second change onwards.
 
 **Deliveries that could not be processed** are set aside with their reason, and never counted as activity:
 
@@ -2530,11 +2538,21 @@ curl -s http://localhost:9000/todo-activity/set-aside
 **What is published** goes to the `todo-activity` topic — one message per change, `ce-subject` = username:
 
 ```json
-{"username":"alice","changes":[{"kind":"added","itemId":1,"description":"buy milk"}],"recordedAt":"…"}
+{"username":"alice","changes":[{"kind":"completed","itemId":1,"description":"buy milk"}],"recordedAt":"…"}
 ```
 
-Locally there is no broker: `akka.javasdk.dev-mode.eventing.support = "logging"` writes each message to the
-service log and drops it. Without that setting the **whole service refuses to start** (`AK-00406`).
+Locally there is no broker: `akka.javasdk.dev-mode.eventing.support = "logging"` logs each message and drops
+it. Without that setting the **whole service refuses to start** (`AK-00406`). The sink logs at INFO under
+`kalix.runtime.eventing.LoggingEventingSupport.<topic>`, and the dev-mode logback config silences the whole
+`kalix` tree at `WARN` — so it prints nothing until that logger is re-enabled, which
+[`include-dev-loggers.xml`](src/main/resources/include-dev-loggers.xml) now does:
+
+```text
+15:11:25.489 INFO  k.r.e.L.todo-activity - DestinationEvent(CloudEvent(…,todo-activity-consumer,…,
+  Some(walk-bob),…,Some(<ByteString size=135 contents="{\"username\":\"walk-bob\",\"changes\":[{\"kind\":\"comp...">),…))
+```
+
+The payload is a **truncated preview**, not the whole message — enough to confirm something was published.
 
 > **The feed covers a window, and says which.** It lives in this process, while the consumer's position is
 > durable: after a restart the consumer resumes and **replays nothing**, so changes recorded before the
@@ -2548,6 +2566,15 @@ service log and drops it. Without that setting the **whole service refuses to st
 > **Where the interop line falls: nowhere.** No Java in production — the first capability since 13. The
 > contrast worth noting is capability 11's View, which consumes the *same* entity and needed a Java querying
 > endpoint (§18).
+>
+> *Verified live* (Ollama `qwen3:8b` driving capability 6; the feed itself uses no model). Three requests to
+> `POST /request/walk-alice` — add "buy milk", complete it, add "call mum" — produced, **unasked**, a feed of
+> `baseline {open:1}` → `completed {itemId:1,"buy milk"}` → `added {"call mum"}`, each within a second of the
+> assistant's reply, with `since` on every response and `GET /todo-activity/set-aside` empty throughout. The
+> walk corrected two things now fixed above: a brand-new user's first delivery **already contains** the item,
+> so there is no `added` entry for it (the example claimed one), and the `logging` sink **printed nothing**
+> until its logger was un-silenced — with that line in place, `k.r.e.L.todo-activity - DestinationEvent(…)`
+> appears for each published message, `ce-subject` = the username.
 
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.

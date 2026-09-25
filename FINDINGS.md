@@ -518,10 +518,19 @@ must bound its own attempts — and the SDK gives it nothing to count with: no a
 that changes on every redelivery, so the key has to be the message's **content**. A set-aside is not a
 tombstone either: a restart of the failing stream can replay the message with the count starting over.
 
-**Two platform traps worth carrying forward.** The TestKit's key-value mock **drops** a failing message and
-loses the ones behind it, so failure tests belong on the real projection path — a false-green hazard, not a
-convenience. And one consumer declaring `@Produce.ToTopic` stops the **whole service** booting when no topic
+**Two platform traps worth carrying forward.** The TestKit's key-value mock **never redelivers** a failing
+message, so failure tests belong on the real projection path — a false-green hazard, not a convenience.
+(It was first recorded as also losing the messages behind the failure; that half did not reproduce and is
+now claimed neither way — the absence of redelivery is enough on its own.) And one consumer declaring `@Produce.ToTopic` stops the **whole service** booting when no topic
 support is configured (`AK-00406`), which the suite cannot show because it mocks topics.
+
+**A third, found by the live walk rather than the probe: the local substitute for a broker prints nothing.**
+`eventing.support = "logging"` does log every produced message — at INFO, under a logger named
+`kalix.runtime.eventing.LoggingEventingSupport.<topic>` — but the dev-mode logback config silences the whole
+`kalix` tree at `WARN`. So a walk that greps the service log for published messages finds none and can
+conclude, wrongly, that publishing never happened. One line in `include-dev-loggers.xml` restores it. The
+general shape is worth keeping: **a diagnostic that is configured off by default reads exactly like a
+feature that did not run**, and only the bytecode settled which it was.
 
 **Method result worth reusing.** Capability 15 asked a guarantee to be proven with a witness that takes no
 part in it; capability 16 needed the same trick for a different reason. Once a delivery is set aside its
