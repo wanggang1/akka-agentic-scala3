@@ -99,9 +99,9 @@ test-green, committed and pushed as it lands.
 
 ## Phase 5: User Story 3 — A repeated delivery is not a repeated event (P2)
 
-- [ ] T023 [US3] Extend `src/test/scala/com/gwgs/akkaagentic/feed/api/TodoActivityIntegrationTest.scala`: the same state delivered twice yields one set of entries (SC-003); a state, a new state, then the new state again yields entries only for the first two
-- [ ] T024 [US3] Record in the test's scaladoc what is **not** promised: with no version on a key-value state, a replay of an *older* committed state after a newer one would surface as a reversal pair (research, "what remains unverified" 1) — FR-004 still holds
-- [ ] T025 [US3] Run `mvn clean verify`
+- [x] T023 [US3] Extend `src/test/scala/com/gwgs/akkaagentic/feed/api/TodoActivityIntegrationTest.scala`: the same state delivered twice yields one set of entries (SC-003); a state, a new state, then the new state again yields entries only for the first two
+- [x] T024 [US3] Record in the test's scaladoc what is **not** promised: with no version on a key-value state, a replay of an *older* committed state after a newer one would surface as a reversal pair (research, "what remains unverified" 1) — FR-004 still holds
+- [x] T025 [US3] Run `mvn clean verify`
 
 **Checkpoint**: idempotence proven on the delivery path. **Gate → commit + push.**
 

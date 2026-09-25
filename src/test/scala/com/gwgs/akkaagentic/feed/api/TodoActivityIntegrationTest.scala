@@ -19,6 +19,15 @@ import org.junit.jupiter.api.{BeforeEach, Test}
   * redelivering it, and loses the ones behind it — so User Story 2 is tested on the real path instead.
   *
   * No model anywhere: the feed reacts to state, and needs no language model to do it.
+  *
+  * **What idempotence here does and does not promise.** A duplicate delivery is an *identical* state, and
+  * an identical state differs in nothing, so it records nothing — that is SC-003, asserted below. What
+  * cannot be promised from this source is exactly-once *display*: a key-value state carries no version, so
+  * if the platform ever replayed an **older committed** state after a newer one, the comparison would
+  * report the difference in reverse (a reversal pair) rather than recognising it as history. FR-004 still
+  * holds either way — entries stay in order and the last one matches the final state — and the reversal
+  * case was not observed in any measurement; it is recorded as unverified rather than claimed impossible
+  * (specs/018 research, "what remains unverified").
   */
 class TodoActivityIntegrationTest extends TestKitSupport:
 
@@ -107,6 +116,28 @@ class TodoActivityIntegrationTest extends TestKitSupport:
     // `since` is the honest half of an in-process feed: the consumer resumes after a restart and resends
     // nothing (research Q-E), so a reader must be able to see the window rather than assume completeness.
     assertThat(feedFor("alice").since).isNotBlank()
+
+  // --- T023: SC-003 — a repeated delivery is not a repeated event ---------------------------------
+
+  @Test
+  def theSameStateDeliveredTwiceIsRecordedOnce(): Unit =
+    val state = list(("buy milk", false))
+    incoming.publish(state, "erin")
+    awaitKinds("erin", "baseline")
+    incoming.publish(state, "erin")
+    // Nothing more can arrive for an identical state; give the second delivery time to be wrong.
+    Thread.sleep(1500)
+    assertThat(kindsFor("erin")).isEqualTo("baseline")
+
+  @Test
+  def aRepeatOfTheLatestStateAfterARealChangeRecordsNothingFurther(): Unit =
+    incoming.publish(list(("a", false)), "frank")
+    awaitKinds("frank", "baseline")
+    incoming.publish(list(("a", false), ("b", false)), "frank")
+    awaitKinds("frank", "baseline,added")
+    incoming.publish(list(("a", false), ("b", false)), "frank") // the same state again
+    Thread.sleep(1500)
+    assertThat(kindsFor("frank")).isEqualTo("baseline,added")
 
   // --- T014: SC-002 on a key-value source ----------------------------------------------------------
 
