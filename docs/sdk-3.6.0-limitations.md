@@ -373,3 +373,74 @@ right for arguments a caller controls, which is exactly the meaning the SDK give
 upgrade**: whether construction failures stop being mapped through the request-error path. Endpoints are
 constructed per request, so this surfaces on the first request, not at startup; startup validation would
 need `ServiceSetup`, which is shared across capabilities.
+
+---
+
+## 8. Consumers (capability 16, measured on 3.6.3)
+
+Four behaviours to re-test on any SDK upgrade. **None is Scala-specific** — a Java service meets all four.
+
+### 8a. A failing handler is redelivered without limit, and it blocks every other entity
+
+Measured on the real projection (not the TestKit): a handler that throws for one entity was redelivered with
+exponential backoff and no ceiling —
+
+```text
+redelivery schedule of one failing message (ms): 0, 277, 789, 1719, 3419, 6985, 13976, 27611 …
+```
+
+— and for the whole of that time, a change written for a **different** entity never arrived. It was delivered
+only once the failing message stopped failing. A handler that counts its own attempts and returns
+`effects().done()` released the stream **within 1 ms**.
+
+**Consequence**: a consumer must bound its own attempts, or one poison message silently stops the capability
+for every user. The SDK offers nothing to count with — `MessageContext` has no attempt or delivery number,
+and `ce-id` changes on every redelivery — so the count must be keyed on the message's **content**. And a
+give-up is not final: the failing stream restarts, so the same message can be replayed afterwards with the
+count starting from zero.
+
+**Re-test on upgrade**: whether `MessageContext` gains a delivery count, and whether blocking is confined to
+a slice rather than the whole consumer. (Scope: measured in local dev mode. A deployed service partitions a
+projection into slices, which may confine the blocking; claimed neither way.)
+
+### 8b. The TestKit's key-value mock does not model redelivery — failure tests there are false greens
+
+With `withKeyValueEntityIncomingMessages(...)`, a failing message is **never redelivered**, and messages
+published while it fails are **lost**. The real projection does the opposite: it redelivers and holds the
+others back.
+
+| Behaviour | Mocked incoming | Real projection |
+|---|---|---|
+| delivery, input type, delete handler, metadata | faithful | faithful |
+| redelivery of a failing message | **none** | exponential, unbounded |
+| messages behind a failure | **lost** | held, then delivered |
+
+**Consequence**: assert failure behaviour by writing the real entity. If the entity's client is
+method-reference-only, that test must be Java — a *test*, which does not compromise a Scala production claim.
+
+### 8c. One `@Produce.ToTopic` stops the whole service starting when no topic support is configured
+
+Default is `eventing.support = "none"`. One consumer declaring a destination then fails startup for the
+entire service — every unrelated capability included:
+
+```text
+AK-00406 Component [...] has declared a message destination topic [...], but no topic support is configured.
+kalix.runtime.InvalidServiceException
+```
+
+The suite never shows it, because the TestKit mocks topics. `akka.javasdk.dev-mode.eventing.support =
+"logging"` makes local runs work: each produced message is written to the log and dropped.
+
+**`logging` is not a broker, and it is asymmetric.** Producing is tolerated; a consumer reading *from* a
+topic gets the runtime's own warning — *"has a source […] but no message broker is configured (eventing
+support is [logging]); it will not receive any events"*. The runtime carries the symmetric startup message
+for sources (`has declared a message source …`), though only the destination case was run here. A deployed
+service still needs a real broker configured at the Akka project level.
+
+### 8d. A produced payload is Scala-aware, but `None` is written as `null`
+
+A produced message goes through the **Scala-aware** mapper — an idiomatic case class with `Option` fields
+serialises, unlike a component payload (README §3). But `None` is emitted as `null`, so a message carried
+`{"kind":"baseline","itemId":null,"description":null}` until the payload type was given
+`@JsonInclude(NON_ABSENT)`. Worth checking on upgrade, and worth annotating either way: a subscriber should
+not have to interpret nulls.

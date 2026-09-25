@@ -120,11 +120,11 @@ test-green, committed and pushed as it lands.
 
 ## Phase 7: User Story 5 — The interop question is answered in public (P3)
 
-- [ ] T030 [P] [US5] Add **§18** to `README.md` (interop note) plus a project-layout entry and a usage section: the family is Scala-clean end to end, **no Java in production**; the failure trap with the measured schedule; the mock that drops failures; `AK-00406`; the restart/`since` trade-off; Q-G reachable but no delegate record
-- [ ] T031 [P] [US5] Add a Capability 16 section and a Consumer row to the client table in `FINDINGS.md`, and extend the rubric: "a consumer must bound its own attempts"
-- [ ] T032 [P] [US5] Update `ROADMAP.md` — row 16 as **🚧 In progress**, "You are here", A2 in flight, and fork B3 marked *measured: not achievable through task events for request-based delegation* (the ✅ flip is a post-merge commit)
-- [ ] T033 [P] [US5] Add **§8** to `docs/sdk-3.6.0-limitations.md`: 8a unbounded redelivery that blocks every entity (schedule); 8b the TestKit's key-value mock drops failing messages and loses those behind it; 8c one `@Produce.ToTopic` stops local startup (`AK-00406`); 8d no attempt number and a per-delivery `ce-id`
-- [ ] T034 [US5] Amend README §17's retry-trap bullet with a one-sentence pointer to §18 — the same trap, worse, because a consumer's blocks everyone. Additive only
+- [x] T030 [P] [US5] Add **§18** to `README.md` (interop note) plus a project-layout entry and a usage section: the family is Scala-clean end to end, **no Java in production**; the failure trap with the measured schedule; the mock that drops failures; `AK-00406`; the restart/`since` trade-off; Q-G reachable but no delegate record
+- [x] T031 [P] [US5] Add a Capability 16 section and a Consumer row to the client table in `FINDINGS.md`, and extend the rubric: "a consumer must bound its own attempts"
+- [x] T032 [P] [US5] Update `ROADMAP.md` — row 16 as **🚧 In progress**, "You are here", A2 in flight, and fork B3 marked *measured: not achievable through task events for request-based delegation* (the ✅ flip is a post-merge commit)
+- [x] T033 [P] [US5] Add **§8** to `docs/sdk-3.6.0-limitations.md`: 8a unbounded redelivery that blocks every entity (schedule); 8b the TestKit's key-value mock drops failing messages and loses those behind it; 8c one `@Produce.ToTopic` stops local startup (`AK-00406`); 8d no attempt number and a per-delivery `ce-id`
+- [x] T034 [US5] Amend README §17's retry-trap bullet with a one-sentence pointer to §18 — the same trap, worse, because a consumer's blocks everyone. Additive only
 
 **Checkpoint**: the verdict is public. **Gate → commit + push.**
 

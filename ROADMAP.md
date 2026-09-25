@@ -7,7 +7,23 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 ## Where we are
 
-> **You are here:** Feature 15 (scheduled reminders — **Timed Action**, candidate A1) — **✅ merged to `main`
+> **You are here:** Feature 16 (reacting to activity — **Consumer**, candidate A2) — **🚧 in progress on
+> branch `018-event-consumer`** ([`specs/018-event-consumer`](specs/018-event-consumer/)). A Scala consumer
+> watches capability 6's to-do lists, keeps an **activity feed** of what changed, and publishes each change
+> to a topic. No model anywhere.
+>
+> **Interop verdict — the family is Scala-clean end to end, and the hazard is elsewhere.** Nothing in it
+> takes a method reference, so there is **no Java in production** (the first since capability 13) — while
+> capability 11's View over the **same entity** needed a Java querying endpoint. The real finding is the
+> failure contract: a throwing handler is redelivered **without limit** (0, 277, 789, 1719, 3419, 6985,
+> 13976, 27611 ms …) and **blocks every other entity** until it stops; giving up released the stream in
+> 1 ms, so a consumer must bound its own attempts. The TestKit's mock hides this — it drops failing messages
+> — so failure is tested on the real projection. Also measured: a handler is chosen by **parameter type**
+> (a wrong type compiles, starts, and is never called); one `@Produce.ToTopic` stops the whole service
+> booting without topic support (`AK-00406`); the consumer **resumes** after a restart and replays nothing,
+> so the in-process feed states its window.
+>
+> **Previously:** Feature 15 (scheduled reminders — **Timed Action**, candidate A1) — **✅ merged to `main`
 > 2026-09-19 (PR #31)** ([`specs/017-timed-action`](specs/017-timed-action/)). `POST /reminders`
 > schedules a note to fire after a delay; `GET`/`DELETE /reminders/{id}` read and cancel it. No model
 > anywhere.
@@ -130,6 +146,7 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 | 14 | **Streaming responses** — `StreamEffect` instead of `Effect[T]`: `POST /stream-chat/{sessionId}` writes the reply as it is generated (chunked), beside cap-4's untouched one-piece `/chat`. **Headline: `dynamicCall` covers request/response ONLY** — it returns a `DynamicMethodRef` with no streaming member, so the agent client is on **both** sides of the method-ref wall; the Scala lambda compiles then fails at runtime blaming the caller's own class, while Java works. The wall took **one class** (the endpoint), pinned by a test; agent, domain and the endpoint's own test stay Scala. Streams are not the axis — `AutonomousAgentClient`/`TaskClient.notificationStream()` are zero-arg and clean. Also: **no `onFailure` on a stream**; a stream can hang (240 s under a scripted failure — though a *real* provider error ends it in ~178 ms, so that silence was a test-provider artifact and the guards cover the "never answers, never errors" case); and a pre-token failure is **undetectable** (`200`, chunked, 0 bytes, `curl_exit=0`). Fully offline-provable: 57 fragments, exact parity | [`specs/016-streaming-responses`](specs/016-streaming-responses/) | ✅ Done — merged (PR #29) |
 | 15 | **Scheduled reminders — Timed Action** (candidate A1, the first untouched family) — `POST /reminders` schedules a note to fire after a delay, `GET`/`DELETE /reminders/{id}` read and cancel it; four states (`pending`/`fired`/`cancelled`/`failed`) kept distinct, and a cancel that cancelled nothing is a `409` naming what stood. **Headline: one family on both sides of the wall, split by OPERATION** — scheduling is `TimedActionClient.method(...)`→`deferred()`, method-ref only (`DynamicMethodRef` has no `deferred()`), so `POST` is the one Java class; cancelling is `TimerScheduler.delete(String)`, Scala-clean — measured cancelling a *Java*-scheduled timer. The Scala lambda compiles then fails naming `$anonfun$1` outright — the clearest diagnostic yet. Also: the 3-arg `createSingleTimer` **retries indefinitely**; an exhausted timer is **silent** and an action gets **no attempt number**, so the action records its own final failure; a pending timer **did not survive a restart** (dev mode), so state is in-process by design. No model anywhere | [`specs/017-timed-action`](specs/017-timed-action/) | ✅ Done — merged (PR #31) |
+| 16 | **Reacting to activity — Consumer** (candidate A2) — a Scala `Consumer` over capability 6's `TodoEntity` keeps an activity feed (`GET /todo-activity`, `/{username}`, `/set-aside`) and publishes each change to the `todo-activity` topic. **Headline: the family is Scala-clean end to end — NO JAVA IN PRODUCTION** (first since cap-13), against cap-11's View on the *same* entity needing a Java querying endpoint: same source, two projections, two verdicts. The real finding is the failure contract — a throwing handler is redelivered **without limit** and **blocks every other entity** until it stops (measured schedule, doubling to 27.6 s+), so the consumer bounds its own attempts and sets a delivery aside; the SDK exposes no attempt number and `ce-id` changes per redelivery, so the key is the message's content. Also: the TestKit's key-value mock **drops** failing messages (false green → failure tested on the real path); a handler is chosen by **parameter type** (wrong type = starts, never called); one `@Produce.ToTopic` stops the whole service booting without topic support; the consumer **resumes** after a restart and replays nothing | [`specs/018-event-consumer`](specs/018-event-consumer/) | 🚧 In progress |
 
 **Status legend:** ✅ done · 📋 planned (spec written) · 🚧 in progress · ⬜ not started
 
@@ -248,14 +265,14 @@ start with `/akka.specify` (never by writing code — see
 ### A. Untouched component families — the project's own axis
 
 Fourteen capabilities in, **four SDK component families had never been built here**; capability 15 took
-the first (A1), so **three remain**. This project
+the first (A1) and capability 16 the second (A2), so **two remain** (A3 event-sourced entity in Scala, A4 gRPC). This project
 exists to answer "which of them can be authored in Scala 3, and what decides it", so these are the
 candidates that still extend the map rather than decorate it.
 
 | # | Candidate | What it explores | Interop bet |
 |---|---|---|---|
 | **A1** | **Timed Action** — ✅ **built as capability 15 (PR #31); the bet is resolved** (both sides of the wall, split by operation — see row 15) | Scheduling: `TimerScheduler.createSingleTimer(name, delay, deferred)`, plus the rescheduling-on-failure hazard AGENTS.md warns about. A natural fit is a delayed follow-up on cap-5's approval gate, or expiring a stale case. | **The sharpest bet left, and genuinely unpredictable.** The `deferred` argument is built from the component client — if it is a `DeferredCall` produced from a **method reference**, the wall bites a family we have never tested; if it is id-keyed like `TaskClient`, it is Scala-clean. Nothing in the project so far predicts which. New descriptor key `timed-action`. |
-| **A2** | **Consumer** (`@Consume.From*` / `@Produce.ToTopic`) | The largest remaining hole: reacting to entity events or a topic, and publishing to one. It is also where cap-13's "there is **no** `Consume.FromAgent`" finding came from — this is that family, approached from the side that *does* exist. Natural fit: consume cap-6's `TodoEntity` events, or finally give cap-7's delegation **ground-truth** observability. | Component likely **Scala-clean** (`@Consume` is annotation-keyed, like `@McpEndpoint`). The open question is the **handler's event type**: a Scala sealed trait with `@TypeName` has never crossed the internal mapper (§3). New descriptor key `consumer`. |
+| **A2** | **Consumer** — 🚧 **in flight as capability 16; the bet is resolved** (Scala-clean end to end; the hazard is the unbounded, blocking redelivery — see row 16) | The largest remaining hole: reacting to entity events or a topic, and publishing to one. It is also where cap-13's "there is **no** `Consume.FromAgent`" finding came from — this is that family, approached from the side that *does* exist. Natural fit: consume cap-6's `TodoEntity` events, or finally give cap-7's delegation **ground-truth** observability. | Component likely **Scala-clean** (`@Consume` is annotation-keyed, like `@McpEndpoint`). The open question is the **handler's event type**: a Scala sealed trait with `@TypeName` has never crossed the internal mapper (§3). New descriptor key `consumer`. |
 | **A3** | **Event Sourced Entity, authored by us in Scala** | Cap-6 has a *key-value* entity, in Java. An event-sourced one means a sealed event hierarchy, `applyEvent`, and snapshots — the persistence model [`docs/akka-persistence-models.md`](docs/akka-persistence-models.md) describes but the repo has never written. | **Two known walls collide.** The entity *client* is method-ref-only, so the caller is Java (cap-11's shape); events cross the internal mapper, so they must be Java-*shaped*. The new question is whether a **Scala 3 `enum` or sealed trait** survives that mapper at all, or whether `@TypeName` + Jackson polymorphism forces Java-*authored* events. New descriptor key `event-sourced-entity`. |
 | **A4** | **gRPC endpoint** | A `.proto` in `src/main/proto` and a Scala class implementing the protoc-generated **Java** interface, with `toApi` converters. | **A different axis from the wall: build ordering.** Generated Java sources must interleave with cap-11's scalac-then-javac arrangement (§13 R3) — the one part of this build that has already broken twice. Lower interop novelty, higher build risk. |
 
@@ -268,13 +285,13 @@ first fixes something that is actually wrong today.
 |---|---|---|---|
 | **B1** | **Session compaction** — summarise old turns instead of keeping full history | cap-6 (README §8, live caveat) | `readLast(N)` orphans tool-call pairs and breaks tool-using sessions, so cap-6 keeps **full history** and accepts unbounded token growth. Compaction is the real bound. **The only candidate that closes a known defect rather than adding surface.** |
 | **B2** | **SSE framing for the streaming surface** | cap-14 (research, contract, `docs/streaming-vs-request-response.md`) | Deliberately not taken: it would make a pre-token failure self-describing instead of a normally-completed empty `200`, but it changes the wire format for **every** client, for a failure path. |
-| **B3** | **Delegation observability via runtime notifications** | cap-7 (D6) | `consultedSpecialists` is **model self-reported** and small models under-report it. Ground truth needs the runtime's notification stream — which pairs naturally with **A2**, and is the reason to consider them together. |
+| **B3** | **Delegation observability via runtime notifications** — ⚠️ **one route measured and ruled out** (cap-16): a Scala consumer *can* read the runtime-owned `TaskEntity`, but a live cap-7 run created **no tasks** for its request-based specialists, so task events cannot say which ran | cap-7 (D6) | `consultedSpecialists` is **model self-reported** and small models under-report it. Ground truth needs the runtime's notification stream — which pairs naturally with **A2**, and is the reason to consider them together. |
 | **B4** | **Usage-accurate citations** | cap-8 (README, "Future work") | Cap-8 cites what was **retrieved**, not what was **used**. Fixing it means asking the model which sources it used — reintroducing exactly the self-report unreliability cap-8 was built to avoid. A genuine tension, not a free upgrade. |
 | **B5** | **Streaming + grounded answer** | cap-14 (spec, Assumptions) | Forked out of cap-14 on purpose: a tool call *inside* a stream is undocumented on this SDK, and citations cannot honestly follow text already sent. |
 
 ### How these are ordered, and why
 
-**A1 → A2 → B1** is the recommended run. **A1 is done** (capability 15, PR #31), so **A2 Consumer** is next.
+**A1 → A2 → B1** is the recommended run. **A1 is done** (capability 15, PR #31) and **A2 is in flight** (capability 16), so **B1 session compaction** is next — the only candidate that fixes a known defect rather than adding surface.
 
 - **A1 (Timed Action) first** because it is small, it is a whole untouched family, and its outcome is
   the one nobody can call in advance. Cap-14 proved the wall still holds surprises fourteen capabilities
