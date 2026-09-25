@@ -68,15 +68,15 @@ test-green, committed and pushed as it lands.
 
 ### Tests for User Story 1
 
-- [ ] T013 [P] [US1] Write `src/test/scala/com/gwgs/akkaagentic/feed/api/TodoActivityIntegrationTest.scala` on the **mocked** channel (`withKeyValueEntityIncomingMessages(classOf[TodoEntity])` — delivery shape is faithful there, research Q-F): first sighting → `baseline`; then `added`, `completed`, `reopened`, `removed`; a whole-list delete → `list-deleted`; an empty feed is `200` with `entries: []`; the per-user route filters; every response carries `since`. `Awaitility` bounds, no sleeps
-- [ ] T014 [P] [US1] In the same test, SC-002 on a key-value source: across ≥ 5 successive states for one user, the entries are never out of order and the last reflects the final state — asserted as exactly that, **not** as "one entry per change" (spec FR-004)
+- [x] T013 [P] [US1] Write `src/test/scala/com/gwgs/akkaagentic/feed/api/TodoActivityIntegrationTest.scala` on the **mocked** channel (`withKeyValueEntityIncomingMessages(classOf[TodoEntity])` — delivery shape is faithful there, research Q-F): first sighting → `baseline`; then `added`, `completed`, `reopened`, `removed`; a whole-list delete → `list-deleted`; an empty feed is `200` with `entries: []`; the per-user route filters; every response carries `since`. `Awaitility` bounds, no sleeps
+- [x] T014 [P] [US1] In the same test, SC-002 on a key-value source: across ≥ 5 successive states for one user, the entries are never out of order and the last reflects the final state — asserted as exactly that, **not** as "one entry per change" (spec FR-004)
 
 ### Implementation for User Story 1
 
-- [ ] T015 [US1] Create `TodoActivityConsumer` in `src/main/scala/com/gwgs/akkaagentic/feed/application/TodoActivityConsumer.scala` — `@Component(id = "todo-activity-consumer")`, `@Consume.FromKeyValueEntity(classOf[TodoEntity])`; `onUpdate(TodoList)` converts to `TodoSnapshot` at the boundary and records through `BoundedDelivery` (rethrow on `WillRetry`, `done()` otherwise); `@DeleteHandler` records `list-deleted`. A plain top-level class (research Q-A)
-- [ ] T016 [US1] Create `TodoActivityEndpoint` in `src/main/scala/com/gwgs/akkaagentic/feed/api/TodoActivityEndpoint.scala` — `GET /todo-activity`, `/todo-activity/{username}`, `/todo-activity/set-aside`, each with `since`; `@JsonInclude(NON_ABSENT)` so optional fields are omitted; idiomatic Scala bodies (README §3)
-- [ ] T017 [US1] Register the consumer under `consumer` and the endpoint under `http-endpoint` in `src/main/resources/META-INF/akka-javasdk-components_com.gwgs_akka-agentic-scala3.conf`, each commented with the measurement that shaped it
-- [ ] T018 [US1] Run `mvn clean verify`
+- [x] T015 [US1] Create `TodoActivityConsumer` in `src/main/scala/com/gwgs/akkaagentic/feed/application/TodoActivityConsumer.scala` — `@Component(id = "todo-activity-consumer")`, `@Consume.FromKeyValueEntity(classOf[TodoEntity])`; `onUpdate(TodoList)` converts to `TodoSnapshot` at the boundary and records through `BoundedDelivery` (rethrow on `WillRetry`, `done()` otherwise); `@DeleteHandler` records `list-deleted`. A plain top-level class (research Q-A)
+- [x] T016 [US1] Create `TodoActivityEndpoint` in `src/main/scala/com/gwgs/akkaagentic/feed/api/TodoActivityEndpoint.scala` — `GET /todo-activity`, `/todo-activity/{username}`, `/todo-activity/set-aside`, each with `since`; `@JsonInclude(NON_ABSENT)` so optional fields are omitted; idiomatic Scala bodies (README §3)
+- [x] T017 [US1] Register the consumer under `consumer` and the endpoint under `http-endpoint` in `src/main/resources/META-INF/akka-javasdk-components_com.gwgs_akka-agentic-scala3.conf`, each commented with the measurement that shaped it
+- [x] T018 [US1] Run `mvn clean verify`
 
 **Checkpoint**: the MVP — the feed reacts to capability 6 with no caller involved. **Gate → commit + push.**
 
