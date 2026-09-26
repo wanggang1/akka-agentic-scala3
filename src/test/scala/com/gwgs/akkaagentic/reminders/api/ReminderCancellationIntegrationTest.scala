@@ -10,7 +10,7 @@ import com.gwgs.akkaagentic.reminders.api.ReminderSchedulingEndpoint.ScheduledRe
 import com.gwgs.akkaagentic.reminders.application.ReminderStore
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility
-import org.junit.jupiter.api.{BeforeEach, Test}
+import org.junit.jupiter.api.{BeforeEach, Tag, Test}
 
 /** T016 / T017 — User Story 2 over real HTTP: a cancelled reminder never fires (SC-003), and the two
   * non-cancellations are reported as what they are (FR-006).
@@ -27,6 +27,7 @@ import org.junit.jupiter.api.{BeforeEach, Test}
   * **Real-time cost.** Proving a negative costs one wait past the delay: ~2 s here, the one unavoidable
   * wait in this class (FR-011).
   */
+@Tag("slow")
 class ReminderCancellationIntegrationTest extends TestKitSupport:
 
   override protected def testKitSettings(): TestKit.Settings =

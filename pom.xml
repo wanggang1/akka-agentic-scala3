@@ -118,4 +118,43 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!--
+          The inner-loop profile. `mvn test -Pquick` / `mvn verify -Pquick` drops two kinds of test:
+
+            slow     - the test's cost is an unavoidable wall-clock wait, almost always to prove a
+                       NEGATIVE (a cancelled timer never fires, a gate does not release, retries
+                       stopped). You cannot prove a negative without waiting, so these are not
+                       inefficiencies to be optimised away - do not "fix" their sleeps.
+            testkit  - a unit-phase `*Test` that starts a whole Akka runtime. Five classes, 21.9 s of
+                       the unit phase's 22.4 s; the other 39 classes together take 0.5 s.
+
+          Tag filtering is honoured by the parent's surefire 2.22.2 and failsafe 3.1.2 (verified: a
+          tagged class goes from 7 tests to 0). This profile is for the inner loop ONLY - the gate
+          before calling work done, or pushing to a PR, is a full `mvn clean verify`. See CLAUDE.md
+          "Choosing which tests to run".
+        -->
+        <profile>
+            <id>quick</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <excludedGroups>slow,testkit</excludedGroups>
+                        </configuration>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <configuration>
+                            <excludedGroups>slow,testkit</excludedGroups>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

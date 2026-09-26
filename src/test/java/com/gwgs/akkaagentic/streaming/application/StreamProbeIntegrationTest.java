@@ -9,6 +9,7 @@ import akka.javasdk.testkit.TestModelProvider;
 import akka.stream.javadsl.Sink;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,6 +35,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * concatenation reproduce it exactly), Q-A (what a consumer observes when the model fails before the
  * first token), Q-D (is a streamed reply written to session memory once complete).
  */
+@Tag("slow")
 public class StreamProbeIntegrationTest extends TestKitSupport {
 
   private static final Logger logger = LoggerFactory.getLogger(StreamProbeIntegrationTest.class);

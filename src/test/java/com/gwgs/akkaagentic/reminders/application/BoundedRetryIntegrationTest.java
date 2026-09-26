@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 
 /**
  * T021 — User Story 3: work that always fails stops after a bounded count, and the reminder ends in
@@ -38,6 +39,7 @@ import org.junit.jupiter.api.Test;
  * backoff, and proving that nothing <i>more</i> arrives needs a wait longer than that backoff. The
  * wait is calibrated from the gap this run actually observed, not guessed.
  */
+@Tag("slow")
 public class BoundedRetryIntegrationTest extends TestKitSupport {
 
   @Override

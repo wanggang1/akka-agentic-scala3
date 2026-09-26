@@ -3,7 +3,7 @@ package com.gwgs.akkaagentic.a2a.application
 import akka.javasdk.testkit.{TestKit, TestKitSupport, TestModelProvider}
 import akka.javasdk.testkit.TestModelProvider.AiResponse
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.{BeforeEach, Test}
+import org.junit.jupiter.api.{BeforeEach, Tag, Test}
 
 /** Deterministic test for [[PersonalAssistantAgent]] with a mocked model.
   *
@@ -15,6 +15,8 @@ import org.junit.jupiter.api.{BeforeEach, Test}
   * As in cap-1, the agent is called via `dynamicCall("personal-assistant-agent")`, not a Java method
   * reference (a Scala lambda can't satisfy the SDK's `MethodRefResolver`).
   */
+// @Tag("testkit"): starts a whole runtime in the UNIT phase (10.0 s of the 22.4 s)
+@Tag("testkit")
 class PersonalAssistantAgentTest extends TestKitSupport:
 
   private val model = new TestModelProvider()

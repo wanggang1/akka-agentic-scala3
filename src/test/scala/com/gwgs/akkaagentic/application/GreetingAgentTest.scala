@@ -3,7 +3,7 @@ package com.gwgs.akkaagentic.application
 import akka.javasdk.JsonSupport
 import akka.javasdk.testkit.{TestKit, TestKitSupport, TestModelProvider}
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.{Tag, Test}
 
 import java.util.UUID
 
@@ -15,6 +15,8 @@ import java.util.UUID
   * agent's single handler by component id, which works the same from Scala and from the
   * endpoint.
   */
+// @Tag("testkit"): starts a whole runtime in the UNIT phase (3.0 s of the 22.4 s)
+@Tag("testkit")
 class GreetingAgentTest extends TestKitSupport:
 
   private val greetingModel = new TestModelProvider()

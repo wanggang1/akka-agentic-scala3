@@ -10,7 +10,7 @@ import akka.javasdk.testkit.{TestKit, TestKitSupport, TestModelProvider}
 import com.gwgs.akkaagentic.approvals.application.{Draft, DraftAgent, PublishAgent, PublishedReply}
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility
-import org.junit.jupiter.api.{BeforeEach, Test}
+import org.junit.jupiter.api.{BeforeEach, Tag, Test}
 
 /** Drives the whole gated flow over HTTP with both agents' models mocked (no live model, no key).
   *
@@ -27,6 +27,7 @@ import org.junit.jupiter.api.{BeforeEach, Test}
   * gate, and the HTTP contract. Everything is Scala, including the human decision (research R1/R6) —
   * the contrast with cap-4, which needed a Java test to read `SessionMemoryEntity`.
   */
+@Tag("slow")
 class ApprovalGateIntegrationTest extends TestKitSupport:
 
   private val draftModel = new TestModelProvider()
