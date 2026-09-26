@@ -119,8 +119,9 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 >
 >
 > **⏭️ Next:** undecided — with A1 and A2 both built, the recommended run reaches **B1 session
-> compaction**, the only candidate that fixes a known defect (cap-6's unbounded history) instead of
-> adding surface. Two untouched families also remain: **A3** an event-sourced entity authored in Scala,
+> compaction** — pitched as the only candidate that fixes a known defect, though capability 17's own
+> probe then showed that defect is smaller than recorded (history is bounded at 510 KiB and the bound is
+> safe; see row B1) — instead of adding surface. Two untouched families also remain: **A3** an event-sourced entity authored in Scala,
 > and **A4** a gRPC endpoint.
 >
 > Capabilities 1–16 are **✅ done and merged**; 5–16 were exploratory follow-ups beyond the original four.
@@ -292,7 +293,7 @@ first fixes something that is actually wrong today.
 
 | # | Fork | Where it was recorded | Why it was declined then |
 |---|---|---|---|
-| **B1** | **Session compaction** — summarise old turns instead of keeping full history | cap-6 (README §8, live caveat) | `readLast(N)` orphans tool-call pairs and breaks tool-using sessions, so cap-6 keeps **full history** and accepts unbounded token growth. Compaction is the real bound. **The only candidate that closes a known defect rather than adding surface.** |
+| **B1** | **Session compaction** — summarise old turns instead of letting the oldest be discarded | cap-6 (README §8, live caveat) | `readLast(N)` orphans tool-call pairs and breaks tool-using sessions, so cap-6 keeps **full history**. ⚠️ **Motivation corrected by capability 17's Phase 0 probe (specs/019 S-1/S-2):** history is NOT unbounded — the SDK bounds it at **510 KiB** by default — and that bound is **turn-aligned and safe**, so no orphan risk is latent. What remains is real but narrower: 510 KiB is ~100k+ tokens re-sent per turn, and FIFO eviction discards the oldest turns leaving nothing behind. Compaction shrinks history **while keeping what it meant**. |
 | **B2** | **SSE framing for the streaming surface** | cap-14 (research, contract, `docs/streaming-vs-request-response.md`) | Deliberately not taken: it would make a pre-token failure self-describing instead of a normally-completed empty `200`, but it changes the wire format for **every** client, for a failure path. |
 | **B3** | **Delegation observability via runtime notifications** — ⚠️ **one route measured and ruled out** (cap-16): a Scala consumer *can* read the runtime-owned `TaskEntity`, but a live cap-7 run created **no tasks** for its request-based specialists, so task events cannot say which ran | cap-7 (D6) | `consultedSpecialists` is **model self-reported** and small models under-report it. Ground truth needs the runtime's notification stream — which pairs naturally with **A2**, and is the reason to consider them together. |
 | **B4** | **Usage-accurate citations** | cap-8 (README, "Future work") | Cap-8 cites what was **retrieved**, not what was **used**. Fixing it means asking the model which sources it used — reintroducing exactly the self-report unreliability cap-8 was built to avoid. A genuine tension, not a free upgrade. |
