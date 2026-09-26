@@ -242,6 +242,64 @@ trigger fires only on `AiMessageAdded` (S-5), which for a streamed turn is writt
 
 ---
 
+## Found while implementing US1 — three more, all measured
+
+### I-1 — A Java caller cannot construct a Scala 3 `enum` case. It pushed the design the right way. ⚠️
+
+The first `SessionMemoryGateway` did the message mapping and the outcome decision in Java. javac refused:
+
+```text
+error: enum classes may not be instantiated
+```
+
+`new HistoryLine.User(...)` and `new Outcome.Failed(...)` are both impossible from Java, because a Scala 3
+`enum` compiles to something Java sees as an enum class. This is a **new** Java↔Scala wrinkle: capabilities
+14 and 15 only *read* Scala values from Java or passed them through, never constructed a sum type.
+
+The workarounds (Scala-side factory methods, or sealed traits instead of `enum`) were both available and
+both rejected, because the compiler was pointing at a real design flaw: **the Java class had logic in it.**
+It exists only to hold method references the SDK forces into Java, so the mapping and the decision moved to
+`Compactor` in Scala, and the gateway became three thin operations that decide nothing. The quarantine is
+now one class *and* one responsibility, which is stronger than the file-count pin capabilities 14 and 15
+ship.
+
+### I-2 — The event's history size is a HINT, not the authority. ⚠️ *(a real cost bug, caught by running it)*
+
+`AiMessageAdded.historySizeInBytes` is the size **at the moment that event was written**. A burst of turns
+crossing the threshold therefore produces a burst of events all reporting a large history, and acting on
+each one costs a model call. Measured on the first US1 run, five turns over a 4 KiB threshold:
+
+```text
+compaction for [us1-compacts]: SkippedStale (4218 -> 2934 bytes, 0 messages replaced)
+compaction for [us1-compacts]: Compacted    (5624 ->  122 bytes, 6 messages replaced)
+compaction for [us1-compacts]: SkippedStale (7030 ->  122 bytes, 0 messages replaced)
+```
+
+Three summariser calls to perform one compaction, with the platform silently discarding two writes — R-4's
+guard doing exactly its job, but only after the tokens were spent. The fix is to re-check the threshold
+against the history **actually read**, and return before any model call when it is no longer needed: *the
+event tells us to look, the history tells us whether*. After it, the same scenario shows one attempt.
+
+This is the kind of defect a probe cannot find, because it only appears once the trigger, the summariser
+and real turns run together.
+
+### I-3 — "Did the write land?" cannot be answered by message count. ⚠️
+
+The first discriminator was `after.messages.size < before.messages.size`. It reported a **successful**
+compaction as `SkippedStale`, because a turn that arrives while the summariser is working is appended
+afterwards, so the count can be unchanged or higher even though the replacement landed.
+
+The reliable discriminator is the **head** of the history: `compactHistory` clears and re-adds, so if our
+summary landed it is first, and later turns append after it. `Compactor` now checks that the first message
+carries the compaction component id and our summary's text. Measured: a session driven with six
+overlapping turns keeps our summary at the head and is correctly recorded as compacted, while the
+deterministic three-turn case is exactly `UserMessage, AiMessage`.
+
+The general shape, and it is the same one R-4 has: **under concurrency, infer nothing from a count.** Ask
+for the thing that is invariant.
+
+---
+
 ## Decisions this research settles
 
 | # | Decision | Because |
@@ -254,3 +312,6 @@ trigger fires only on `AiMessageAdded` (S-5), which for a streamed turn is writt
 | D6 | The summariser is a **Scala** `Agent` whose result is **Java-shaped** | It crosses the internal serializer (README §3), like capability 3's `HelpAnswer` |
 | D7 | Observability is an in-process store — **one `AtomicReference`, pure transitions** | The cap-15 review rule; and FR-011 needs it readable without the log |
 | D8 | Capability 6 is **untouched**; capabilities 4 and 14 gain the bound without being edited | FR-014/FR-015; the trigger is service-wide and lives entirely in this capability |
+| D9 | The Java class holds **no logic at all** — three thin operations, no decisions | I-1: javac cannot construct a Scala 3 `enum` case, which exposed that the first draft had logic in the quarantine |
+| D10 | The threshold is re-checked against the history actually read, before any model call | I-2: the event's size is stale in a burst, and acting on it alone spent three summariser calls to do one compaction |
+| D11 | A landed write is identified by our summary being at the **head**, never by a message count | I-3: a concurrent turn appends while the summariser works, so a count reported a success as a skip |
