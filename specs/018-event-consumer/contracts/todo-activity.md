@@ -50,7 +50,7 @@ everyone else — research Q-D). Set-asides are never counted as activity and ne
 One message per delivery **that produced changes** (none for a duplicate, none for a set-aside):
 
 ```json
-{"username":"alice","changes":[{"kind":"added","itemId":1,"description":"buy milk"}],"recordedAt":"…"}
+{"username":"alice","changes":[{"kind":"added","itemId":2,"description":"call mum"}],"recordedAt":"…"}
 ```
 
 Metadata `ce-subject` = username, so a broker keeps each user's messages in order. The payload is an
