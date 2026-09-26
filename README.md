@@ -1639,8 +1639,21 @@ curl -i -X POST http://localhost:9000/request/alice \
 > > works once `.readLast(N)` is removed — hence this capability uses **full session history**
 > > (`MemoryProvider.limitedWindow()`, no `readLast`). *Correction:* an earlier version of this note blamed
 > > qwen3 null-content persistence; a live A/B (remove `readLast` → fixed) showed the window trim was the real
-> > cause. Tradeoff of full history: **unbounded token growth** on long sessions — **compaction** (summarize
-> > old turns without slicing pairs) is the proper bound, left as future work.
+> > cause.
+> >
+> > > **Corrected 2026-09-26 by capability 17's probe — "unbounded token growth" was wrong, and so was the
+> > > worry behind it.** Session history is **already bounded**, at `akka.javasdk.agent.memory
+> > > .limited-window.max-size = 510 KiB` (SDK default, and documented as the *maximum* permitted, because
+> > > session messages are routed around the cluster). `MemoryProvider.limitedWindow()` exposes no size
+> > > setting at all, which is why this capability never knew it had a bound. **And that bound is safe**:
+> > > `SessionMemoryEntity$State.enforceMaxCapacity` evicts FIFO *and then* sweeps head messages until the
+> > > head is a `UserMessage`, so the retained history always begins at a turn boundary and a tool pair can
+> > > never be split. So the two mechanisms differ in exactly one property — **whether the cut is
+> > > turn-aligned**: the write-side byte bound is, `readLast(N)`'s `subList` is not. Dropping `readLast` was
+> > > both the correct fix and a *sufficient* one; nothing latent remains here. What compaction would still
+> > > buy is narrower and real: 510 KiB is ~100k+ tokens re-sent every turn, and FIFO eviction discards the
+> > > oldest turns **entirely**, leaving nothing behind (`State.truncated()` records that it happened).
+> > > See specs/019 research S-1/S-2.
 > >
 > > **Two defensive layers kept alongside** ([`PersonalAssistantAgent`](src/main/scala/com/gwgs/akkaagentic/a2a/application/PersonalAssistantAgent.scala)),
 > > for related but distinct failure modes:

@@ -7,23 +7,37 @@
 
 ## Why this capability exists
 
-Every capability so far **added** a surface. This one **closes a defect that is in the repository today**,
-and it is the only remaining candidate that does.
+> **Premise corrected 2026-09-26 by this feature's own Phase 0 probe** (research S-1/S-2). This section
+> originally said capability 6's history grows without bound and remains exposed to the orphaned-tool-pair
+> bug. **Both were wrong**, and both came from reasoning by analogy with `readLast(N)` instead of measuring.
+> The corrected motivation below is narrower, and it is the one to publish.
 
 Capability 6's assistant keeps its **entire** session history, deliberately. The SDK's
 `MemoryProvider…readLast(N)` window is a naive "keep the last N messages" trim, and once a *tool-using*
 session exceeds N it cuts between a tool call and its response. The model provider then rejects the
 assembled request — reported, misleadingly, as `argument "content" is null`. That was capability 6's real
-live failure, proven by removing `readLast`, and the fix was to keep **full history** and accept the cost.
+live failure, proven by removing `readLast`.
 
-The cost is **unbounded token growth**: every turn of a long conversation re-sends every earlier turn, so
-a session gets steadily slower and more expensive until it is abandoned. Capability 6 recorded compaction
-as the proper bound and deferred it.
+**What the probe then measured.** Session history is **already bounded**, at
+`akka.javasdk.agent.memory.limited-window.max-size = 510 KiB` — the SDK's default, and documented as the
+*maximum* permitted value. And that bound is **safe**: the entity evicts oldest-first and then sweeps until
+the head of the history is a `UserMessage`, so the retained window always begins at a turn boundary and a
+tool-call pair can never be split. The two mechanisms differ in exactly one property — **whether the cut is
+turn-aligned** — and only `readLast`'s is not. Dropping `readLast` was the correct fix *and* a sufficient
+one.
 
-Compaction is the right answer precisely because it **summarises instead of slicing**. A summary is one
-user message and one AI message of ordinary prose, so there is no tool-call pair left to orphan — the
-mechanism that broke capability 6 cannot occur. Bounding the history and keeping tool-using sessions
-working are the same act, not a trade.
+**So what is left to fix is smaller, and still worth fixing:**
+
+1. **A bounded history is not a small one.** 510 KiB of text is on the order of 100k+ tokens, re-sent on
+   every turn of a long session. That is a cost and latency problem even though it terminates — and it
+   cannot be tuned upward, because 510 KiB is already the ceiling.
+2. **Eviction discards meaning.** The oldest turns are dropped *entirely* — safely, but with nothing left
+   behind. A long conversation quietly loses its beginning; `State.truncated()` records that it happened
+   and nothing recovers it.
+
+Compaction is the only mechanism available that shrinks a history **while keeping what it meant**: it
+replaces old turns with prose rather than deleting them. It is a **cost and continuity** feature, not a
+bug fix — and because a summary is prose, it also cannot reintroduce the shape that broke capability 6.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -177,7 +191,9 @@ the Java quarantine so that growth becomes a recorded finding rather than silent
 - **FR-002**: The summary MUST preserve what the conversation established, including the substance of tool
   calls and their results, expressed as ordinary prose rather than retained as structured tool calls.
 - **FR-003**: A compacted history MUST NOT contain a tool-call request without its matching response, nor
-  a response without its request — the shape that broke capability 6 MUST be unreachable by construction.
+  a response without its request. *(Research S-2: this is not defence against a latent SDK risk — the
+  SDK's own eviction is turn-aligned and safe. It is a property of **our** summary, and it holds by
+  construction because a summary is prose. Pinned by a test so a future change cannot quietly lose it.)*
 - **FR-004**: A session whose history is below the configured size MUST NOT be compacted.
 - **FR-005**: Compaction MUST NOT cause a user's turn to fail. If summarising fails for any reason, the
   session MUST remain usable and its history MUST be left exactly as it was.
@@ -205,6 +221,11 @@ the Java quarantine so that growth becomes a recorded finding rather than silent
   long session changes, and their existing tests MUST still pass against a memory that can compact.
 - **FR-015**: Capability 6 MUST be modified as little as possible; any change to it MUST be justified by a
   requirement here and called out, as capability 13's one-line change to capability 8 was.
+- **FR-016**: The compaction threshold MUST sit **below the SDK's own history bound**
+  (`limited-window.max-size`, default and maximum 510 KiB), and the permitted range MUST enforce that.
+  Above it the SDK's eviction reaches the oldest turns first, so compaction would summarise a history whose
+  beginning has already been discarded — the capability would appear to work while silently doing nothing
+  useful (research S-1).
 
 ### Key Entities
 
@@ -226,7 +247,7 @@ the Java quarantine so that growth becomes a recorded finding rather than silent
 - **SC-002**: A fact established before compaction is still present in the compacted history. Verified
   offline; the assistant's *use* of it is a **live** criterion, labelled as one.
 - **SC-003**: No compacted history contains an orphaned tool-call pair, asserted directly on the stored
-  messages. This is the criterion that says capability 6's defect cannot recur.
+  messages — a property of our own summary, since research S-2 showed the SDK's eviction never creates one.
 - **SC-004**: A turn taken while summarisation is failing returns a normal reply, and the history is
   unchanged.
 - **SC-005**: Capability 6's request and response shapes are unchanged, demonstrated rather than asserted.
@@ -256,6 +277,8 @@ the Java quarantine so that growth becomes a recorded finding rather than silent
   because FR-011 has to be testable and SC-001 has to be measurable.
 - **No new dependency.** The SDK documents this whole mechanism; nothing here needs anything the project
   does not already have.
+- **The SDK's 510 KiB bound stays on.** This capability compacts *earlier* than the SDK would evict; it
+  does not replace, raise or disable the SDK's bound, which cannot be raised anyway (research S-1).
 - **Capability 6 remains the only write path** for to-dos, and its assistant remains the subject. This
   capability adds no conversational surface of its own.
 

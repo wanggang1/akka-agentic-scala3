@@ -142,20 +142,115 @@ exhaustivity guarantee from the compiler.
 
 ---
 
-## Still to measure — the runtime half of the probe
+## The runtime half of the probe — measured 2026-09-26
 
-- **R-1 (Q-A)**: does a Scala `Consumer` over `SessionMemoryEntity` actually receive these events, and can
-  a Scala handler match `AiMessageAdded` / `UserMessageAdded` / `HistoryCleared` across the internal
-  serializer? Capability 16 proved the analogous thing for `TaskEntity`, but not for this hierarchy.
-- **R-2 (S-6's hazard)**: what is `historySizeInBytes` on the `AiMessageAdded` that **compaction itself**
-  emits? Decides whether a naive trigger loops.
-- **R-3 (Q-B)**: can one Java class hold `getHistory`, `compactHistory` *and* the detailed agent call, with
-  the trigger and everything else Scala? And does a **Java** method reference to a **Scala** agent's
-  handler resolve (capability 14 did this for `tokenStream`, so it is expected, not assumed)?
-- **R-4 (FR-008)**: does the `sequenceNumber` guard actually reject a stale write, and what does the caller
-  see when it does — an error, or a silent no-op?
-- **R-5 (Q-D consequence)**: does capability 14's **streamed** turn tolerate its history being replaced
-  mid-assembly? The one surface where our write races something the SDK is doing for us.
-- **R-6**: with `limited-window.max-size` overridden small, confirm S-2 empirically — that a tool-using
-  session evicted by size leaves **no** orphan, and that `truncated()` flips. Proves the corrected premise
-  by observation and not only by bytecode.
+Probes: `src/main/scala/com/gwgs/akkaagentic/compaction/probe/SessionMemoryProbeConsumer.scala` (Scala
+consumer over the runtime-owned entity), `src/main/java/…/SessionMemoryProbeGateway.java` (the two entity
+method references), `src/test/scala/…/CompactionProbeIntegrationTest.scala` and
+`EvictionAlignmentProbeIntegrationTest.scala`. All green; sessions driven through capability 4's
+`ChatAgent`, the least-interop agent in the project, so what is measured is the memory mechanism and not an
+agent.
+
+### R-1 — A Scala consumer over `SessionMemoryEntity` works. Capability 16's finding extends. ✅
+
+```text
+R-1 >>> events seen for [probe-r1]: UserMessageAdded(size=14) | AiMessageAdded(size=22, HISTORY=36)
+                                  | UserMessageAdded(size=16) | AiMessageAdded(size=17, HISTORY=69)
+```
+
+Zero unmatched events. A plain Scala `Consumer` with
+`@Consume.FromEventSourcedEntity(classOf[SessionMemoryEntity])` receives the runtime-owned entity's events
+and matches its record subtypes by type pattern. So capability 13's clause — the wall is about *which
+client*, not about who owns the component — extends from `TaskEntity` (capability 16) to
+`SessionMemoryEntity`. `Event` is a plain Java interface, so the compiler offers no exhaustivity check; a
+default case is required and the probe asserts nothing reaches it.
+
+### R-2 — The self-trigger loop hazard is REAL in shape and BENIGN in fact. ✅ *(measured, not assumed)*
+
+`compactHistory` does persist an `AiMessageAdded`, the same event the trigger listens to. But the size it
+reports is computed **after** `HistoryCleared` has reset the state:
+
+```text
+R-2 >>> before: messages=8 seqNr=9  historySizes=4015,8030,12045,16060
+R-2 >>> after:  messages=2 seqNr=12 texts=UserMessage,AiMessage  historySizes=…,16060,22
+R-2 >>> LOOP HAZARD: history size reported on compaction's OWN AiMessageAdded = 22 (was 16060)
+```
+
+**22 bytes.** So a trigger keyed on `historySizeInBytes > threshold` does **not** re-fire on its own write,
+for any sane threshold. The seqNr moving 9 → 12 confirms S-6's three events. The compacted history is
+exactly `UserMessage, AiMessage`. No loop guard is needed — but a test should pin this, because it is a
+property of the SDK's ordering rather than of our code.
+
+### R-3 — One Java class can hold every method reference. ✅
+
+`SessionMemoryProbeGateway` holds `.method(SessionMemoryEntity::getHistory)` and
+`.method(SessionMemoryEntity::compactHistory)` and compiles and runs against the **runtime-owned** entity.
+And the agent call can live there too: capability 14's `StreamingChatEndpoint` already holds
+`tokenStream(StreamingChatAgent::stream)` — a Java method reference to a **Scala** agent's handler, in
+production — so `.method(CompactionAgent::summarize).withDetailedReply()` against a Scala agent needs no
+separate proof. **Decision**: one Java class, holding all three method references, keeping the summary's
+token usage at zero extra Java (S-4).
+
+### R-4 — The concurrency guard is SILENT. ⚠️ *(the finding that changes the design)*
+
+A stale sequence number is **accepted without error and does nothing**:
+
+```text
+R-4 >>> stale sequenceNumber [3] -> ACCEPTED (no error)
+R-4 >>> history after the stale write: messages=4     # unchanged — the compaction was discarded
+```
+
+So FR-008 is satisfied *by the platform* — newer messages are never lost — but the caller gets **no signal
+whatsoever** that compaction was skipped. There is no exception and no result to inspect. A naive
+implementation would record "compacted" in its own state while the history was untouched, and report a
+bound it never applied.
+
+**Consequence for the design**: compaction must be **verified, not assumed**. The gateway re-reads the
+history after writing and compares, and only a confirmed replacement is recorded. This is the same class of
+hazard as capability 16's set-aside accounting, where the store could not testify to what the runtime
+actually did.
+
+### R-6 — The SDK's own eviction is turn-aligned, observed. ✅ *(S-2 confirmed by measurement)*
+
+510 KiB is impractical to reach in a test, so the bound was overridden to 8 KiB; the mechanism is the same
+and only the threshold moves.
+
+```text
+R-6 >>> wrote 24 messages under an 8 KiB bound; 8 retained
+R-6 >>> EVICTION OCCURRED = true
+R-6 >>> retained heads: q9 z,a9 z,q10 ,a10 ,q11 ,a11
+R-6 >>> first retained message is a UserMessage
+```
+
+The retained window begins at `q9` — a `UserMessage` — and alternates cleanly from there. The cut lands
+exactly on a turn boundary, so a tool-call pair cannot be split. **S-2 is now measured, not inferred**, and
+with it the corrected premise the whole capability rests on.
+
+*(A first attempt at this used 4000-character padding under the default 510 KiB bound and evicted nothing —
+`eviction occurred = false`, 24 of 24 retained. Reported because it is why the override exists: a probe that
+does not reach its own trigger proves nothing, and it would have been easy to read that green run as
+confirmation.)*
+
+### R-5 — NOT measured. Stated rather than assumed.
+
+Whether capability 14's **streamed** turn tolerates its history being replaced mid-assembly is the one risk
+the service-wide decision (FR-014) creates, and it is **unverified**. It needs a compaction fired at a
+session while a stream is open — two concurrent things, neither easy to time deterministically. It is
+carried into implementation as a task with its own test, not silently assumed safe. What is known: the
+trigger fires only on `AiMessageAdded` (S-5), which for a streamed turn is written when the stream
+*completes*, so the window for a race is narrower than it first appears — but "narrower" is not "absent".
+
+---
+
+## Decisions this research settles
+
+| # | Decision | Because |
+|---|---|---|
+| D1 | Trigger is a **Scala** `Consumer` on `SessionMemoryEntity`, keyed on `AiMessageAdded` only | R-1 works; S-5 puts the running size on that event alone, so the check costs no entity read and cannot fire mid-turn |
+| D2 | **One Java class** holds `getHistory`, `compactHistory` and the detailed agent call | R-3; keeps token usage (S-4) at zero extra Java, and pins the quarantine at one class as in capabilities 11, 14, 15 |
+| D3 | Compaction is **verified by re-reading**, never assumed | R-4: a stale sequence number is accepted silently and does nothing |
+| D4 | No loop guard, but a **test pinning** the 22-byte result | R-2: the hazard resolves in the SDK's ordering, which is not our property to rely on silently |
+| D5 | Threshold in **bytes**, configurable, disableable, and **range-enforced below 510 KiB** | S-1: above it the SDK's eviction reaches the oldest turns first and compaction would do nothing useful |
+| D6 | The summariser is a **Scala** `Agent` whose result is **Java-shaped** | It crosses the internal serializer (README §3), like capability 3's `HelpAnswer` |
+| D7 | Observability is an in-process store — **one `AtomicReference`, pure transitions** | The cap-15 review rule; and FR-011 needs it readable without the log |
+| D8 | Capability 6 is **untouched**; capabilities 4 and 14 gain the bound without being edited | FR-014/FR-015; the trigger is service-wide and lives entirely in this capability |
