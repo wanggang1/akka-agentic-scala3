@@ -6,7 +6,7 @@ import akka.javasdk.testkit.{TestKit, TestKitSupport}
 import com.gwgs.akkaagentic.reminders.application.ReminderStore
 import com.gwgs.akkaagentic.reminders.domain.ReminderState
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.{BeforeEach, Test}
+import org.junit.jupiter.api.{BeforeEach, Tag, Test}
 import org.slf4j.LoggerFactory
 
 /** Phase 0's discovery probe, reduced to the one piece of evidence nothing else carries (FR-013): **a
@@ -21,6 +21,7 @@ import org.slf4j.LoggerFactory
   *   - **Q-C** (durability) and **Q-E** (timing) were measurements, not regression checks; they are
   *     recorded in specs/017 research.md.
   */
+@Tag("slow")
 class TimedActionProbeIntegrationTest extends TestKitSupport:
 
   private val logger = LoggerFactory.getLogger(classOf[TimedActionProbeIntegrationTest])

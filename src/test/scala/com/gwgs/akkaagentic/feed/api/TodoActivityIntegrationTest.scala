@@ -9,7 +9,7 @@ import com.gwgs.akkaagentic.feed.api.TodoActivityEndpoint.FeedView
 import com.gwgs.akkaagentic.feed.application.ActivityStore
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility
-import org.junit.jupiter.api.{BeforeEach, Test}
+import org.junit.jupiter.api.{BeforeEach, Tag, Test}
 
 /** T013 / T014 — User Story 1 over real HTTP: a change at the source appears in the feed, unasked.
   *
@@ -29,6 +29,7 @@ import org.junit.jupiter.api.{BeforeEach, Test}
   * case was not observed in any measurement; it is recorded as unverified rather than claimed impossible
   * (specs/018 research, "what remains unverified").
   */
+@Tag("slow")
 class TodoActivityIntegrationTest extends TestKitSupport:
 
   override protected def testKitSettings(): TestKit.Settings =

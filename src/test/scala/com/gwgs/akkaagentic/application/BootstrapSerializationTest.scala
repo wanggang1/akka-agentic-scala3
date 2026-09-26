@@ -3,7 +3,7 @@ package com.gwgs.akkaagentic.application
 import akka.javasdk.JsonSupport
 import akka.javasdk.testkit.{TestKit, TestKitSupport}
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.{Tag, Test}
 
 /** A plain, annotation-free Scala case class with `Option` fields — the thing that only
   * (de)serializes once [[Bootstrap]] has registered `DefaultScalaModule`. Defined at the
@@ -16,6 +16,8 @@ final case class Sample(user: Option[String], text: Option[String], count: Int)
   * the SDK's shared `ObjectMapper`. If the `service-setup` descriptor entry were wrong, the
   * module would not be registered and these round-trips would fail.
   */
+// @Tag("testkit"): starts a whole runtime in the UNIT phase (2.8 s of the 22.4 s)
+@Tag("testkit")
 class BootstrapSerializationTest extends TestKitSupport:
 
   // The agent component is loaded at startup; give it a dummy key so boot succeeds offline.

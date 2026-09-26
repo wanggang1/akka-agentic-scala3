@@ -11,7 +11,7 @@ import com.gwgs.akkaagentic.approvals.application.ApprovalTasks
 import com.gwgs.akkaagentic.feed.application.ActivityStore
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility
-import org.junit.jupiter.api.{BeforeEach, Test}
+import org.junit.jupiter.api.{BeforeEach, Tag, Test}
 import org.slf4j.LoggerFactory
 
 /** Phase 0's discovery probe, reduced to the evidence nothing else carries (FR-013).
@@ -27,6 +27,7 @@ import org.slf4j.LoggerFactory
   * specs/018 research Q-D, and re-deriving a known number cost the suite ~2 minutes per run. The behaviour
   * they justified is pinned by `BoundedActivityDeliveryIntegrationTest`, on the real path.
   */
+@Tag("slow")
 class ConsumerProbeIntegrationTest extends TestKitSupport:
 
   private val logger = LoggerFactory.getLogger(classOf[ConsumerProbeIntegrationTest])

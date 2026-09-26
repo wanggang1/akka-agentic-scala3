@@ -14,7 +14,7 @@ import akka.stream.javadsl.{Sink, Source}
 import akka.util.ByteString
 import com.gwgs.akkaagentic.streaming.application.StreamingChatAgent
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.{BeforeEach, Test}
+import org.junit.jupiter.api.{BeforeEach, Tag, Test}
 import org.slf4j.LoggerFactory
 
 /** US3 — an interrupted answer must not be passed off as a complete one, and a caller must never wait
@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory
   *     synthetic source below, and the real case is live-only work (research, "What remains
   *     unverified"). An SDK that let a test provider emit tokens on demand would close this gap.
   */
+@Tag("slow")
 class StreamingChatFailureIntegrationTest extends TestKitSupport:
 
   private val logger = LoggerFactory.getLogger(classOf[StreamingChatFailureIntegrationTest])

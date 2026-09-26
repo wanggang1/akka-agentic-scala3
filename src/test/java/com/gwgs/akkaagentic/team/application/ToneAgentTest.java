@@ -6,8 +6,11 @@ import akka.javasdk.testkit.TestKit;
 import akka.javasdk.testkit.TestKitSupport;
 import akka.javasdk.testkit.TestModelProvider;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 
 /** Drives {@link ToneAgent} with a mocked model (no live model, no API key). */
+// @Tag("testkit"): starts a whole runtime in the UNIT phase (3.1 s of the 22.4 s)
+@Tag("testkit")
 public class ToneAgentTest extends TestKitSupport {
 
   private final TestModelProvider toneModel = new TestModelProvider();

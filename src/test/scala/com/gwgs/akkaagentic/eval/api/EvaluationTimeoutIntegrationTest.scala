@@ -7,7 +7,7 @@ import akka.javasdk.testkit.{TestKit, TestKitSupport, TestModelProvider}
 import com.gwgs.akkaagentic.docs.application.DocsAgent
 import com.gwgs.akkaagentic.eval.application.DeclineJudge
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.{BeforeEach, Test}
+import org.junit.jupiter.api.{BeforeEach, Tag, Test}
 
 /** Gate 2 of the judge-timeout follow-up: the two judges run **concurrently**, and each is bounded by
   * `eval.judge-timeout`.
@@ -20,6 +20,7 @@ import org.junit.jupiter.api.{BeforeEach, Test}
   * ends; concurrent judges must finish well under the sum of both sleeps. They measure the mechanism,
   * not the machine.
   */
+@Tag("slow")
 class EvaluationTimeoutIntegrationTest extends TestKitSupport:
 
   private val docsModel = new TestModelProvider()
