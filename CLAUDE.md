@@ -36,6 +36,34 @@ Scala idioms over Java-isms:
   nullable), because the SDK has no Scala Jackson module. Idiomatic Scala applies to the
   domain/application layers; the null→Option conversion bridges the two.
 
+## Choosing which tests to run
+
+**`mvn clean verify` (4:16) is the gate, not the loop.** Run it before calling work done and before
+pushing to a PR — never as the check after editing one line. Otherwise, pick the smallest run that
+could actually catch a break in what you changed. See README "Test" for every command and its measured
+cost; the short forms are `mvn test -Pquick` (8.8 s, pure logic), `mvn test -Dtest='XTest,YTest'`
+(5.0 s) and `mvn verify -Dit.test='Cap*IntegrationTest' -Dtest='!*'` (26.5 s, one capability).
+
+| What you touched | What to run |
+|---|---|
+| Pure domain, or a non-component helper (`*/domain/*`, `BoundedDelivery`, `ActivityStore`, `FeedSettings`, `KnowledgeStore`) | that capability's **unit** tests by name |
+| A component or endpoint (Agent, Consumer, Entity, View, TimedAction, endpoint) | that capability's **integration** tests — the runtime does the wiring, so only a runtime can check it |
+| **The component descriptor**, `application.conf`, `Bootstrap.scala`, `include-*loggers.xml`, `pom.xml` | **`mvn clean verify`** — each has a measured precedent for breaking *every* capability at startup (a missing descriptor line; `AK-00406` from one `@Produce.ToTopic`; a misspelled guardrail class) |
+| A Java↔Scala reference, or plugin/phase order | **`mvn clean verify`** — exactly the class of bug capability 11 hid, where incremental passed and clean failed |
+| About to say "done", or push to a PR | **`mvn clean verify`** |
+
+Two things that keep this honest:
+
+- **`clean` is a separate axis from *which* tests.** It is load-bearing only for the last three rows;
+  in the inner loop an incremental build is correct, and `mvn clean` also wipes Metals' output.
+- **Cross-capability edges, so "that capability's tests" is not quietly wrong.** Capability 16's feed
+  and capability 11's View both consume **capability 6's** `TodoEntity`; capability 13 calls
+  **capability 8's** agent and capability 12 guards it; capability 10 calls **capability 9's** MCP
+  server. Editing 6, 8 or 9 means running the dependents' integration tests too.
+
+A selective run can miss a break outside the capability you edited — that is the trade, and the last
+row is the mitigation. Do not narrow the final gate to buy speed.
+
 ## Akka documentation
 
 You find the reference documentation of Akka in the akka-context directory and sub-directories.

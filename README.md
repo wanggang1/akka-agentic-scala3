@@ -1167,13 +1167,43 @@ Two things worth knowing before you go cache-hunting, both learned the hard way:
 ## Test
 
 ```shell
-mvn verify
+mvn clean verify
 ```
 
 Tests register a `TestModelProvider`, so **no API key or network is required** — results are
 deterministic. Capabilities 11, 15 and 16 use no model at all, mocked or live.
 
-Prefer **`mvn clean verify`** as the final check before calling work done (see the note above).
+**`mvn clean verify` is the gate, not the loop.** It is the final check before calling work done or
+pushing to a PR — and the `clean` is load-bearing, because an incremental build reuses `target/classes`
+and once masked a build that failed from clean (§13 R3). But at 4:16 it is the wrong thing to run after
+editing one line, so the commands below exist. All timings are measured on an M1 / 32 GB Mac.
+
+| Command | Runs | Cost |
+|---|---|---|
+| `mvn clean verify` | everything — 221 unit + 196 integration | **4:16** |
+| `mvn verify -Pquick` | everything except the two excluded tags below | **2:13** |
+| `mvn test` | the unit phase only (the parent pom excludes `*IntegrationTest`) | **28 s** |
+| `mvn test -Pquick` | pure logic only — no runtime is started | **8.8 s** |
+| `mvn test -Dtest='TodoDiffTest,ActivityFeedTest'` | named unit tests | **5.0 s** |
+| `mvn verify -Dit.test='TodoActivity*IntegrationTest' -Dtest='!*'` | one capability's integration tests (`-Dtest='!*'` suppresses the unit phase) | **26.5 s** |
+| `mvn verify -DskipITs` | the inverse — unit phase, skip integration | — |
+
+**`-Pquick` excludes two JUnit tags**, and the reason each exists matters more than the time it saves:
+
+- **`slow`** — the test's cost is an unavoidable wall-clock wait, and in every case here it is waiting
+  to prove a **negative**: a cancelled timer never fires, an undecided approval gate does not release,
+  retries actually stopped, a stream stays silent, nothing was recorded for an untouched user. You
+  cannot prove a negative without waiting, so **these sleeps are not inefficiencies to optimise away**.
+  Nine integration classes, ~92 s.
+- **`testkit`** — a `*Test` in the *unit* phase that starts a whole Akka runtime. Five classes account
+  for **21.9 s of the unit phase's 22.4 s**; the other 39 classes together take 0.5 s. That is what
+  makes `mvn test -Pquick` a genuinely fast loop rather than a marginally faster one.
+
+**Do not try `-DforkCount` to parallelise.** Measured: `forkCount=3` fails with 5 errors —
+`GreetingAgentTest` dies in `TestKitSupport.beforeAll` with *"Runtime Error while starting"*, others
+with *"Command to entity [akka-session-memory] timed out"*. Concurrent Akka runtimes contend, and the
+failures land in the unit phase before integration tests even start. A faster build that fails randomly
+is not a faster build.
 
 ## Run locally
 
