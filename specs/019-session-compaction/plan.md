@@ -75,13 +75,14 @@ specs/019-session-compaction/
 src/main/scala/com/gwgs/akkaagentic/compaction/domain/
     CompactionThreshold.scala     # pure: bytes, range-enforced BELOW the SDK's 510 KiB (S-1)
     CompactionDecision.scala      # pure: (historySize, threshold, enabled) => Compact | Leave
-    ConversationSummary.scala     # pure: the prose pair; Java-shaped result type for the agent (§3)
-    SummaryRequest.scala          # pure: SessionHistory's messages -> the text a summariser reads
+    HistoryLine.scala             # pure: the neutral conversation type, so `domain` imports no Akka
+    SummaryRequest.scala          # pure: HistoryLine list -> the text a summariser reads
     CompactionLedger.scala        # pure: per-session record + bounded retention, (Ledger, Result) transitions
 
 src/main/scala/com/gwgs/akkaagentic/compaction/application/
     SessionMemoryConsumer.scala   # TRIGGER: @Consume.FromEventSourcedEntity(SessionMemoryEntity), AiMessageAdded only
     CompactionAgent.scala         # the summariser; Scala Agent, Java-shaped result
+    ConversationSummary.scala     # the Java-shaped result (here, not domain — it carries @Description)
     CompactionStore.scala         # ONE AtomicReference over CompactionLedger, pure CAS transitions
     CompactionSettings.scala      # threshold + enabled from Config; ConfigException.BadValue, never `require`
 

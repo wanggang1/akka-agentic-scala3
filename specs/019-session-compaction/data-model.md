@@ -51,7 +51,19 @@ call that could later be orphaned.
 | `text` | `String` | `USER:` / `AI:` / `TOOL_CALL_REQUEST:` / `TOOL_CALL_RESPONSE:` sections, in order |
 | `messageCount` | `Int` | Carried so the ledger can record what was replaced |
 
-### `ConversationSummary` — **Java-shaped** (crosses the internal serializer)
+### `HistoryLine` — the neutral conversation type
+
+The SDK hands us `akka.javasdk.agent.SessionMessage`, and the constitution's Principle II keeps `domain`
+free of Akka. So the formatting rule — the part worth unit-testing, because it decides what survives a
+compaction — works on `HistoryLine.{User, Ai, ToolResult}` and the application layer maps at the boundary.
+*(A departure from this document's first draft and from tasks.md T005, both of which had `SummaryRequest`
+taking `SessionMessage` directly. Caught while implementing: it would have dragged the SDK into the domain
+to save one small mapper.)*
+
+### `ConversationSummary` — **Java-shaped**, and in `application` not `domain`
+
+*(Also corrected while implementing: its `@Description` hints are an Akka annotation, so it belongs beside
+capability 3's `HelpAnswer`, which lives in `application` for the same reason.)*
 
 The summariser agent's result type. Jackson-annotated with plain fields, like capability 3's `HelpAnswer`
 and capability 16's change message, because component payloads do **not** go through the Scala-aware mapper
