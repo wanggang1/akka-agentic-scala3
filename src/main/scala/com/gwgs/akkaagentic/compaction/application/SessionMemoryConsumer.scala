@@ -37,8 +37,12 @@ import org.slf4j.LoggerFactory
 class SessionMemoryConsumer(componentClient: ComponentClient, config: Config) extends Consumer:
 
   private val logger = LoggerFactory.getLogger(getClass)
-  private val threshold = CompactionSettings.threshold(config)
+  // `thresholdOrDisabled`, not `threshold`: a consumer that throws is redelivered without limit
+  // (capability 16), so an out-of-range value would spin for ever. `Bootstrap` raises loudly at startup;
+  // here the capability simply switches itself off. See CompactionSettings.thresholdOrDisabled.
+  private val threshold = CompactionSettings.thresholdOrDisabled(config)
   private val compactor = new Compactor(new SessionMemoryGateway(componentClient))
+  if !threshold.enabled then logger.debug("compaction is disabled; the trigger will do nothing")
   CompactionStore.configure(config)
 
   def onEvent(event: SessionMemoryEntity.Event): Consumer.Effect =

@@ -27,7 +27,11 @@ object CompactionStore:
   /** Applies the configured retention. The consumer calls this as it is constructed; it is idempotent for
     * the same value, so per-message construction does not keep resetting the ledger. */
   def configure(config: Config): Unit =
-    val maxSessions = CompactionSettings.maxSessions(config)
+    // Same reasoning as the threshold: a throw here would be a per-message throw. `Bootstrap` is where
+    // an out-of-range value is reported.
+    val maxSessions =
+      try CompactionSettings.maxSessions(config)
+      catch case _: com.typesafe.config.ConfigException.BadValue => 1000
     cell.updateAndGet(ledger =>
       if ledger.maxSessions == maxSessions then ledger
       else CompactionLedger.start(ledger.since, maxSessions))

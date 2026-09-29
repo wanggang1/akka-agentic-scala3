@@ -327,6 +327,41 @@ deterministic three-turn case is exactly `UserMessage, AiMessage`.
 The general shape, and it is the same one R-4 has: **under concurrency, infer nothing from a count.** Ask
 for the thing that is invariant.
 
+### I-4 — A `ServiceSetup.onStartup` failure does NOT stop the service. ⚠️ *(measured in US4)*
+
+`Bootstrap.onStartup` was made to validate `compaction.*` and raise `ConfigException.BadValue` on an
+out-of-range value, on the model of capability 12's misspelled guardrail class — which *does* fail the
+service at startup, leaving "no window in which an agent is silently unguarded".
+
+**That does not transfer.** The runtime logs the `onStartup` exception and **starts anyway**:
+`testKit.start()` returns normally, and every subsequent request is served. So a `ServiceSetup` is not a
+place where a service can be made to refuse to start, and capability 12's guarantee comes from *where* its
+check happens rather than from the SDK failing loudly in general.
+
+### I-5 — Which made a bad setting a redelivery storm, until it was degraded. ⚠️
+
+With the settings read straight in `SessionMemoryConsumer`, an out-of-range value produced:
+
+| | Observed |
+|---|---|
+| service starts | **yes** |
+| a user's turn | **succeeds**, no symptom |
+| `GET /compaction/{id}` | `404` — compaction never ran |
+| the consumer | threw on construction for **every** event — **40 redeliveries** in one short test |
+
+Capability 16 measured that a failing consumer is redelivered without limit, so an operator's typo became
+a consumer spinning for ever while every outward sign said the service was healthy — the worst combination
+available: no damage a caller can see, and no symptom pointing at the cause.
+
+**The design that replaced it: loud once, harmless thereafter.** `Bootstrap` still raises at startup, where
+the offending key and value are logged once; the consumer and the store degrade to "compaction off". A
+misconfigured service now behaves exactly as if compaction were disabled, and the occurrence count in the
+same test dropped from **40 to 1**.
+
+The general shape is worth keeping: **when a component is reconstructed per message, a throw in its
+constructor is not a failure, it is a loop.** Validate where it is reported once, and degrade where it
+would repeat.
+
 ---
 
 ## Decisions this research settles
@@ -344,3 +379,4 @@ for the thing that is invariant.
 | D9 | The Java class holds **no logic at all** — three thin operations, no decisions | I-1: javac cannot construct a Scala 3 `enum` case, which exposed that the first draft had logic in the quarantine |
 | D10 | The threshold is re-checked against the history actually read, before any model call | I-2: the event's size is stale in a burst, and acting on it alone spent three summariser calls to do one compaction |
 | D11 | A landed write is identified by our summary being at the **head**, never by a message count | I-3: a concurrent turn appends while the summariser works, so a count reported a success as a skip |
+| D12 | Bad configuration is reported **once at startup** and then **degrades to compaction off**, never thrown per message | I-4: a `ServiceSetup` failure does not stop the service; I-5: a per-message throw is a redelivery storm, not a failure (40 → 1) |

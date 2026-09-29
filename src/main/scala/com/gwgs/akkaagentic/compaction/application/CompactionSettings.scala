@@ -22,6 +22,29 @@ object CompactionSettings:
       .of(config.getBytes(MaxBytesKey), config.getBoolean(EnabledKey))
       .fold(reason => throw ConfigException.BadValue(MaxBytesKey, reason), identity)
 
+  /** The threshold, or **compaction switched off** if the configuration is out of range.
+    *
+    * Measured (specs/019 T029): a consumer that throws on an out-of-range value is reconstructed and
+    * throws again for **every** session-memory event — 40 redeliveries in one short test — because
+    * capability 16 measured that a failing consumer is redelivered without limit. That turns an operator's
+    * typo into a consumer spinning for ever, with no outward symptom.
+    *
+    * And the obvious fix is not available: `Bootstrap.onStartup` DOES validate and DOES raise, but the
+    * runtime logs that and starts anyway (measured — `testKit.start()` returns normally), so a bad value
+    * cannot be made to stop the service the way capability 12's misspelled guardrail class does.
+    *
+    * So the failure is made **loud once and harmless thereafter**: `Bootstrap` raises at startup, where it
+    * is logged with the offending key and value, and the consumer degrades to "compaction off" instead of
+    * spinning. A misconfigured service does not compact, says so at startup, and damages nothing.
+    */
+  def thresholdOrDisabled(config: Config): CompactionThreshold =
+    try threshold(config)
+    catch
+      case bad: ConfigException.BadValue =>
+        CompactionThreshold
+          .of(CompactionThreshold.MaxBytes, enabled = false)
+          .getOrElse(throw bad) // unreachable: MaxBytes is in range by construction
+
   def maxSessions(config: Config): Int =
     val value = config.getInt(MaxSessionsKey)
     if value < 1 || value > 100000 then
