@@ -43,10 +43,22 @@ curl -s -X POST http://localhost:9000/request/alice \
 # ...still answers "Ada" — the summary carried it across the compaction
 ```
 
-**This is the one thing no offline test in this project can show.** Capabilities 4 and 6 both measured that
-a mocked model receives only the current turn, so the mock cannot demonstrate the model *using* a summary.
-Offline tests assert the summary **contains** what was established; that it is then *used* is verified here,
-live, and nowhere else.
+**This is the one thing no offline test in this project can show**, and it is worth being precise about
+where the line falls. A mocked model receives only the current turn — capabilities 4 and 6 both measured
+it, and `ChatAgentIntegrationTest.mockReceivesOnlyTheCurrentTurnNotReplayedHistory` pins it — so the mock
+cannot demonstrate a model *using* a summary.
+
+What the offline tests do prove is the pipeline either side of the model, which is where a real bug would
+live:
+
+| Claim | Proven | Where |
+|---|---|---|
+| Nothing is lost on the way **in** — the summariser is handed what was established, tool outcomes included | offline | `SummaryContentIntegrationTest`, `SummaryRequestToolProseTest` |
+| Nothing is lost on the way **out** — what the summariser returned is exactly what the session stores | offline | `SummaryContentIntegrationTest` |
+| The model then **uses** the summary on a later turn | **live only** | this walk, and nowhere else |
+
+The third row is labelled rather than simulated, because a simulated version would pass whether or not the
+feature worked.
 
 ## It applies to every session, not just the assistant's
 
