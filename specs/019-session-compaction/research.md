@@ -191,24 +191,38 @@ production — so `.method(CompactionAgent::summarize).withDetailedReply()` agai
 separate proof. **Decision**: one Java class, holding all three method references, keeping the summary's
 token usage at zero extra Java (S-4).
 
-### R-4 — The concurrency guard is SILENT. ⚠️ *(the finding that changes the design)*
+### R-4 — ~~The concurrency guard is SILENT~~ → **CORRECTED: it is a MERGE.** ⚠️
 
-A stale sequence number is **accepted without error and does nothing**:
+**This entry was wrong, and the way it was wrong is the more useful finding.**
+
+*What Phase 0 concluded.* A `compactHistory` carrying a stale `sequenceNumber` was "accepted without error
+and does nothing":
 
 ```text
 R-4 >>> stale sequenceNumber [3] -> ACCEPTED (no error)
-R-4 >>> history after the stale write: messages=4     # unchanged — the compaction was discarded
+R-4 >>> history after the stale write: messages=4     # read as "unchanged"
 ```
 
-So FR-008 is satisfied *by the platform* — newer messages are never lost — but the caller gets **no signal
-whatsoever** that compaction was skipped. There is no exception and no result to inspect. A naive
-implementation would record "compacted" in its own state while the history was untouched, and report a
-bound it never applied.
+*What is actually true*, measured in T023 and confirmed in `SessionMemoryEntity.compactHistory`'s bytecode:
+`sequenceNumber` marks **how much of the history the summary stands for**. The entity clears, writes the
+summary, and then **replays every event recorded after that number back on top of it**. A concurrent turn
+is therefore neither lost nor able to block the compaction — it simply ends up after the summary.
 
-**Consequence for the design**: compaction must be **verified, not assumed**. The gateway re-reads the
-history after writing and compares, and only a confirmed replacement is recorded. This is the same class of
-hazard as capability 16's set-aside accounting, where the store could not testify to what the runtime
-actually did.
+*How the probe misread it.* It passed `sequenceNumber - 2` against a four-message history and saw four
+messages afterwards. That was not "unchanged": it was *compacted to two, then two replayed back*. The same
+count, for a completely different reason — which is precisely the mistake this capability later wrote up
+as **I-3: under concurrency, infer nothing from a count.** The probe made the error before the lesson was
+learned, and the lesson did not get applied backwards to its own notes.
+
+*What it changes, and what it does not.* FR-008 is satisfied more strongly than assumed — by replay rather
+than by rejection. The design is unaffected: `Compactor` still re-reads after writing, because that is how
+the ledger reports what actually stands rather than what was hoped, and it is what makes `lastBytesAfter`
+a measurement instead of a prediction. `Outcome.SkippedStale` stays as a defensive case for a summary that
+does not appear at the head, with the honest note that **this SDK version gives no way to produce one**.
+
+*What it is worth carrying forward.* A silent API is still a hazard — the call reports nothing either way,
+so the only way to know what a compaction did is to look. That part of R-4 stands. What does not stand is
+the inference about *what* it did, drawn from a count that happened to match.
 
 ### R-6 — The SDK's own eviction is turn-aligned, observed. ✅ *(S-2 confirmed by measurement)*
 
@@ -231,14 +245,29 @@ with it the corrected premise the whole capability rests on.
 does not reach its own trigger proves nothing, and it would have been easy to read that green run as
 confirmation.)*
 
-### R-5 — NOT measured. Stated rather than assumed.
+### R-5 — MEASURED in T026: a streamed turn survives its history being replaced. ✅ *(with a stated limit)*
 
-Whether capability 14's **streamed** turn tolerates its history being replaced mid-assembly is the one risk
-the service-wide decision (FR-014) creates, and it is **unverified**. It needs a compaction fired at a
-session while a stream is open — two concurrent things, neither easy to time deterministically. It is
-carried into implementation as a task with its own test, not silently assumed safe. What is known: the
-trigger fires only on `AiMessageAdded` (S-5), which for a streamed turn is written when the stream
-*completes*, so the window for a race is narrower than it first appears — but "narrower" is not "absent".
+The one risk the service-wide decision (FR-014) creates, carried from planning as explicitly unverified.
+Now measured, and it holds:
+
+```text
+R-5 >>> streamed turn during a compaction: status=200 bytes=79
+R-5 >>> record: {...,"lastBytesBefore":4449,"lastBytesAfter":156,"lastMessagesReplaced":6,"lastOutcome":"compacted"}
+R-5 >>> history after the race: 4 messages
+R-5 >>> streamed turn after compaction: status=200
+```
+
+The race is produced by making the summariser slow (3 s), driving capability 14's streamed surface until a
+turn crosses the threshold, and opening another stream while the compaction is inside the summariser. The
+streamed turn returned `200` with its body **exactly** intact, and its message is still in the history
+afterwards — kept by the same replay that R-4 (corrected) describes. A stream over an already-compacted
+session behaves normally too.
+
+**The limit, stated rather than glossed.** The window is wide — seconds — but this is still a *timing*
+construction, not a deterministic interleaving: the SDK offers no hook to hold a compaction at a chosen
+instant, so a green run is evidence and not proof. What it does rule out is the failure that would have
+mattered: a streamed turn erroring, truncating, or losing its reply because its history was replaced
+underneath it. That was the open question, and the answer is no.
 
 ---
 
@@ -306,7 +335,7 @@ for the thing that is invariant.
 |---|---|---|
 | D1 | Trigger is a **Scala** `Consumer` on `SessionMemoryEntity`, keyed on `AiMessageAdded` only | R-1 works; S-5 puts the running size on that event alone, so the check costs no entity read and cannot fire mid-turn |
 | D2 | **One Java class** holds `getHistory`, `compactHistory` and the detailed agent call | R-3; keeps token usage (S-4) at zero extra Java, and pins the quarantine at one class as in capabilities 11, 14, 15 |
-| D3 | Compaction is **verified by re-reading**, never assumed | R-4: a stale sequence number is accepted silently and does nothing |
+| D3 | Compaction is **verified by re-reading**, never assumed | R-4 (as corrected): the call reports nothing either way, so `lastBytesAfter` must be a measurement rather than a prediction |
 | D4 | No loop guard, but a **test pinning** the 22-byte result | R-2: the hazard resolves in the SDK's ordering, which is not our property to rely on silently |
 | D5 | Threshold in **bytes**, configurable, disableable, and **range-enforced below 510 KiB** | S-1: above it the SDK's eviction reaches the oldest turns first and compaction would do nothing useful |
 | D6 | The summariser is a **Scala** `Agent` whose result is **Java-shaped** | It crosses the internal serializer (README §3), like capability 3's `HelpAnswer` |
