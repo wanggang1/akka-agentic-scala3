@@ -170,6 +170,19 @@ src/main/scala/com/gwgs/akkaagentic/feed/probe/       # FR-013 evidence: the alw
 # cannot be processed is set aside and the stream moves on. The feed is in-process and says so (`since`):
 # the consumer resumes after a restart and replays nothing. New descriptor key `consumer`. See §18.
 
+# Capability 17 — Scala + ONE Java class (session compaction; see "Scala interop notes" §19)
+src/main/scala/com/gwgs/akkaagentic/compaction/domain/      # CompactionThreshold (range enforced BELOW the SDK's 510 KiB), CompactionDecision, HistoryLine, SummaryRequest, CompactionLedger — no Akka import
+src/main/scala/com/gwgs/akkaagentic/compaction/application/ # SessionMemoryConsumer (trigger, AiMessageAdded only), Compactor (ALL the judgement), CompactionAgent (summariser), ConversationSummary (Java-shaped), CompactionStore (one atomic cell), CompactionSettings
+src/main/java/com/gwgs/akkaagentic/compaction/application/  # SessionMemoryGateway — THE ONE JAVA CLASS: three method refs, no logic
+src/main/scala/com/gwgs/akkaagentic/compaction/api/         # CompactionEndpoint (GET /compaction, /{sessionId})
+# Note: when a session's history passes `compaction.max-bytes` it is replaced by a prose summary, so a long
+# conversation stays affordable. Applies to EVERY session (caps 4, 6 and 14 gain the bound un-edited — an
+# empty git diff proves it), because session memory is shared infrastructure. The Java class exists because
+# getHistory, compactHistory AND withDetailedReply are all method-ref-only — the THIRD method of the agent
+# client to land on the wrong side of the wall. It holds no logic because javac cannot construct a Scala 3
+# enum case, which pushed the decisions to Scala. NOT a bug fix: history was already bounded at 510 KiB and
+# that bound is turn-aligned and safe — this is cost + continuity. See §19.
+
 src/main/resources/application.conf                 # default model-provider config
 src/test/{scala,java}/com/gwgs/akkaagentic/...       # tests (TestModelProvider, no live model)
 ```
@@ -1119,6 +1132,65 @@ writing components in Scala needs explicit workarounds:
       creates no tasks. Reachable is not the same as useful, and the ROADMAP fork B3 stays open.
 
     New descriptor key `consumer`; no `pom.xml` change. See specs/018 research Q-A–Q-G.
+
+19. **Compaction claims a *third* method of the agent client — and four of its seven findings were
+    corrections of things this project had already written down.** Capability 17
+    (`com.gwgs.akkaagentic.compaction.*`) summarises a session's history once it passes a configured size,
+    so a long conversation stays affordable. It applies to **every** session in the service, so
+    capabilities 4, 6 and 14 gain the bound without being edited (proven by an empty `git diff`). The
+    interop results are ordinary; what is unusual is how much of this capability's own documentation it
+    had to correct.
+
+    - **The wall takes a third method of the same client (S-4).** `dynamicCall` returns a
+      `DynamicMethodRef` carrying `invoke`, `invokeAsync`, `withMetadata`, `withRetry` — and nothing else.
+      `withDetailedReply()`, which is how the summary's token usage is obtained, exists on four types and
+      every one is reached from a **method reference**. So after `invoke` (capability 1, rescued) and
+      `tokenStream` (capability 14, not rescued), the statement sharpens once more: *`dynamicCall` covers
+      plain request/response and nothing else.*
+
+    - **A Scala consumer reaches the runtime-owned `SessionMemoryEntity` (R-1).** Capability 16 proved
+      this for `TaskEntity`; it holds for session memory too, with its record subtypes matched by type
+      pattern and zero unmatched. So capability 13's clause — the wall is about *which client*, not about
+      who owns the component — now covers two runtime-owned event streams.
+
+    - **The Java quarantine is one class *and* one responsibility, because javac said so (I-1).** A Java
+      caller **cannot construct a Scala 3 `enum` case**: `new HistoryLine.User(...)` is
+      *"enum classes may not be instantiated"*. The first gateway did the message mapping and the outcome
+      decision in Java and would not compile. Scala-side factories would have worked and were rejected,
+      because the compiler was pointing at a real flaw — the quarantine had **logic** in it. It moved to
+      Scala, and `SessionMemoryGateway` is now three thin operations that decide nothing.
+
+    - **Four findings this capability wrote down and then had to correct.** They are listed because the
+      pattern is the point, not the individual mistakes:
+
+      | Claimed | Actually |
+      |---|---|
+      | History grows **unbounded** (the spec's premise, inherited from capability 6) | Bounded at **510 KiB** by default, and that is also the maximum permitted |
+      | The 510 KiB eviction has `readLast`'s orphan bug at a higher threshold | It is **turn-aligned and safe** — it sweeps until the head is a `UserMessage`. The two mechanisms differ in exactly one property: whether the cut is turn-aligned |
+      | `compactHistory` **silently discards** a stale `sequenceNumber` (research R-4) | It **merges** — the number marks how much the summary stands for, and events after it are replayed on top. FR-008 is satisfied more strongly than assumed |
+      | A `ServiceSetup.onStartup` failure stops the service (by analogy with capability 12) | The runtime **logs it and starts anyway** (I-4) |
+
+      The third one is the instructive one: the probe passed `sequenceNumber - 2` against a four-message
+      history, saw four messages afterwards, and called it "unchanged" — when it was *compacted to two and
+      two replayed back*. Same count, different reason. That is precisely the rule this capability itself
+      later wrote down as **"under concurrency, infer nothing from a count"** (I-3), made before the rule
+      existed and never applied backwards to its own notes.
+
+    - **A per-message constructor turns a throw into a loop (I-5).** Reading the settings directly in the
+      consumer meant an out-of-range value threw on construction for *every* session-memory event — **40
+      redeliveries in one short test**, with the service starting normally, turns succeeding, and no
+      symptom pointing anywhere. Capability 16 measured that a failing consumer is redelivered without
+      limit; here that turned an operator's typo into a consumer spinning for ever. Since I-4 rules out
+      failing at startup, the design is **loud once, harmless thereafter**: `Bootstrap` raises where it is
+      logged once, and the consumer degrades to compaction-off. Occurrences: **40 → 1**.
+
+    - **What compaction is actually for, after all that.** Not a bug fix. History was already bounded and
+      safely so. It is **cost and continuity**: 510 KiB is ~100k+ tokens re-sent every turn, and the SDK's
+      eviction discards the oldest turns *entirely*, leaving nothing behind. Compaction is the only
+      mechanism that shrinks a history **while keeping what it meant**.
+
+    Descriptor keys `consumer`, `agent`, `http-endpoint`; `SessionMemoryEntity` is **not** listed, as in
+    capability 4. No `pom.xml` change. See specs/019 research S-1–S-7, R-1–R-6, I-1–I-5.
 
 ## Build
 
@@ -2618,6 +2690,73 @@ The payload is a **truncated preview**, not the whole message — enough to conf
 > so there is no `added` entry for it (the example claimed one), and the `logging` sink **printed nothing**
 > until its logger was un-silenced — with that line in place, `k.r.e.L.todo-activity - DestinationEvent(…)`
 > appears for each published message, `ce-subject` = the username.
+
+### Capability 17 — session compaction (`GET /compaction`, and a bound that applies itself)
+
+Capability 17 keeps a long conversation affordable. When a session's stored history passes
+`compaction.max-bytes`, it is replaced by a short prose summary of what the conversation established.
+Nothing calls it and nothing opts in: it applies to **every** session in the service — capability 4's chat,
+capability 6's assistant and capability 14's streamed chat alike — and none of them was modified.
+
+```shell
+# Lower the threshold so a handful of turns crosses it (the default is 128 KiB)
+COMPACTION_MAX_BYTES=4096 mvn compile exec:java
+
+for i in 1 2 3 4 5 6; do
+  curl -s -X POST http://localhost:9000/request/alice \
+    -H "Content-Type: application/json" \
+    -d "{\"message\":\"turn $i — tell me about akka, at length\"}" > /dev/null
+done
+
+curl -s http://localhost:9000/compaction/alice
+# {"sessionId":"alice","compactions":1,"lastBytesBefore":4271,"lastBytesAfter":206,
+#  "lastMessagesReplaced":10,"lastOutcome":"compacted","lastAt":"…"}
+```
+
+`lastBytesAfter` is **read back from the entity**, not predicted — the compaction call reports nothing
+either way, so the only way to know what it did is to look.
+
+**The conversation still knows what it established.** Ask about something from before the compaction and
+the answer still reflects it — the summary carried it across:
+
+```shell
+curl -s -X POST http://localhost:9000/request/alice \
+  -H "Content-Type: application/json" -d '{"message":"what is my name?"}'
+```
+
+**Every session, not just the assistant's** — capability 4's chat gets the bound too, unmodified:
+
+```shell
+curl -s http://localhost:9000/compaction
+# {"since":"…","sessions":[{"sessionId":"alice",…},{"sessionId":"c-123",…}]}
+```
+
+**Turn it off**, and the service behaves exactly as it did before this capability existed:
+
+```shell
+COMPACTION_ENABLED=false mvn compile exec:java
+```
+
+> **What it is for, and what it is not.** It is **not** a bug fix, though it was specified as one. Session
+> history was already bounded — the SDK evicts at `akka.javasdk.agent.memory.limited-window.max-size`,
+> default and maximum **510 KiB** — and that eviction is **safe**: it sweeps until the head of the window
+> is a user message, so it can never split a tool-call pair the way `readLast(N)` did to capability 6.
+> What remains is real but narrower: 510 KiB is ~100k+ tokens re-sent on every turn, and eviction discards
+> the oldest turns **entirely**, leaving nothing behind. Compaction is the only mechanism that shrinks a
+> history **while keeping what it meant**.
+>
+> **Known limits, stated rather than hidden.** Compaction **replaces**; the summarised turns are not
+> recoverable. A `404` from `GET /compaction/{id}` deliberately does not distinguish "never needed
+> compacting" from "lost to a restart" — the ledger is in-process (hence `since`) and the entity keeps no
+> record of who compacted it, so this capability genuinely cannot tell. And an out-of-range setting
+> **disables compaction rather than stopping the service**: a `ServiceSetup` failure does not prevent
+> startup on this SDK (§19, I-4), so the error is reported once at startup and the capability switches
+> itself off rather than failing every delivery for ever.
+>
+> **Where the interop line falls.** One Java class, holding three method references and no logic —
+> `getHistory`, `compactHistory`, and `withDetailedReply` for the summary's token usage, the **third**
+> method of the agent client to fall outside `dynamicCall`'s reach (§19). A test pins it at exactly one,
+> and pins that it stays logic-free.
 
 You can use the [Akka Console](https://console.akka.io) to create a project and see the status of
 your service.

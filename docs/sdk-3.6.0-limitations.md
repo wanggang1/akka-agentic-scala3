@@ -470,3 +470,42 @@ serialises, unlike a component payload (README §3). But `None` is emitted as `n
 `{"kind":"baseline","itemId":null,"description":null}` until the payload type was given
 `@JsonInclude(NON_ABSENT)`. Worth checking on upgrade, and worth annotating either way: a subscriber should
 not have to interpret nulls.
+
+## 9. Session compaction (capability 17, measured on 3.6.3)
+
+### 9a. A `ServiceSetup.onStartup` failure does NOT stop the service
+
+Capability 12 established that a misspelled guardrail **class** fails the service at startup, leaving "no
+window in which an agent is silently unguarded". That guarantee does **not** generalise to the setup hook.
+
+`Bootstrap.onStartup` was made to validate configuration and raise `ConfigException.BadValue`. Measured:
+the runtime **logs the exception and starts anyway** — `testKit.start()` returns normally and every
+subsequent request is served. So a `ServiceSetup` is not a place where a service can be made to refuse to
+start, and capability 12's guarantee comes from *where* its check happens rather than from the SDK failing
+loudly in general.
+
+**Consequence, and why it matters more than it sounds.** Combined with a component that is constructed per
+message, this makes a configuration error invisible *and* expensive: reading settings directly in a
+`Consumer` meant an out-of-range value threw on construction for every event — **40 redeliveries in one
+short test** — while the service started, user turns succeeded, and nothing surfaced. Capability 16 already
+measured that a failing consumer is redelivered without limit. The workaround is to report at startup
+(logged once) and **degrade** in the per-message component rather than throwing; occurrences dropped 40 → 1.
+
+Re-check on upgrade: if a future SDK propagates an `onStartup` failure into startup failure, the
+degradation in `CompactionSettings.thresholdOrDisabled` can be removed in favour of failing fast.
+
+### 9b. `compactHistory` reports nothing — success and no-op are indistinguishable from the call
+
+`SessionMemoryEntity.compactHistory` returns `Done` whatever happens. There is no result to inspect and no
+exception on a stale `sequenceNumber`, so a caller cannot learn from the call whether the history was
+replaced. The only way to know is to read the history back afterwards.
+
+This is a **reporting** limitation rather than a correctness one: what the entity actually does is a
+**merge** — `sequenceNumber` marks how much of the history the summary stands for, and events recorded
+after it are replayed on top of the summary, so a concurrent turn is never lost. *(An earlier note here
+claimed a stale write was silently discarded. That was wrong, and wrong because it inferred from a message
+count that coincidentally matched — see specs/019 research R-4 for the correction.)*
+
+Re-check on upgrade: if `compactHistory` gains a result describing what it did, the re-read in `Compactor`
+becomes unnecessary.
+
