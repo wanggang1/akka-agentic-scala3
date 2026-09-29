@@ -362,6 +362,21 @@ The general shape is worth keeping: **when a component is reconstructed per mess
 constructor is not a failure, it is a loop.** Validate where it is reported once, and degrade where it
 would repeat.
 
+### I-6 — `lastBytesAfter` can exceed `lastBytesBefore`, and only the live walk showed it. ⚠️
+
+Measured driving capability 4's chat live: `compaction for [walk-c1]: Compacted (7154 -> 10186 bytes, 6
+messages replaced)`. The history is **larger** after compaction than before it.
+
+Nothing is wrong. Six messages really were replaced by two, and the turns that arrived while the summariser
+worked were replayed on top (R-4's merge). `lastBytesAfter` is the size of what **stands** when it is read
+back — which is the property that made the re-read worth doing — and on a busy session that includes
+traffic compaction never saw.
+
+But it reads as "compaction made it worse", which is the wrong story for anyone judging whether the feature
+works. Every offline test drives a quiet session, so every offline test shows a clean shrink; only a live
+session with real latency produces this. Documented in the contract and the README rather than papered
+over, with `lastMessagesReplaced` named as the field that actually answers "did it work".
+
 ---
 
 ## Decisions this research settles

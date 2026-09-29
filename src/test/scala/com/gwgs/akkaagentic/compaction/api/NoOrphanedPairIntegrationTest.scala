@@ -10,7 +10,7 @@ import com.gwgs.akkaagentic.chat.application.ChatAgent
 import com.gwgs.akkaagentic.compaction.application.{CompactionAgent, SessionMemoryGateway}
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility
-import org.junit.jupiter.api.{Tag, Test}
+import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
 
 /** T025 / User Story 3 — a compacted history contains **no tool-call pair at all**, so none can be split.
@@ -25,7 +25,6 @@ import org.slf4j.LoggerFactory
   * change that carried structured tool calls into the summary would reintroduce exactly the shape
   * capability 6 was burned by, and this test is what would say so.
   */
-@Tag("slow")
 class NoOrphanedPairIntegrationTest extends TestKitSupport:
 
   private val logger = LoggerFactory.getLogger(getClass)

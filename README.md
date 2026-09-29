@@ -2716,6 +2716,11 @@ curl -s http://localhost:9000/compaction/alice
 `lastBytesAfter` is **read back from the entity**, not predicted — the compaction call reports nothing
 either way, so the only way to know what it did is to look.
 
+On a **busy** session it can exceed `lastBytesBefore`, and that is not a malfunction: turns arriving
+while the summariser works are replayed on top of the summary, so the number reflects where the session
+stands rather than the size of the summary. Measured live: `7154 -> 10186 bytes, 6 messages replaced`.
+`lastMessagesReplaced` is the field that says compaction worked.
+
 **The conversation still knows what it established.** Ask about something from before the compaction and
 the answer still reflects it — the summary carried it across:
 

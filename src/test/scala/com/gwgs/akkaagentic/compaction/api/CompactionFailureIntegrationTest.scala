@@ -9,7 +9,7 @@ import com.gwgs.akkaagentic.chat.application.ChatAgent
 import com.gwgs.akkaagentic.compaction.application.{CompactionAgent, SessionMemoryGateway}
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility
-import org.junit.jupiter.api.{Tag, Test}
+import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
 
 /** T022 / User Story 3 — compaction must be invisible when it works and **harmless when it fails**.
@@ -23,7 +23,6 @@ import org.slf4j.LoggerFactory
   * implementation, because it arrives on the success path: replacing a conversation with an empty summary
   * would satisfy the byte bound perfectly and destroy the point.
   */
-@Tag("slow")
 class CompactionFailureIntegrationTest extends TestKitSupport:
 
   private val logger = LoggerFactory.getLogger(getClass)

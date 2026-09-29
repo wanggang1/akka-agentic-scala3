@@ -34,6 +34,14 @@ archive it. That is a better outcome than the SDK's default — which discards t
     "lastMessagesReplaced":36,"lastOutcome":"compacted","lastAt":"…"}]}
 ```
 
+> **Reading `lastBytesAfter` on a busy session.** It is the size of the history **when it was read back**,
+> which is what actually stands — not the size of the summary. On a session that keeps receiving turns
+> while the summariser works, those turns are replayed on top of the summary (the merge), so the number can
+> exceed `lastBytesBefore`. Measured live: `7154 -> 10186 bytes, 6 messages replaced`. Compaction did its
+> job — six turns became two — and the history then grew again from traffic that arrived during it.
+> `lastMessagesReplaced` is the field that tells you compaction worked; `lastBytesAfter` tells you where
+> the session stands now.
+
 `lastOutcome` ∈ `compacted` · `skipped-stale` · `failed`. An empty list is a **success**, not a `404` —
 "nothing has needed compacting" is a valid answer. Row order is unspecified.
 

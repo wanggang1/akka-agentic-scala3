@@ -8,7 +8,7 @@ import akka.javasdk.testkit.{TestKit, TestKitSupport, TestModelProvider}
 import com.gwgs.akkaagentic.chat.application.ChatAgent
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility
-import org.junit.jupiter.api.{Tag, Test}
+import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
 
 /** Phase 0 probe for feature 019, R-6. NOT production.
@@ -22,7 +22,6 @@ import org.slf4j.LoggerFactory
   * 510 KiB is impractical to reach in a test, so the bound is overridden to **8 KiB** here. The mechanism
   * is the same; only the threshold moves.
   */
-@Tag("slow")
 class EvictionAlignmentProbeIntegrationTest extends TestKitSupport:
 
   private val logger = LoggerFactory.getLogger(getClass)
@@ -52,7 +51,7 @@ class EvictionAlignmentProbeIntegrationTest extends TestKitSupport:
       .atMost(20, TimeUnit.SECONDS)
       .until(() => SessionMemoryProbeConsumer.seen(session).size >= turns * 2)
 
-    val history = new SessionMemoryProbeGateway(componentClient).history(session)
+    val history = new com.gwgs.akkaagentic.compaction.application.SessionMemoryGateway(componentClient).history(session)
     val kinds = history.messages.asScala.map(_.getClass.getSimpleName).toList
     val texts = history.messages.asScala.map {
       case u: akka.javasdk.agent.SessionMessage.UserMessage => u.text.take(4)

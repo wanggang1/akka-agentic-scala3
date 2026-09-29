@@ -7,7 +7,7 @@ import com.gwgs.akkaagentic.chat.application.ChatAgent
 import com.gwgs.akkaagentic.compaction.application.CompactionAgent
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility
-import org.junit.jupiter.api.{Tag, Test}
+import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
 
 /** T027 / User Story 4 — the threshold is configuration, proven by **configuration**.
@@ -18,7 +18,6 @@ import org.slf4j.LoggerFactory
   * to demonstrate a configuration switch without asserting on the configuration itself — which would prove
   * only that the test can read its own fixture.
   */
-@Tag("slow")
 class ThresholdConfigIntegrationTest extends TestKitSupport:
 
   private val logger = LoggerFactory.getLogger(getClass)

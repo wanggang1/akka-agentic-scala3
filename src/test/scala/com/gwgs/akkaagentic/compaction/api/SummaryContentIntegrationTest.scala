@@ -10,7 +10,7 @@ import com.gwgs.akkaagentic.chat.application.ChatAgent
 import com.gwgs.akkaagentic.compaction.application.{CompactionAgent, SessionMemoryGateway}
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility
-import org.junit.jupiter.api.{Tag, Test}
+import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
 
 /** T019 / User Story 2 — what survives being compacted.
@@ -34,7 +34,6 @@ import org.slf4j.LoggerFactory
   * the quickstart walk and nowhere else. It is labelled rather than simulated, because a simulated
   * version would pass whether or not the feature worked.
   */
-@Tag("slow")
 class SummaryContentIntegrationTest extends TestKitSupport:
 
   private val logger = LoggerFactory.getLogger(getClass)
