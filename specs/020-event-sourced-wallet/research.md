@@ -2,17 +2,20 @@
 
 **Feature**: `020-event-sourced-wallet` · **Date**: 2026-10-03 · **SDK**: 3.6.3 · **Scala**: 3.3.8
 
-Every answer below was **measured**, not read. The Phase 0 probes are kept as evidence (FR-014), under
-`com.gwgs.akkaagentic.wallet.probe`:
+Every answer below was **measured**, not read. The Phase 0 probes lived under
+`com.gwgs.akkaagentic.wallet.probe` and are preserved as FR-014 evidence in the **Phase-0 commit**
+(`ed6e2f2`). They were **retired from the working tree when the production entity landed** — not as
+cleanup but because they could not coexist with it: `@TypeName` values are **service-global**, so the
+probe's `WalletEvent.Opened` and the production one both claiming `opened` collided at startup
+(`IllegalStateException: Collision with existing mapping ... -> opened. The same type name can't be used
+for other class`). That collision is itself a finding (see Q-F). The probes were:
 
 - `WalletEntity.scala` — the probe entity (Scala), with `Wallet` state (Scala case class).
-- `WalletEvent.java` — the event hierarchy in its **final, working** form (Java sealed interface). Earlier
-  Scala forms are documented below with their exact failure, not kept as dead code.
-- `WalletSerializationProbeTest.scala` — drives the SDK's internal mapper directly (Q-B, Q-C).
-- `WalletProbeTest.scala` — pins the unit-testkit wall from Scala (Q-E).
-- `WalletJavaUnitProbeTest.java` — the Java control: a method reference drives the same Scala entity.
-- `WalletProbeIntegrationTest.java` — boots the whole service and drives the entity over the real journal
-  (startup validation, Q-D, snapshot write).
+- `WalletEvent.java` — the event hierarchy's final working form (Java sealed interface).
+- `WalletSerializationProbeTest.scala` — drove the SDK's internal mapper directly (Q-B, Q-C).
+- `WalletProbeTest.scala` — pinned the unit-testkit wall from Scala (Q-E).
+- `WalletJavaUnitProbeTest.java` — the Java control: a method reference drove the same Scala entity.
+- `WalletProbeIntegrationTest.java` — booted the whole service over the real journal (startup, Q-D).
 
 ---
 
@@ -107,6 +110,23 @@ So the method-reference wall reaches the *unit* testkit, not only the component 
 real capability: the **domain rules are unit-tested in pure Scala** (no SDK types — FR-009), and the
 **entity is exercised by the Java integration test**. A green Scala test (`WalletProbeTest`) pins the wall
 so a future reader does not rediscover it.
+
+## Q-F — `@TypeName` is service-global (measured when the probe met production)
+
+Registering the production `wallet.application.WalletEntity` **alongside** the still-present probe entity
+failed to boot:
+
+```text
+IllegalStateException: Collision with existing mapping class wallet.domain.WalletEvent$Opened -> opened.
+The same type name can't be used for other class class wallet.probe.WalletEvent$Opened
+```
+
+So a `@TypeName` is unique across the **whole service**, not per entity — the SDK builds one global
+type-name → class registry (the ESE doc's recommendation "use logical names unique per Akka service" is in
+fact enforced). Two event hierarchies cannot share a logical name even if they belong to different
+entities. Consequence here: the probe had to be **retired the moment the production entity was registered**,
+which pulled task T018 forward into US1. A design consequence for anyone adding a second entity later:
+choose type names that are unique service-wide (e.g. prefix by aggregate) rather than per-entity.
 
 ## Bonus — build ordering did not break
 
