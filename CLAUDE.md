@@ -2,6 +2,28 @@
 
 This file provides guidance to AI coding assistant when working with code in this repository.
 
+## Start here (a cold session)
+
+**You do not need the previous conversation.** Everything a session needs to resume this project is
+written down, and a fresh start is far cheaper than replaying a transcript — this file plus `AGENTS.md`,
+the guidelines doc and the memory index come to roughly 8,000 words, where a capability's transcript runs
+to tens of megabytes. Resuming is for picking up mid-gate with un-recorded reasoning, which is rare here
+on purpose: each gate is committed, and each finding is written into `specs/<id>/research.md` and memory
+as it is measured.
+
+Read in this order, and only as far as the task needs:
+
+1. **The memory index** — already in context. It says what is merged, what is in flight, and the measured
+   findings worth not rediscovering.
+2. **`ROADMAP.md`, the "Where we are" block** — the current capability, the interop verdict, what remains.
+3. **`specs/<NNN-feature>/`** for the capability in hand — `spec.md` then `research.md`. `research.md` is
+   the one that repays reading: it carries the measurements and the corrections.
+4. **`README.md` — by SECTION, never whole.** It is ~27,000 words. The "Scala interop notes" are numbered
+   §1–§19, one per capability; read the section you need. Same for `FINDINGS.md` and `ROADMAP.md`.
+
+Then confirm state from the repository rather than from any document: `git status`, `git log --oneline -5`,
+and the task list in `specs/<NNN>/tasks.md`. Documents describe intent; the repository is what is true.
+
 ## Project overview
 
 See `README.md` for a project overview, and how to build, test and run the application.
