@@ -63,4 +63,40 @@ public class WalletEndpointIntegrationTest extends TestKitSupport {
     assertThat(get(id).open()).isFalse();
     assertThat(get(id).balance()).isEqualTo(10L);
   }
+
+  // --- US2: forbidden operations are 400 and change nothing ---------------------------------------
+
+  private int status(String path, Object body) {
+    var req = httpClient.POST(path);
+    return (body == null ? req : req.withRequestBody(body)).invoke().status().intValue();
+  }
+
+  @Test
+  public void forbiddenOperationsAre400AndLeaveTheBalanceUnchanged() {
+    var id = "dave";
+    httpClient.POST("/wallets/" + id + "/open").withRequestBody(new OpenRequest(100)).invoke();
+
+    assertThat(status("/wallets/" + id + "/withdraw", new AmountRequest(999))).isEqualTo(400); // overdraw
+    assertThat(status("/wallets/" + id + "/deposit", new AmountRequest(0))).isEqualTo(400); // non-positive
+    assertThat(status("/wallets/" + id + "/deposit", new AmountRequest(-5))).isEqualTo(400);
+    assertThat(status("/wallets/" + id + "/open", new OpenRequest(5))).isEqualTo(400); // re-open
+
+    // none of the rejected calls moved the balance or the open flag
+    assertThat(get(id).balance()).isEqualTo(100L);
+    assertThat(get(id).open()).isTrue();
+  }
+
+  @Test
+  public void everyOperationOnAClosedWalletIs400() {
+    var id = "erin";
+    httpClient.POST("/wallets/" + id + "/open").withRequestBody(new OpenRequest(10)).invoke();
+    httpClient.POST("/wallets/" + id + "/close").invoke();
+
+    assertThat(status("/wallets/" + id + "/deposit", new AmountRequest(5))).isEqualTo(400);
+    assertThat(status("/wallets/" + id + "/withdraw", new AmountRequest(1))).isEqualTo(400);
+    assertThat(status("/wallets/" + id + "/close", null)).isEqualTo(400);
+
+    assertThat(get(id).balance()).isEqualTo(10L);
+    assertThat(get(id).open()).isFalse();
+  }
 }
