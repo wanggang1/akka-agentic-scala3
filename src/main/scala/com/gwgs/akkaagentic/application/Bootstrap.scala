@@ -5,7 +5,9 @@ import akka.javasdk.JsonSupport
 import akka.javasdk.ServiceSetup
 import akka.javasdk.annotations.Setup
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
+import com.gwgs.akkaagentic.compaction.application.CompactionSettings
 import com.gwgs.akkaagentic.docs.application.KnowledgeStore
+import com.typesafe.config.Config
 
 /** Service lifecycle hook: makes the SDK's shared Jackson `ObjectMapper` Scala-aware.
   *
@@ -28,10 +30,30 @@ import com.gwgs.akkaagentic.docs.application.KnowledgeStore
   * `onStartup` also runs during the offline test suite.
   */
 @Setup
-class Bootstrap extends ServiceSetup:
+class Bootstrap(config: Config) extends ServiceSetup:
 
   override def onStartup(): Unit =
     JsonSupport.getObjectMapper().registerModule(DefaultScalaModule)
+    validateCompactionSettings()
+
+  /** Capability 17: refuse to start on an out-of-range `compaction.*` value.
+    *
+    * Measured before deciding this (specs/019 T029): without it, an out-of-range `max-bytes` produces a
+    * service that **looks healthy** — it starts, user turns answer normally, and nothing surfaces — while
+    * `SessionMemoryConsumer` throws on construction for **every** session-memory event. 40 redeliveries
+    * were counted in a single short test. Capability 16 measured that a failing consumer is redelivered
+    * without limit and **blocks every other entity behind it**, so this is not "compaction quietly does
+    * not work": it is a typo that can stall the whole session-memory projection, with no symptom pointing
+    * at the cause.
+    *
+    * So the failure is moved to the one place it cannot be missed, which is the shape capability 12 landed
+    * on for a misspelled guardrail class: **there is no window in which the service is silently not
+    * compacting.** `CompactionSettings` already raises `ConfigException.BadValue`; calling it here simply
+    * makes that happen at startup rather than on every delivery for ever.
+    */
+  private def validateCompactionSettings(): Unit =
+    CompactionSettings.threshold(config)
+    CompactionSettings.maxSessions(config)
 
   /** Provide capability 8's [[KnowledgeStore]] as a custom, constructor-injectable dependency.
     *

@@ -1,0 +1,397 @@
+# Phase 0 research: session compaction (capability 17)
+
+**Method**: measured against the SDK 3.6.3 artifacts before any design, as every capability since 13 has
+done. Findings below marked **static** were read out of the shipped bytecode and `reference.conf`; those
+marked **runtime** still need a probe that runs.
+
+> **Headline: the spec's premise was wrong, and the corrected one is better.** Capability 6's session
+> history is **not** unbounded, and it is **not** at risk of the orphaned-tool-pair bug. Both claims came
+> from reasoning by analogy with `readLast(N)`, and both are false. What compaction actually fixes is
+> different, and worth stating precisely — see S-1 and S-2.
+
+---
+
+## S-1 — History is ALREADY bounded, at 510 KiB, by default *(static; premise-correcting)*
+
+`akka-javasdk-3.6.3.jar!/reference.conf`:
+
+```hocon
+akka.javasdk.agent.memory {
+  enabled = true
+  # The maximum size of the memory window for the session history.
+  # This is calculated as the sum of all messages content length in bytes.
+  # Once the limit is reached, older messages will be automatically removed in a FIFO approach.
+  # The default value is 510 KiB and this is actually the maximum value allowed. ...
+  limited-window.max-size = 510 KiB
+}
+```
+
+So "unbounded token growth" — the phrase capability 6's README and this spec both used — is **not what
+happens**. Growth stops at 510 KiB, which the SDK also documents as the **maximum permitted** value,
+because session messages are routed around the Akka cluster.
+
+Note what `MemoryProvider.limitedWindow()` does *not* have: any size setting at all. Its builder exposes
+only `readLast(int)`, `readOnly`, `writeOnly`, `filtered` (bytecode-verified). The byte bound is
+**configuration**, applied to the entity through `setLimitedWindow(LimitedWindow(maxSizeInBytes))`, not
+something the agent asks for. That is why capability 6 never knew it had one.
+
+**Consequence for the design, and it is a hard ordering constraint**: our threshold MUST sit well below
+510 KiB. Above it, the SDK's eviction gets there first and has already discarded the oldest turns by the
+time we would summarise — we would be compacting a history whose beginning is gone.
+
+## S-2 — That eviction is TURN-ALIGNED and safe. `readLast(N)` is not. *(static; reverses the hypothesis)*
+
+The probe set out to show that the 510 KiB FIFO had the same defect as `readLast(N)` at a higher
+threshold. **It does not.** `SessionMemoryEntity$State.enforceMaxCapacity` runs two loops:
+
+1. while `currentSizeInBytes > maxSizeInBytes` → `List.removeFirst()`, logging *"Removed oldest message
+   for sessionId [{}]"*;
+2. **then** while the head is neither a `UserMessage` nor a `MultimodalUserMessage` → `removeFirst()`,
+   logging *"Removed orphan message for sessionId [{}]"*.
+
+The second loop is the whole difference. It guarantees the retained history **begins at a user turn**, and
+since eviction only ever removes from the head, what remains is always a suffix starting at a user
+message. A tool-call/response pair lives *inside* a turn, so a cut aligned to turn boundaries can never
+split one.
+
+**The precise, reusable statement**: the SDK has two history-shrinking mechanisms and they differ in
+exactly one property — whether the cut is aligned to a turn boundary.
+
+| | Mechanism | Aligned to a turn? | Orphans a tool pair? |
+|---|---|---|---|
+| **write** side (entity state, byte bound) | `enforceMaxCapacity` — FIFO **plus an orphan sweep** | **yes**, head is forced to a `UserMessage` | **no** |
+| **read** side (`MemoryProvider…readLast(N)`) | `MemoryHistoryUtils.trimToLastN` — `subList(size-N, size)` | **no**, arbitrary index | **yes** — capability 6's live failure |
+
+So capability 6's failure was specific to `readLast(N)`, and dropping it was the correct and *sufficient*
+fix for that bug. This capability is not repairing a latent orphan risk, because there isn't one.
+
+## S-3 — What compaction is actually for, restated *(follows from S-1 and S-2)*
+
+Two real problems remain, and they are the honest motivation:
+
+1. **A bounded history is not a small one.** 510 KiB of text is on the order of 100k+ tokens, re-sent on
+   every turn of a long session. That is a cost and latency problem even though it terminates.
+2. **Eviction discards meaning.** The FIFO drops the *oldest turns entirely* — safely, but with nothing
+   left behind. A conversation quietly loses its beginning. `State.truncated()` is a boolean recording
+   that this happened, so the loss is detectable but not recoverable.
+
+Compaction is the only mechanism available that shrinks history **while keeping what it meant**: it
+replaces the turns with prose instead of deleting them. That is a better justification than the one the
+spec was written on, and it is the one to publish.
+
+## S-4 — Q-C: `dynamicCall` has no detailed reply, and the wall claims a THIRD method *(static)*
+
+```
+akka.javasdk.client.DynamicMethodRef<A1, R>   // what dynamicCall returns
+  withMetadata, withRetry(RetrySettings), withRetry(int), invoke, invokeAsync   // and nothing else
+```
+
+`withDetailedReply()` exists on exactly four types, and every one is reached from the **method-reference**
+path: `AgentMethodRef`, `AgentMethodRef1`, `AgentInvokeOnlyMethodRef`, `AgentInvokeOnlyMethodRef1`.
+
+So the amendment capability 14 began continues. The agent client's escape hatch covers **plain
+request/response and nothing else**: capability 1 found `dynamicCall` rescues `invoke`; capability 14
+found `tokenStream` is method-ref only; capability 17 finds `withDetailedReply` is too.
+
+**Is token usage load-bearing?** No — and there are two ways out, one better than the other:
+
+- `SessionMessage$AiMessage` has a **three-argument constructor** `(Instant, String text, String
+  componentId)` with no token usage, and `CompactionCmd` only needs *an* `AiMessage`. So a Scala-clean
+  `dynamicCall` is possible at the price of the summary reporting no token cost — which makes the
+  session's own `getTokenUsage()` under-report for ever after.
+- **Better**: the Java class that Q-B already forces to exist can hold the agent call too, keeping token
+  usage at **zero extra Java**. Preferred, and it makes Q-B and Q-C one decision instead of two.
+
+## S-5 — Q-E: the running size is on `AiMessageAdded` only *(static)*
+
+`SessionMemoryEntity$Event$AiMessageAdded` carries **`historySizeInBytes(): long`**. No other event does —
+`UserMessageAdded`, `ToolResponseMessageAdded` and both multimodal variants expose only their own
+`sizeInBytes(): int`.
+
+This is better than it sounds. The threshold can be tested **once per turn, on the event that ends the
+turn, with no entity read at all** — so the common case (below threshold, do nothing) costs nothing. And
+because only the AI message carries it, **the trigger cannot fire mid-turn**, i.e. never between a tool
+call and its response. A safety property for free rather than one to engineer.
+
+## S-6 — `compactHistory` emits `AiMessageAdded`, so the trigger can see its own write *(static; hazard)*
+
+`compactHistory(CompactionCmd)` persists **three** events in one `persistAll`:
+`HistoryCleared`, `UserMessageAdded`, `AiMessageAdded`.
+
+That third event is the same type the trigger listens to. If the trigger's only test is
+`historySizeInBytes > threshold`, compaction's own write could re-trigger compaction — a loop that spends
+model calls for ever. Whether it actually does depends on what `historySizeInBytes` reads as *after*
+`HistoryCleared` has reset the state, which is a **runtime** question (R-2 below), not one to settle by
+staring at bytecode. The design must be robust either way.
+
+`CompactionCmd(UserMessage, AiMessage, long sequenceNumber)` confirms the concurrency guard is a
+sequence number, and `State` carries `compactionSeqNr()` and `truncated()` alongside `currentSizeInBytes()`.
+`SessionMemoryEntity` also exposes `fetchHistory` returning `SessionHistoryResult` beside
+`getHistory` returning `SessionHistory` — the difference is unmeasured and may matter for reading the
+sequence number.
+
+## S-7 — The entity id and descriptor key *(static)*
+
+`SessionMemoryEntity` is `public final`, extends `EventSourcedEntity<State, Event>`, and exposes
+`COMPONENT_ID`. It is **runtime-owned**: like capability 4, it must **not** be added to the hand-maintained
+descriptor. A consumer over it goes under `consumer`, the key capability 16 established.
+
+`Event` is a plain Java interface with record subtypes and a `Event$Message` sub-interface grouping the
+four message-added events — so a Scala `match` uses type patterns and needs a default case, with no
+exhaustivity guarantee from the compiler.
+
+---
+
+## The runtime half of the probe — measured 2026-09-26
+
+Probes: `src/main/scala/com/gwgs/akkaagentic/compaction/probe/SessionMemoryProbeConsumer.scala` (Scala
+consumer over the runtime-owned entity), `src/main/java/…/SessionMemoryProbeGateway.java` (the two entity
+method references), `src/test/scala/…/CompactionProbeIntegrationTest.scala` and
+`EvictionAlignmentProbeIntegrationTest.scala`. All green; sessions driven through capability 4's
+`ChatAgent`, the least-interop agent in the project, so what is measured is the memory mechanism and not an
+agent.
+
+### R-1 — A Scala consumer over `SessionMemoryEntity` works. Capability 16's finding extends. ✅
+
+```text
+R-1 >>> events seen for [probe-r1]: UserMessageAdded(size=14) | AiMessageAdded(size=22, HISTORY=36)
+                                  | UserMessageAdded(size=16) | AiMessageAdded(size=17, HISTORY=69)
+```
+
+Zero unmatched events. A plain Scala `Consumer` with
+`@Consume.FromEventSourcedEntity(classOf[SessionMemoryEntity])` receives the runtime-owned entity's events
+and matches its record subtypes by type pattern. So capability 13's clause — the wall is about *which
+client*, not about who owns the component — extends from `TaskEntity` (capability 16) to
+`SessionMemoryEntity`. `Event` is a plain Java interface, so the compiler offers no exhaustivity check; a
+default case is required and the probe asserts nothing reaches it.
+
+### R-2 — The self-trigger loop hazard is REAL in shape and BENIGN in fact. ✅ *(measured, not assumed)*
+
+`compactHistory` does persist an `AiMessageAdded`, the same event the trigger listens to. But the size it
+reports is computed **after** `HistoryCleared` has reset the state:
+
+```text
+R-2 >>> before: messages=8 seqNr=9  historySizes=4015,8030,12045,16060
+R-2 >>> after:  messages=2 seqNr=12 texts=UserMessage,AiMessage  historySizes=…,16060,22
+R-2 >>> LOOP HAZARD: history size reported on compaction's OWN AiMessageAdded = 22 (was 16060)
+```
+
+**22 bytes.** So a trigger keyed on `historySizeInBytes > threshold` does **not** re-fire on its own write,
+for any sane threshold. The seqNr moving 9 → 12 confirms S-6's three events. The compacted history is
+exactly `UserMessage, AiMessage`. No loop guard is needed — but a test should pin this, because it is a
+property of the SDK's ordering rather than of our code.
+
+### R-3 — One Java class can hold every method reference. ✅
+
+`SessionMemoryProbeGateway` holds `.method(SessionMemoryEntity::getHistory)` and
+`.method(SessionMemoryEntity::compactHistory)` and compiles and runs against the **runtime-owned** entity.
+And the agent call can live there too: capability 14's `StreamingChatEndpoint` already holds
+`tokenStream(StreamingChatAgent::stream)` — a Java method reference to a **Scala** agent's handler, in
+production — so `.method(CompactionAgent::summarize).withDetailedReply()` against a Scala agent needs no
+separate proof. **Decision**: one Java class, holding all three method references, keeping the summary's
+token usage at zero extra Java (S-4).
+
+### R-4 — ~~The concurrency guard is SILENT~~ → **CORRECTED: it is a MERGE.** ⚠️
+
+**This entry was wrong, and the way it was wrong is the more useful finding.**
+
+*What Phase 0 concluded.* A `compactHistory` carrying a stale `sequenceNumber` was "accepted without error
+and does nothing":
+
+```text
+R-4 >>> stale sequenceNumber [3] -> ACCEPTED (no error)
+R-4 >>> history after the stale write: messages=4     # read as "unchanged"
+```
+
+*What is actually true*, measured in T023 and confirmed in `SessionMemoryEntity.compactHistory`'s bytecode:
+`sequenceNumber` marks **how much of the history the summary stands for**. The entity clears, writes the
+summary, and then **replays every event recorded after that number back on top of it**. A concurrent turn
+is therefore neither lost nor able to block the compaction — it simply ends up after the summary.
+
+*How the probe misread it.* It passed `sequenceNumber - 2` against a four-message history and saw four
+messages afterwards. That was not "unchanged": it was *compacted to two, then two replayed back*. The same
+count, for a completely different reason — which is precisely the mistake this capability later wrote up
+as **I-3: under concurrency, infer nothing from a count.** The probe made the error before the lesson was
+learned, and the lesson did not get applied backwards to its own notes.
+
+*What it changes, and what it does not.* FR-008 is satisfied more strongly than assumed — by replay rather
+than by rejection. The design is unaffected: `Compactor` still re-reads after writing, because that is how
+the ledger reports what actually stands rather than what was hoped, and it is what makes `lastBytesAfter`
+a measurement instead of a prediction. `Outcome.SkippedStale` stays as a defensive case for a summary that
+does not appear at the head, with the honest note that **this SDK version gives no way to produce one**.
+
+*What it is worth carrying forward.* A silent API is still a hazard — the call reports nothing either way,
+so the only way to know what a compaction did is to look. That part of R-4 stands. What does not stand is
+the inference about *what* it did, drawn from a count that happened to match.
+
+### R-6 — The SDK's own eviction is turn-aligned, observed. ✅ *(S-2 confirmed by measurement)*
+
+510 KiB is impractical to reach in a test, so the bound was overridden to 8 KiB; the mechanism is the same
+and only the threshold moves.
+
+```text
+R-6 >>> wrote 24 messages under an 8 KiB bound; 8 retained
+R-6 >>> EVICTION OCCURRED = true
+R-6 >>> retained heads: q9 z,a9 z,q10 ,a10 ,q11 ,a11
+R-6 >>> first retained message is a UserMessage
+```
+
+The retained window begins at `q9` — a `UserMessage` — and alternates cleanly from there. The cut lands
+exactly on a turn boundary, so a tool-call pair cannot be split. **S-2 is now measured, not inferred**, and
+with it the corrected premise the whole capability rests on.
+
+*(A first attempt at this used 4000-character padding under the default 510 KiB bound and evicted nothing —
+`eviction occurred = false`, 24 of 24 retained. Reported because it is why the override exists: a probe that
+does not reach its own trigger proves nothing, and it would have been easy to read that green run as
+confirmation.)*
+
+### R-5 — MEASURED in T026: a streamed turn survives its history being replaced. ✅ *(with a stated limit)*
+
+The one risk the service-wide decision (FR-014) creates, carried from planning as explicitly unverified.
+Now measured, and it holds:
+
+```text
+R-5 >>> streamed turn during a compaction: status=200 bytes=79
+R-5 >>> record: {...,"lastBytesBefore":4449,"lastBytesAfter":156,"lastMessagesReplaced":6,"lastOutcome":"compacted"}
+R-5 >>> history after the race: 4 messages
+R-5 >>> streamed turn after compaction: status=200
+```
+
+The race is produced by making the summariser slow (3 s), driving capability 14's streamed surface until a
+turn crosses the threshold, and opening another stream while the compaction is inside the summariser. The
+streamed turn returned `200` with its body **exactly** intact, and its message is still in the history
+afterwards — kept by the same replay that R-4 (corrected) describes. A stream over an already-compacted
+session behaves normally too.
+
+**The limit, stated rather than glossed.** The window is wide — seconds — but this is still a *timing*
+construction, not a deterministic interleaving: the SDK offers no hook to hold a compaction at a chosen
+instant, so a green run is evidence and not proof. What it does rule out is the failure that would have
+mattered: a streamed turn erroring, truncating, or losing its reply because its history was replaced
+underneath it. That was the open question, and the answer is no.
+
+---
+
+## Found while implementing US1 — three more, all measured
+
+### I-1 — A Java caller cannot construct a Scala 3 `enum` case. It pushed the design the right way. ⚠️
+
+The first `SessionMemoryGateway` did the message mapping and the outcome decision in Java. javac refused:
+
+```text
+error: enum classes may not be instantiated
+```
+
+`new HistoryLine.User(...)` and `new Outcome.Failed(...)` are both impossible from Java, because a Scala 3
+`enum` compiles to something Java sees as an enum class. This is a **new** Java↔Scala wrinkle: capabilities
+14 and 15 only *read* Scala values from Java or passed them through, never constructed a sum type.
+
+The workarounds (Scala-side factory methods, or sealed traits instead of `enum`) were both available and
+both rejected, because the compiler was pointing at a real design flaw: **the Java class had logic in it.**
+It exists only to hold method references the SDK forces into Java, so the mapping and the decision moved to
+`Compactor` in Scala, and the gateway became three thin operations that decide nothing. The quarantine is
+now one class *and* one responsibility, which is stronger than the file-count pin capabilities 14 and 15
+ship.
+
+### I-2 — The event's history size is a HINT, not the authority. ⚠️ *(a real cost bug, caught by running it)*
+
+`AiMessageAdded.historySizeInBytes` is the size **at the moment that event was written**. A burst of turns
+crossing the threshold therefore produces a burst of events all reporting a large history, and acting on
+each one costs a model call. Measured on the first US1 run, five turns over a 4 KiB threshold:
+
+```text
+compaction for [us1-compacts]: SkippedStale (4218 -> 2934 bytes, 0 messages replaced)
+compaction for [us1-compacts]: Compacted    (5624 ->  122 bytes, 6 messages replaced)
+compaction for [us1-compacts]: SkippedStale (7030 ->  122 bytes, 0 messages replaced)
+```
+
+Three summariser calls to perform one compaction, with the platform silently discarding two writes — R-4's
+guard doing exactly its job, but only after the tokens were spent. The fix is to re-check the threshold
+against the history **actually read**, and return before any model call when it is no longer needed: *the
+event tells us to look, the history tells us whether*. After it, the same scenario shows one attempt.
+
+This is the kind of defect a probe cannot find, because it only appears once the trigger, the summariser
+and real turns run together.
+
+### I-3 — "Did the write land?" cannot be answered by message count. ⚠️
+
+The first discriminator was `after.messages.size < before.messages.size`. It reported a **successful**
+compaction as `SkippedStale`, because a turn that arrives while the summariser is working is appended
+afterwards, so the count can be unchanged or higher even though the replacement landed.
+
+The reliable discriminator is the **head** of the history: `compactHistory` clears and re-adds, so if our
+summary landed it is first, and later turns append after it. `Compactor` now checks that the first message
+carries the compaction component id and our summary's text. Measured: a session driven with six
+overlapping turns keeps our summary at the head and is correctly recorded as compacted, while the
+deterministic three-turn case is exactly `UserMessage, AiMessage`.
+
+The general shape, and it is the same one R-4 has: **under concurrency, infer nothing from a count.** Ask
+for the thing that is invariant.
+
+### I-4 — A `ServiceSetup.onStartup` failure does NOT stop the service. ⚠️ *(measured in US4)*
+
+`Bootstrap.onStartup` was made to validate `compaction.*` and raise `ConfigException.BadValue` on an
+out-of-range value, on the model of capability 12's misspelled guardrail class — which *does* fail the
+service at startup, leaving "no window in which an agent is silently unguarded".
+
+**That does not transfer.** The runtime logs the `onStartup` exception and **starts anyway**:
+`testKit.start()` returns normally, and every subsequent request is served. So a `ServiceSetup` is not a
+place where a service can be made to refuse to start, and capability 12's guarantee comes from *where* its
+check happens rather than from the SDK failing loudly in general.
+
+### I-5 — Which made a bad setting a redelivery storm, until it was degraded. ⚠️
+
+With the settings read straight in `SessionMemoryConsumer`, an out-of-range value produced:
+
+| | Observed |
+|---|---|
+| service starts | **yes** |
+| a user's turn | **succeeds**, no symptom |
+| `GET /compaction/{id}` | `404` — compaction never ran |
+| the consumer | threw on construction for **every** event — **40 redeliveries** in one short test |
+
+Capability 16 measured that a failing consumer is redelivered without limit, so an operator's typo became
+a consumer spinning for ever while every outward sign said the service was healthy — the worst combination
+available: no damage a caller can see, and no symptom pointing at the cause.
+
+**The design that replaced it: loud once, harmless thereafter.** `Bootstrap` still raises at startup, where
+the offending key and value are logged once; the consumer and the store degrade to "compaction off". A
+misconfigured service now behaves exactly as if compaction were disabled, and the occurrence count in the
+same test dropped from **40 to 1**.
+
+The general shape is worth keeping: **when a component is reconstructed per message, a throw in its
+constructor is not a failure, it is a loop.** Validate where it is reported once, and degrade where it
+would repeat.
+
+### I-6 — `lastBytesAfter` can exceed `lastBytesBefore`, and only the live walk showed it. ⚠️
+
+Measured driving capability 4's chat live: `compaction for [walk-c1]: Compacted (7154 -> 10186 bytes, 6
+messages replaced)`. The history is **larger** after compaction than before it.
+
+Nothing is wrong. Six messages really were replaced by two, and the turns that arrived while the summariser
+worked were replayed on top (R-4's merge). `lastBytesAfter` is the size of what **stands** when it is read
+back — which is the property that made the re-read worth doing — and on a busy session that includes
+traffic compaction never saw.
+
+But it reads as "compaction made it worse", which is the wrong story for anyone judging whether the feature
+works. Every offline test drives a quiet session, so every offline test shows a clean shrink; only a live
+session with real latency produces this. Documented in the contract and the README rather than papered
+over, with `lastMessagesReplaced` named as the field that actually answers "did it work".
+
+---
+
+## Decisions this research settles
+
+| # | Decision | Because |
+|---|---|---|
+| D1 | Trigger is a **Scala** `Consumer` on `SessionMemoryEntity`, keyed on `AiMessageAdded` only | R-1 works; S-5 puts the running size on that event alone, so the check costs no entity read and cannot fire mid-turn |
+| D2 | **One Java class** holds `getHistory`, `compactHistory` and the detailed agent call | R-3; keeps token usage (S-4) at zero extra Java, and pins the quarantine at one class as in capabilities 11, 14, 15 |
+| D3 | Compaction is **verified by re-reading**, never assumed | R-4 (as corrected): the call reports nothing either way, so `lastBytesAfter` must be a measurement rather than a prediction |
+| D4 | No loop guard, but a **test pinning** the 22-byte result | R-2: the hazard resolves in the SDK's ordering, which is not our property to rely on silently |
+| D5 | Threshold in **bytes**, configurable, disableable, and **range-enforced below 510 KiB** | S-1: above it the SDK's eviction reaches the oldest turns first and compaction would do nothing useful |
+| D6 | The summariser is a **Scala** `Agent` whose result is **Java-shaped** | It crosses the internal serializer (README §3), like capability 3's `HelpAnswer` |
+| D7 | Observability is an in-process store — **one `AtomicReference`, pure transitions** | The cap-15 review rule; and FR-011 needs it readable without the log |
+| D8 | Capability 6 is **untouched**; capabilities 4 and 14 gain the bound without being edited | FR-014/FR-015; the trigger is service-wide and lives entirely in this capability |
+| D9 | The Java class holds **no logic at all** — three thin operations, no decisions | I-1: javac cannot construct a Scala 3 `enum` case, which exposed that the first draft had logic in the quarantine |
+| D10 | The threshold is re-checked against the history actually read, before any model call | I-2: the event's size is stale in a burst, and acting on it alone spent three summariser calls to do one compaction |
+| D11 | A landed write is identified by our summary being at the **head**, never by a message count | I-3: a concurrent turn appends while the summariser works, so a count reported a success as a skip |
+| D12 | Bad configuration is reported **once at startup** and then **degrades to compaction off**, never thrown per message | I-4: a `ServiceSetup` failure does not stop the service; I-5: a per-message throw is a redelivery storm, not a failure (40 → 1) |

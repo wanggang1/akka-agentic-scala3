@@ -31,6 +31,7 @@ reference in the first place (`Class` references, `Task` constants, a URL string
 | `TimedActionClient` — **scheduling** (cap-15) | method-ref **only**; `DynamicMethodRef` has no `deferred()` | ❌ no |
 | `TimerScheduler.delete` — **cancelling** (cap-15) | timer name, a plain **string** | ✅ yes |
 | `Consumer` — the whole family (cap-16) | an annotation carrying a `Class`; the handler by **parameter type** | ✅ yes — no client at all |
+| `AgentClient.withDetailedReply` (cap-17) | method-ref **only** — `DynamicMethodRef` has `invoke`/`invokeAsync` and nothing more | ❌ no |
 
 **Any client keyed solely on a Java method reference is unreachable from Scala.** That is the whole
 story; everything below is a corollary. Crucially, the wall is a property of the *client*, not of
@@ -536,3 +537,41 @@ feature that did not run**, and only the bytecode settled which it was.
 part in it; capability 16 needed the same trick for a different reason. Once a delivery is set aside its
 attempt count is cleared, so the store cannot testify to how many times the runtime actually delivered — a
 separate counter in the probe does, and it is what the bound is checked against.
+
+## Capability 17 — compaction: a third method of the same client, and four corrections
+
+The interop result is a footnote; the useful part is how much this capability had to un-write.
+
+**The wall takes a third method of the agent client.** `dynamicCall` returns a `DynamicMethodRef` carrying
+`invoke`, `invokeAsync`, `withMetadata`, `withRetry`. `withDetailedReply()` — the only route to a summary's
+token usage — lives on four types, all reached by method reference. So the escape hatch that has carried
+this project since capability 1 covers **plain request/response and nothing else**: `invoke` rescued,
+`tokenStream` not (capability 14), `withDetailedReply` not (here).
+
+**A Java caller cannot construct a Scala 3 `enum` case** — *"enum classes may not be instantiated"*. That
+is a new Java↔Scala wrinkle, and it improved the design: the first gateway had the message mapping and the
+outcome decision in Java and would not compile. Scala-side factories were available and rejected, because
+the compiler was pointing at a real flaw — the quarantine held **logic**. It is now one class **and** one
+responsibility, which is a stronger claim than capability 14 and 15's file counts.
+
+**Four things this capability asserted and then had to correct**, which is the reason it is worth reading:
+
+| Asserted | Measured |
+|---|---|
+| History grows unbounded | Bounded at **510 KiB**, which is also the maximum permitted |
+| That bound has `readLast`'s orphan bug at a higher threshold | It is **turn-aligned and safe**; the two mechanisms differ in exactly one property — whether the cut lands on a turn boundary |
+| `compactHistory` silently discards a stale sequence number | It **merges**: the number marks how much the summary stands for, and later events are replayed on top |
+| A `ServiceSetup.onStartup` failure stops the service | The runtime logs it and **starts anyway** |
+
+The third is the one to learn from. The probe passed `sequenceNumber - 2` against a four-message history,
+saw four messages after, and recorded "unchanged" — when it was *compacted to two and two replayed back*.
+The same count for a different reason: exactly the rule this capability itself later wrote down as **"under
+concurrency, infer nothing from a count"**, made before the rule existed and never applied backwards.
+A probe is not immune to the lessons it produces.
+
+**And one operational shape worth carrying beyond Akka: when a component is reconstructed per message, a
+throw in its constructor is not a failure, it is a loop.** An out-of-range setting read in the consumer
+threw for every session-memory event — 40 redeliveries in one short test — while the service started, turns
+succeeded, and nothing pointed at the cause. Validate where it is reported once; degrade where it would
+repeat.
+
