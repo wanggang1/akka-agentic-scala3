@@ -128,6 +128,15 @@ entities. Consequence here: the probe had to be **retired the moment the product
 which pulled task T018 forward into US1. A design consequence for anyone adding a second entity later:
 choose type names that are unique service-wide (e.g. prefix by aggregate) rather than per-entity.
 
+## Bonus — `snapshot-every` is service-global, like `@TypeName`
+
+`akka.javasdk.event-sourced-entity.snapshot-every` has **no per-entity form** — it is one service-wide
+knob. So a capability cannot set its own entity's snapshot cadence without also changing every other
+entity's, including the runtime-owned `SessionMemoryEntity` that capabilities 4/6/17 depend on. The wallet
+therefore keeps the SDK default (100) in production and exercises snapshotting with a per-test override
+(`WalletSnapshotIntegrationTest` sets it to 2). Two service-global registries in one capability
+(`@TypeName`, Q-F; and this), both of which constrain how a *second* entity would be added later.
+
 ## Bonus — build ordering did not break
 
 A3's stated secondary risk was the scalac-then-javac arrangement (§13 R3, broken twice before). Here the
