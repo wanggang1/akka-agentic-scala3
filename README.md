@@ -183,6 +183,18 @@ src/main/scala/com/gwgs/akkaagentic/compaction/api/         # CompactionEndpoint
 # enum case, which pushed the decisions to Scala. NOT a bug fix: history was already bounded at 510 KiB and
 # that bound is turn-aligned and safe — this is cost + continuity. See §19.
 
+# Capability 18 — Scala entity + ONE Java event file + Java caller (event-sourced wallet; see "Scala interop notes" §20)
+src/main/scala/com/gwgs/akkaagentic/wallet/domain/      # Wallet (state + pure rules, SDK-free; Scala case class, round-trips for snapshots)
+src/main/java/com/gwgs/akkaagentic/wallet/domain/       # WalletEvent — THE ONE JAVA FILE: a sealed interface of @TypeName records
+src/main/scala/com/gwgs/akkaagentic/wallet/application/ # WalletEntity (EventSourcedEntity[Wallet, WalletEvent]; thin handlers + applyEvent)
+src/main/java/com/gwgs/akkaagentic/wallet/api/          # WalletEndpoint (POST open/deposit/withdraw/close, GET /wallets/{id})
+# Note: the repo's first EVENT-SOURCED entity. A Scala 3 enum SERIALIZES but can't be read back ("cannot
+# reflectively create enum objects"); a Scala 3 sealed trait round-trips through the mapper but FAILS the
+# SDK's "event type must be a sealed interface" startup validation (Scala 3.3.8 emits no JVM sealed). So the
+# events are one Java file; the entity + Wallet state stay Scala (state round-trips, no sealed gate); the
+# caller is Java (entity client is method-ref-only). @TypeName and snapshot-every are both SERVICE-GLOBAL.
+# New descriptor key `event-sourced-entity`. No model anywhere. See §20.
+
 src/main/resources/application.conf                 # default model-provider config
 src/test/{scala,java}/com/gwgs/akkaagentic/...       # tests (TestModelProvider, no live model)
 ```
@@ -1191,6 +1203,55 @@ writing components in Scala needs explicit workarounds:
 
     Descriptor keys `consumer`, `agent`, `http-endpoint`; `SessionMemoryEntity` is **not** listed, as in
     capability 4. No `pom.xml` change. See specs/019 research S-1–S-7, R-1–R-6, I-1–I-5.
+
+20. **A Scala 3 sum type cannot be an event-sourced entity's event hierarchy — for *two independent* SDK
+    reasons — so the one forced-Java file is the events, while the entity and its state stay Scala.**
+    Capability 18 (`com.gwgs.akkaagentic.wallet.*`) is the repo's first **event-sourced entity**: a
+    `Wallet` ledger whose balance is a fold over `Opened`/`Deposited`/`Withdrawn`/`Closed` events, not a
+    stored number. A3 asked whether a Scala 3 `enum` or sealed trait could be the event type the SDK's
+    internal Jackson mapper (de)serializes and dispatches on by `@TypeName`. Measured: no, twice over.
+
+    - **A Scala 3 `enum` serializes but cannot be read back.** The write path works and `@TypeName` is
+      honoured (content type `json.akka.io/opened`), but deserialization throws *"Cannot construct
+      instance of `WalletEvent$Opened` … Cannot reflectively create enum objects"* — Jackson treats an
+      enum case as an enum constant and refuses to build it from a constructor. An `enum` is a one-way
+      type here, which makes it useless as an event hierarchy.
+
+    - **A Scala 3 `sealed trait` round-trips through the mapper but fails STARTUP VALIDATION.** This is the
+      correction that matters: the project's prior shorthand ("Scala sum types can't cross the internal
+      mapper") was too coarse. The sealed trait *does* cross the mapper — all four case classes serialize
+      and deserialize, polymorphically, with **no `@JsonCreator`/`@JsonProperty`** needed for flat
+      primitive fields. It is a *second, independent* gate that rejects it: the SDK validates at boot that
+      *"the event type of an EventSourcedEntity is required to be a sealed interface"*, and Scala 3.3.8
+      emits no JVM `sealed` attribute (`isSealed() == false`, `getPermittedSubclasses() == null`). A Java
+      `sealed interface` is a genuine JVM-sealed interface, so the events live in **one Java file**
+      (`wallet/domain/WalletEvent.java`).
+
+    - **State and entity stay Scala; the caller is Java.** The `Wallet` state is a plain Scala case class
+      that round-trips through the internal mapper in both directions, with no annotations and no sealed
+      requirement (that gate is on the event type only) — so snapshots of Scala state are safe (Q-C). The
+      entity `WalletEntity` is Scala. The endpoint is Java for the familiar reason: the
+      `EventSourcedEntity` client is method-reference-only with no `dynamicCall` (the cap-6/cap-11 wall).
+      A smaller measurement: `ReadOnlyEffect[Long]`'s Scala `Long` reads back as `Object` for a Java
+      method-ref caller.
+
+    - **The unit testkit is on the wall too (Q-E).** `EventSourcedTestKit.of(...)` takes a SAM so a Scala
+      lambda *constructs* it, but `.method(scalaLambda)` throws `ClassCastException` in
+      `Reflect.getReturnType` — it reads the command's return type reflectively and a Scala lambda has no
+      parameterized return type. A Java method reference resolves the real command method. So the domain
+      rules are unit-tested in pure Scala and the entity via a Java testkit / integration test.
+
+    - **Two service-global registries constrain a second entity.** `@TypeName` is unique **service-wide**,
+      not per entity (the Phase-0 probe's and production's `opened` collided at startup, forcing the probe
+      out early); and `snapshot-every` is a single service-wide knob with no per-entity form (so production
+      keeps the SDK default 100 and the test lowers it only under `withAdditionalConfig`, to avoid changing
+      `SessionMemoryEntity`). A second entity added later must pick type names unique across the service.
+
+    - **Build ordering did not break.** A3's secondary risk was the scalac-then-javac arrangement; a Scala
+      entity referencing a same-package Java `sealed interface` compiled cleanly under `mvn clean verify`.
+
+    New descriptor key `event-sourced-entity`; `WalletEndpoint` under `http-endpoint`. No `pom.xml` change.
+    See specs/020 research Q-A–Q-F.
 
 ## Build
 

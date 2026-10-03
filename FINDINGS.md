@@ -575,3 +575,39 @@ threw for every session-memory event — 40 redeliveries in one short test — w
 succeeded, and nothing pointed at the cause. Validate where it is reported once; degrade where it would
 repeat.
 
+## Capability 18 — event-sourced entity: a sum type crosses the mapper but fails a *second* gate
+
+The repo's first event-sourced entity (a `Wallet` ledger), and the sharpest correction to this page's own
+vocabulary. A3's question was whether a Scala 3 sum type can be the event hierarchy. Measured: no — and the
+reason is subtler than "the mapper can't take it."
+
+**Two independent gates, and they disagree.** A Scala 3 `enum` **serializes** (its `@TypeName` is honoured)
+but **cannot be deserialized**: Jackson reports *"Cannot reflectively create enum objects."* A Scala 3
+`sealed trait` of case classes **round-trips through the internal mapper cleanly** — all four cases, both
+directions, no `@JsonCreator`/`@JsonProperty` for flat primitive fields — and then **fails at startup**:
+the SDK validates that *"the event type of an EventSourcedEntity is required to be a sealed interface,"* and
+Scala 3.3.8 emits no JVM `sealed` attribute (`isSealed() == false`, `getPermittedSubclasses() == null`).
+
+**This corrects the project's shorthand.** "Scala sum types can't cross the internal mapper" was too coarse:
+the sealed trait *does* cross it. What forces Java is a *second*, separate gate — startup validation — that
+the serializer knows nothing about. So the event hierarchy is **one Java `sealed interface`** of records,
+and that is the only forced-Java file: the entity is Scala and the `Wallet` **state** is a plain Scala case
+class that round-trips for snapshots (the sealed requirement is on the *event* type only). The caller is
+Java for the usual reason — the `EventSourcedEntity` client is method-reference-only (cap-6/cap-11).
+
+**The method-ref wall reaches the unit testkit.** `EventSourcedTestKit.of(...)` takes a SAM so a Scala
+lambda *constructs* it, but `.method(scalaLambda)` throws `ClassCastException` in `Reflect.getReturnType`,
+which reads the command's parameterized return type reflectively — a Scala lambda is a synthetic method with
+an erased return type, a Java method reference is the real command method. So domain rules are unit-tested in
+pure Scala and the entity through a Java testkit / integration test.
+
+**Two service-global registries, not per-entity** — both of which shape how a *second* entity is added
+later. `@TypeName` is unique service-wide (the Phase-0 probe's `opened` and production's `opened` collided at
+startup, forcing the probe out the moment production registered); and `snapshot-every` is a single
+service-wide knob with no per-entity form (so production keeps the SDK default and only a per-test override
+exercises snapshots, to avoid changing the runtime-owned `SessionMemoryEntity`).
+
+**And one reassurance for A4.** A3's secondary risk was build ordering; a Scala entity referencing a
+same-package Java `sealed interface` compiled cleanly under `mvn clean verify`. gRPC's *generated* sources
+remain the untested case.
+
