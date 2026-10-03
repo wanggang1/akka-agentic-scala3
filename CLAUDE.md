@@ -24,6 +24,28 @@ Read in this order, and only as far as the task needs:
 Then confirm state from the repository rather than from any document: `git status`, `git log --oneline -5`,
 and the task list in `specs/<NNN>/tasks.md`. Documents describe intent; the repository is what is true.
 
+### What keeps the above true — your side of it
+
+Starting cold is only safe because the previous session left nothing in its head. That is a **standing
+obligation on every session, not a description of how things happen to be**, and it is the reason this
+section can be trusted rather than merely hoped for. If it lapses, a cold start becomes *worse* than a slow
+one: a session will begin confidently from stale ground and will not know that it is stale.
+
+So, while you work:
+
+- **Commit at each gate**, as the workflow below says — not once at the end. An uncommitted gate is
+  reasoning that exists only in this conversation.
+- **Write each finding into `specs/<id>/research.md` as it is measured**, not when the capability is
+  finished. A measurement you are holding "until later" is the exact thing a cold start cannot recover.
+- **Correct a document the moment a measurement disproves it**, and say what was wrong rather than quietly
+  editing. Capability 17 had to do this four times — including to its own spec and its own probe notes —
+  and a reader who met only the corrected text would have learned less than one who saw the correction.
+- **Record a claim you could not verify as unverified.** "Not measured" is a finding; a confident sentence
+  covering a gap is a trap for whoever reads it next.
+
+If you are about to end a session, the test is simple: *could someone start tomorrow from this repository
+and the memory index alone, and be right?* If not, write the missing thing down before you stop.
+
 ## Project overview
 
 See `README.md` for a project overview, and how to build, test and run the application.
