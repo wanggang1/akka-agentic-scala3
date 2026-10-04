@@ -7,7 +7,26 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 ## Where we are
 
-> **You are here:** Feature 17 (session compaction, fork **B1**) — **✅ merged to `main` 2026-10-03
+> **You are here:** Feature 18 (event-sourced wallet, candidate **A3**) — **🟡 in flight on branch
+> `020-event-sourced-wallet`** ([`specs/020-event-sourced-wallet`](specs/020-event-sourced-wallet/)). The
+> repo's **first event-sourced entity**: a `Wallet` ledger whose balance is a fold over
+> `Opened`/`Deposited`/`Withdrawn`/`Closed` events. US1–US3 built and green (fold, rejection-persists-nothing,
+> snapshots); US4/docs + final gate remain.
+>
+> **Interop verdict — a Scala 3 sum type cannot be the event hierarchy, for TWO independent SDK reasons.**
+> A Scala 3 `enum` **serializes but cannot be read back** (Jackson: "Cannot reflectively create enum
+> objects"); a Scala 3 `sealed trait` **round-trips through the internal mapper but fails startup
+> validation** — the SDK requires a JVM `sealed interface` and Scala 3.3.8 emits none (`isSealed == false`).
+> This **corrects the project's prior shorthand**: the sealed trait *does* cross the mapper; a *second*
+> gate (startup validation) forces Java. So the events are **one Java file**, while the **entity and the
+> `Wallet` state stay Scala** (the state round-trips as a plain case class — no sealed gate), and the
+> **endpoint is Java** (entity client is method-ref-only). Also measured: the unit `EventSourcedTestKit`
+> needs a Java method ref (Scala lambda → `ClassCastException` in `Reflect.getReturnType`); `@TypeName` and
+> `snapshot-every` are both **service-global** (the probe's and production's `opened` collided, forcing the
+> probe out early); and the scalac-then-javac build ordering did **not** break for a same-package
+> Scala→Java reference. See specs/020 research Q-A–Q-F.
+>
+> **Previously:** Feature 17 (session compaction, fork **B1**) — **✅ merged to `main` 2026-10-03
 > (PR #37)** ([`specs/019-session-compaction`](specs/019-session-compaction/)). When a
 > session's history passes a configured size it is replaced by a prose summary, so a long conversation
 > stays affordable. It applies to **every** session in the service, so capabilities 4, 6 and 14 gain the
@@ -139,15 +158,14 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 > verified by mechanism, not by watching it happen.
 >
 >
-> **⏭️ Next:** undecided. The recommended run **A1 → A2 → B1 is complete** (capabilities 15, 16 and 17).
-> What remains are the **last two untouched SDK component families** — **A3**, an event-sourced entity
-> authored in Scala, where two known walls collide and the open question is whether a Scala 3 `enum` or
-> sealed trait survives the internal mapper at all; and **A4**, a gRPC endpoint, whose risk is build
-> ordering rather than the wall. Four forks also stay open: **B2** SSE framing, **B3** delegation
-> observability (one route measured and ruled out), **B4** usage-accurate citations, **B5** streaming
-> with a grounded answer.
+> **⏭️ Next:** **A3 is in flight (capability 18, above).** That leaves **exactly one** untouched SDK
+> component family — **A4**, a gRPC endpoint, whose risk is build ordering rather than the wall (and A3
+> gave one reassuring data point: a same-package Scala→Java reference compiled cleanly under `clean
+> verify`). Four forks also stay open: **B2** SSE framing, **B3** delegation observability (one route
+> measured and ruled out), **B4** usage-accurate citations, **B5** streaming with a grounded answer.
 >
-> Capabilities 1–17 are **✅ done and merged**; 5–17 were exploratory follow-ups beyond the original four.
+> Capabilities 1–17 are **✅ done and merged**; 18 is in flight. 5–18 were exploratory follow-ups beyond
+> the original four.
 >
 > **📄 Retrospective:** [`FINDINGS.md`](FINDINGS.md) consolidates the single `dynamicCall` finding that
 > explains every Scala-vs-Java outcome, plus the practical rubric. Caps 5–11 extend the through-line: the
@@ -181,6 +199,7 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 | 15 | **Scheduled reminders — Timed Action** (candidate A1, the first untouched family) — `POST /reminders` schedules a note to fire after a delay, `GET`/`DELETE /reminders/{id}` read and cancel it; four states (`pending`/`fired`/`cancelled`/`failed`) kept distinct, and a cancel that cancelled nothing is a `409` naming what stood. **Headline: one family on both sides of the wall, split by OPERATION** — scheduling is `TimedActionClient.method(...)`→`deferred()`, method-ref only (`DynamicMethodRef` has no `deferred()`), so `POST` is the one Java class; cancelling is `TimerScheduler.delete(String)`, Scala-clean — measured cancelling a *Java*-scheduled timer. The Scala lambda compiles then fails naming `$anonfun$1` outright — the clearest diagnostic yet. Also: the 3-arg `createSingleTimer` **retries indefinitely**; an exhausted timer is **silent** and an action gets **no attempt number**, so the action records its own final failure; a pending timer **did not survive a restart** (dev mode), so state is in-process by design. No model anywhere | [`specs/017-timed-action`](specs/017-timed-action/) | ✅ Done — merged (PR #31) |
 | 16 | **Reacting to activity — Consumer** (candidate A2) — a Scala `Consumer` over capability 6's `TodoEntity` keeps an activity feed (`GET /todo-activity`, `/{username}`, `/set-aside`) and publishes each change to the `todo-activity` topic. **Headline: the family is Scala-clean end to end — NO JAVA IN PRODUCTION** (first since cap-13), against cap-11's View on the *same* entity needing a Java querying endpoint: same source, two projections, two verdicts. The real finding is the failure contract — a throwing handler is redelivered **without limit** and **blocks every other entity** until it stops (measured schedule, doubling to 27.6 s+), so the consumer bounds its own attempts and sets a delivery aside; the SDK exposes no attempt number and `ce-id` changes per redelivery, so the key is the message's content. Also: the TestKit's key-value mock **drops** failing messages (false green → failure tested on the real path); a handler is chosen by **parameter type** (wrong type = starts, never called); one `@Produce.ToTopic` stops the whole service booting without topic support; the consumer **resumes** after a restart and replays nothing | [`specs/018-event-consumer`](specs/018-event-consumer/) | ✅ Done — merged (PR #33) |
 | 17 | **Session compaction** (fork B1) — when a session's history passes `compaction.max-bytes` it is replaced by a prose summary; applies to **every** session, so caps 4/6/14 gain the bound un-edited (empty `git diff`). `GET /compaction[/{sessionId}]` reports what happened. **Headline: the wall claims a THIRD method of the agent client** — `withDetailedReply` is method-ref only, after `invoke` (rescued) and `tokenStream` (not), so `dynamicCall` means *plain request/response and nothing else*. ONE Java class holds all three method refs and **no logic**, because a Java caller cannot construct a Scala 3 `enum` case. Also: a Scala consumer reaches the runtime-owned `SessionMemoryEntity`; `compactHistory` **merges** (events after the sequence number are replayed on top) and reports nothing either way, so success is verified by re-reading; a `ServiceSetup.onStartup` failure does **not** stop the service, and a per-message constructor turns a throw into a **40-redelivery loop**, so bad config is loud once and degrades to off. **Four of its findings were corrections of things this project had already written down** | [`specs/019-session-compaction`](specs/019-session-compaction/) | ✅ Done — merged (PR #37) |
+| 18 | **Event-sourced wallet — Event Sourced Entity** (candidate A3, the repo's first ESE) — a `Wallet` ledger (`POST /wallets/{id}/{open,deposit,withdraw,close}`, `GET /wallets/{id}`) whose balance is a fold over `Opened`/`Deposited`/`Withdrawn`/`Closed` events; rejected commands persist nothing. **Headline: a Scala 3 sum type cannot be the event hierarchy, for TWO independent reasons** — an `enum` serializes but can't be read back ("cannot reflectively create enum objects"); a `sealed trait` round-trips through the mapper but **fails the SDK's "must be a sealed interface" startup validation** (Scala 3.3.8 emits no JVM sealed). This **corrects** the old "sum types can't cross the mapper" shorthand: it's a *second* gate. So events are **one Java file**; the entity + `Wallet` state stay Scala (state round-trips, no sealed gate); the caller is Java (entity client method-ref-only). Also: the unit `EventSourcedTestKit` needs a Java method ref (Scala lambda → `ClassCastException`); `@TypeName` and `snapshot-every` are **service-global**; build ordering held for a same-package Scala→Java ref. No model anywhere | [`specs/020-event-sourced-wallet`](specs/020-event-sourced-wallet/) | 🟡 In flight (branch `020-event-sourced-wallet`) |
 
 **Status legend:** ✅ done · 📋 planned (spec written) · 🚧 in progress · ⬜ not started
 
@@ -307,7 +326,7 @@ candidates that still extend the map rather than decorate it.
 |---|---|---|---|
 | **A1** | **Timed Action** — ✅ **built as capability 15 (PR #31); the bet is resolved** (both sides of the wall, split by operation — see row 15) | Scheduling: `TimerScheduler.createSingleTimer(name, delay, deferred)`, plus the rescheduling-on-failure hazard AGENTS.md warns about. A natural fit is a delayed follow-up on cap-5's approval gate, or expiring a stale case. | **The sharpest bet left, and genuinely unpredictable.** The `deferred` argument is built from the component client — if it is a `DeferredCall` produced from a **method reference**, the wall bites a family we have never tested; if it is id-keyed like `TaskClient`, it is Scala-clean. Nothing in the project so far predicts which. New descriptor key `timed-action`. |
 | **A2** | **Consumer** — ✅ **built as capability 16 (PR #33); the bet is resolved** (Scala-clean end to end; the hazard is the unbounded, blocking redelivery — see row 16) | The largest remaining hole: reacting to entity events or a topic, and publishing to one. It is also where cap-13's "there is **no** `Consume.FromAgent`" finding came from — this is that family, approached from the side that *does* exist. Natural fit: consume cap-6's `TodoEntity` events, or finally give cap-7's delegation **ground-truth** observability. | Component likely **Scala-clean** (`@Consume` is annotation-keyed, like `@McpEndpoint`). The open question is the **handler's event type**: a Scala sealed trait with `@TypeName` has never crossed the internal mapper (§3). New descriptor key `consumer`. |
-| **A3** | **Event Sourced Entity, authored by us in Scala** | Cap-6 has a *key-value* entity, in Java. An event-sourced one means a sealed event hierarchy, `applyEvent`, and snapshots — the persistence model [`docs/akka-persistence-models.md`](docs/akka-persistence-models.md) describes but the repo has never written. | **Two known walls collide.** The entity *client* is method-ref-only, so the caller is Java (cap-11's shape); events cross the internal mapper, so they must be Java-*shaped*. The new question is whether a **Scala 3 `enum` or sealed trait** survives that mapper at all, or whether `@TypeName` + Jackson polymorphism forces Java-*authored* events. New descriptor key `event-sourced-entity`. |
+| **A3** | ✅ **built as capability 18 (in flight, branch `020-event-sourced-wallet`); the bet is resolved** (see row 18) | Cap-6 has a *key-value* entity, in Java. An event-sourced one means a sealed event hierarchy, `applyEvent`, and snapshots — the persistence model [`docs/akka-persistence-models.md`](docs/akka-persistence-models.md) describes but the repo had never written. | **Resolved by measurement.** Both walls held *and* a new one appeared: a Scala 3 `enum` can't be deserialized and a Scala 3 `sealed trait` fails the SDK's **sealed-interface startup validation** (not just the mapper — a second gate), so events are **Java-authored**; the entity and `Wallet` state are Scala (state round-trips, no sealed gate); the caller is Java. New descriptor key `event-sourced-entity`; `@TypeName`/`snapshot-every` are service-global. |
 | **A4** | **gRPC endpoint** | A `.proto` in `src/main/proto` and a Scala class implementing the protoc-generated **Java** interface, with `toApi` converters. | **A different axis from the wall: build ordering.** Generated Java sources must interleave with cap-11's scalac-then-javac arrangement (§13 R3) — the one part of this build that has already broken twice. Lower interop novelty, higher build risk. |
 
 ### B. Forks recorded along the way
@@ -325,7 +344,7 @@ first fixes something that is actually wrong today.
 
 ### How these are ordered, and why
 
-**A1 → A2 → B1** is the recommended run. **A1 and A2 are done** (capabilities 15 and 16, PRs #31 and #33), so **B1 session compaction** is next — the only candidate that fixes a known defect rather than adding surface.
+**A1 → A2 → B1** was the recommended run and is **complete** (capabilities 15, 16, 17). **A3 followed** as capability 18 (in flight) — the most *interesting* remaining question, and the one that produced the sharpest correction (a sealed trait crosses the mapper but fails startup validation). **A4 (gRPC) is the last untouched family.**
 
 - **A1 (Timed Action) first** because it is small, it is a whole untouched family, and its outcome is
   the one nobody can call in advance. Cap-14 proved the wall still holds surprises fourteen capabilities
