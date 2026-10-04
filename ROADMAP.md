@@ -344,7 +344,7 @@ first fixes something that is actually wrong today.
 
 ### How these are ordered, and why
 
-**A1 → A2 → B1** was the recommended run and is **complete** (capabilities 15, 16, 17). **A3 followed** as capability 18 (in flight) — the most *interesting* remaining question, and the one that produced the sharpest correction (a sealed trait crosses the mapper but fails startup validation). **A4 (gRPC) is the last untouched family.**
+**A1 → A2 → B1** was the recommended run and is **complete** (capabilities 15, 16, 17). **A3 followed** as capability 18 (merged, PR #41) — the most *interesting* remaining question, and the one that produced the sharpest correction (a sealed trait crosses the mapper but fails startup validation). **A4 (gRPC) is the last untouched family.**
 
 - **A1 (Timed Action) first** because it is small, it is a whole untouched family, and its outcome is
   the one nobody can call in advance. Cap-14 proved the wall still holds surprises fourteen capabilities
