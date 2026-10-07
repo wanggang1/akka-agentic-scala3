@@ -195,6 +195,16 @@ src/main/java/com/gwgs/akkaagentic/wallet/api/          # WalletEndpoint (POST o
 # caller is Java (entity client is method-ref-only). @TypeName and snapshot-every are both SERVICE-GLOBAL.
 # New descriptor key `event-sourced-entity`. No model anywhere. See §20.
 
+# Capability 19 — Scala gRPC endpoint over Java-generated stubs (first gRPC endpoint; see "Scala interop notes" §21)
+src/main/proto/com/gwgs/akkaagentic/grpc/           # greeter.proto — service + messages (codegen auto-activated by this dir)
+src/main/scala/com/gwgs/akkaagentic/grpc/api/       # GreeterGrpcEndpointImpl (Scala; implements generated Java iface; fronts greeting-agent via dynamicCall)
+# Note: the LAST untouched SDK component family. The real bet was BUILD ORDERING, not the wall: the akka-grpc
+# codegen (parent profile generate-protobuf-endpoints, auto-activated by src/main/proto) runs at generate-sources,
+# before this project's process-resources scalac, so a Scala class implements the generated Java interface — green
+# from CLEAN, no pom change. Fronting an AGENT keeps the endpoint Scala (agent client dynamicCall, no method-ref
+# wall). Wire types are Java-generated (builders) = the cap-3 boundary exception at a codegen surface. New
+# descriptor key `grpc-endpoint`. See §21.
+
 src/main/resources/application.conf                 # default model-provider config
 src/test/{scala,java}/com/gwgs/akkaagentic/...       # tests (TestModelProvider, no live model)
 ```
@@ -1252,6 +1262,62 @@ writing components in Scala needs explicit workarounds:
 
     New descriptor key `event-sourced-entity`; `WalletEndpoint` under `http-endpoint`. No `pom.xml` change.
     See specs/020 research Q-A–Q-F.
+
+21. **A gRPC endpoint is Scala over Java-generated stubs — and the only real risk was build ordering, which
+    did not bite.** Capability 19 (`com.gwgs.akkaagentic.grpc.*`) is the repo's first **gRPC endpoint**, the
+    last untouched SDK component family. A `.proto` defines a unary `Greet` RPC; the SDK generates a **Java**
+    service interface and message classes; a **Scala** class implements that interface under `@GrpcEndpoint`
+    and fronts capability 1's `greeting-agent`. Unlike every capability since §4, the method-reference wall is
+    *not* the story — it was known to be answerable, and fronting an **agent** (not an entity) keeps the
+    endpoint Scala.
+
+    - **Build ordering — the actual bet — resolved favorably, from clean.** The SDK parent carries a profile
+      `generate-protobuf-endpoints` **auto-activated by the mere existence of `src/main/proto`** (no `pom.xml`
+      edit, no `<plugin>` entry). It runs `akka-grpc-maven-plugin` 2.5.10 at **`generate-sources`**, and
+      `build-helper` adds `target/generated-sources/akka-grpc-java` as a compile source root. This project's
+      scalac is bound to **`process-resources`** (later) with `sendJavaToScalac=true`, so by the time Scala
+      compiles, the generated Java interface exists and is on scalac's source path — a Scala class implements a
+      Java interface whose source did not exist until mid-build. `mvn clean verify` was green on the first
+      clean run (the §13 R3 arrangement that had broken twice did not break here).
+
+    - **Java-flavor, and the asymmetry is the honest result.** `blockingApis=true` yields the blocking Java
+      interface (`GreetReply greet(GreetRequest in)`). ScalaPB is not usable: the SDK's `@GrpcEndpoint`
+      contract is the generated **Java** interface. So this is *Scala-authored endpoint over Java-generated
+      stubs* — the wire messages are Java (builders, proto3 non-null scalars), the same boundary exception
+      carried since §3, now at a **code-generated** surface. `generateScalaHandlerFactory=true` is a red
+      herring: it emits `…ScalaHandlerFactory.**java**`, so nothing Scala escapes the one generated-sources
+      root (which is why plain-Java SDK projects, with no scalac, build this profile fine).
+
+    - **The endpoint calls the agent via `dynamicCall`, exactly like the Scala HTTP endpoint.**
+      `componentClient.forAgent().inSession(uuid).dynamicCall[Request, Result]("greeting-agent").invoke(...)` —
+      the agent client is on the right side of the wall (§15). Validation reuses the pure domain
+      `GreetingRequest` (parse-don't-validate); a blank `user`/`text` throws
+      `new akka.grpc.GrpcServiceException(io.grpc.Status.INVALID_ARGUMENT.augmentDescription(msg))` **before**
+      the agent is called, surfacing client-side as `INVALID_ARGUMENT` with the field message.
+
+    - **Testing is Scala-clean.** The integration test uses the generated blocking client
+      `GreeterGrpcEndpointClient` from `getGrpcEndpointClient(...)` and `TestModelProvider` to mock the agent's
+      model — no method reference anywhere. Timezone forwarding is proven with
+      `whenMessage(_.contains("Europe/London"))` (a match means the endpoint passed it through).
+
+    New descriptor key `grpc-endpoint` (confirmed by the runtime registering the service at startup). No
+    `pom.xml` change; `akka-grpc-runtime` comes transitively via `akka-javasdk`. See specs/021 research Q-A–Q-E.
+
+### Calling the gRPC endpoint
+
+The gRPC endpoint is served on the service's HTTP/2 port (dev mode enables reflection), alongside the HTTP
+endpoints:
+
+```shell
+grpcurl -plaintext \
+  -d '{"user":"Ada","text":"hello there","timezone":"Europe/London"}' \
+  localhost:9000 com.gwgs.akkaagentic.grpc.GreeterGrpcEndpoint/Greet
+# => { "greeting": "...", "tone": "...", "timeOfDay": "evening" }
+
+grpcurl -plaintext -d '{"user":"","text":"hi"}' \
+  localhost:9000 com.gwgs.akkaagentic.grpc.GreeterGrpcEndpoint/Greet
+# => ERROR: Code: InvalidArgument  Message: user must not be blank
+```
 
 ## Build
 

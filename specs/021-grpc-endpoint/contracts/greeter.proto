@@ -1,0 +1,35 @@
+// gRPC service contract for capability 19 (A4) — a Scala endpoint fronting the
+// capability-1 greeting agent. This is the design artifact; the implementation
+// copies it to src/main/proto/com/gwgs/akkaagentic/grpc/greeter.proto, which
+// auto-activates the SDK parent's `generate-protobuf-endpoints` profile.
+//
+// Java-flavor codegen (blockingApis=true) produces:
+//   - messages:  com.gwgs.akkaagentic.grpc.proto.{GreetRequest, GreetReply}
+//   - interface: com.gwgs.akkaagentic.grpc.proto.GreeterGrpcEndpoint
+//                  (blocking: GreetReply greet(GreetRequest in))
+//   - test client: com.gwgs.akkaagentic.grpc.proto.GreeterGrpcEndpointClient
+// The Scala class GreeterGrpcEndpointImpl implements the interface under @GrpcEndpoint.
+
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "com.gwgs.akkaagentic.grpc.proto";
+
+package com.gwgs.akkaagentic.grpc;
+
+message GreetRequest {
+  string user = 1;      // required (endpoint validates non-blank)
+  string text = 2;      // required (endpoint validates non-blank)
+  string timezone = 3;  // optional; "" -> agent falls back to UTC
+}
+
+message GreetReply {
+  string greeting = 1;
+  string tone = 2;
+  string time_of_day = 3;
+}
+
+service GreeterGrpcEndpoint {
+  // Unary: compose a personalized greeting via the greeting agent.
+  rpc Greet (GreetRequest) returns (GreetReply) {}
+}
