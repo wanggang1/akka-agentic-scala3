@@ -40,7 +40,18 @@ usable; the SDK's `@GrpcEndpoint` contract is the generated **Java** interface.
 
 ---
 
-## Q-B — Does the codegen run *before* this project's Scala compile? **[MEASURED] ordering · [PREDICTED] result**
+## Q-B — Does the codegen run *before* this project's Scala compile? **[MEASURED] — CONFIRMED from clean**
+
+> **RESULT (T005, 2026-10-07): CONFIRMED.** `mvn clean verify` from a clean tree is **green** (224 tests, 0
+> failures, 5:32) with a stub Scala endpoint implementing the generated Java interface. `mvn clean
+> generate-sources` placed the interface + messages under `target/generated-sources/akka-grpc-java` (Q-A), and
+> the started runtime logged `gRPC endpoint component [com.gwgs.akkaagentic.grpc.api.GreeterGrpcEndpointImpl],
+> gRPC service name [com.gwgs.akkaagentic.grpc.GreeterGrpcEndpoint]`. The prediction below held exactly: the
+> generated Java is on scalac's source path by `process-resources`, and a Scala class compiles against a Java
+> interface that did not exist until mid-build. **No `pom.xml` change was needed.** The build-ordering axis —
+> the only genuine A4 risk — is resolved favorably.
+
+
 
 **The build-ordering crux of A4.** Maven lifecycle order is:
 `validate → initialize → generate-sources → process-sources → generate-resources → process-resources →
@@ -91,25 +102,31 @@ components; the agent client is on the right side of the wall). An entity front 
 **Confirmed by:** the Scala endpoint compiling against the generated interface (part of Q-B's build) and the
 integration test returning the agent's mocked reply.
 
-**[TO CONFIRM] residual risks** (named checks, resolved in implementation):
+**residual risks** (resolved in T003–T006):
 
-1. **Exception/`Status` imports.** The doc signals errors by throwing `GrpcServiceException(Status.…)`. Exact
-   packages to confirm at compile: `akka.grpc.GrpcServiceException` and `io.grpc.Status`. If `IllegalArgumentException`
-   is simpler and maps to `INVALID_ARGUMENT` (the doc says it does), US2 can throw that instead — decide at
-   implementation, record which.
-2. **`generateScalaHandlerFactory=true`.** The name suggests a Scala artifact. But this profile is what
-   plain-**Java** SDK projects (no scalac) use and build successfully, so the generated, compilable output
-   must be Java (javac-only). Expected to be a non-issue here; if a stray `.scala` lands outside the single
-   added source root and fails to compile, that is a finding (and a second `add-source` or a language setting
-   is the fix). Check: inspect `target/generated-sources/` after the first codegen.
-3. **akka-grpc runtime on the compile classpath.** The generated handler references akka-grpc runtime
-   classes; `akka-javasdk` is expected to bring them transitively (the profile adds only `protobuf-java`). If
-   compilation reports a missing akka-grpc runtime class, record it and add the dependency — that is a real
-   A4 finding about the SDK's packaging, not a silent fix.
+1. **Exception/`Status` imports.** *(Still open — needed only for US2/T011, not the stub.)* The doc throws
+   `GrpcServiceException(Status.…)`. `akka-grpc-runtime_2.13` 2.5.10 is confirmed on the classpath (it compiled
+   and started), so `akka.grpc.GrpcServiceException` + `io.grpc.Status` are available; the doc also says
+   `IllegalArgumentException` maps to `INVALID_ARGUMENT`. Exact choice/imports decided at T011 and recorded
+   then.
+2. **`generateScalaHandlerFactory=true`.** **RESOLVED (T005): it generates JAVA, not Scala.** The generated
+   file is `…/proto/GreeterGrpcEndpointScalaHandlerFactory.**java**` — despite the name, a `.java` file. No
+   `.scala` escapes the single added source root; nothing extra to compile. (This is why plain-Java SDK
+   projects with no scalac build fine: the "Scala handler factory" is a historical akka-grpc name, emitted as
+   Java.)
+3. **akka-grpc runtime on the compile classpath.** **RESOLVED (T005): present.** The stub compiled and the
+   service started; `akka-grpc-runtime_2.13-2.5.10.jar` is in `.m2` via the `akka-javasdk` dependency tree. No
+   hand-added dependency was needed — the profile adds only `protobuf-java`, and the runtime comes transitively.
 
 ---
 
-## Q-D — What is the component descriptor key for a gRPC endpoint? **[TO CONFIRM]**
+## Q-D — What is the component descriptor key for a gRPC endpoint? **[MEASURED] — `grpc-endpoint` CONFIRMED**
+
+> **RESULT (T004/T005): `grpc-endpoint` is correct.** With
+> `grpc-endpoint = ["com.gwgs.akkaagentic.grpc.api.GreeterGrpcEndpointImpl"]` in the hand-maintained
+> descriptor, the started runtime registered and named the service (log line in Q-B). A wrong key would have
+> left it undiscovered; it was discovered. The key sits beside `http-endpoint` / `mcp-endpoint`, as expected.
+
 
 **Decision:** Register the impl under a new top-level key **`grpc-endpoint`** in the hand-maintained
 descriptor (`src/main/resources/META-INF/akka-javasdk-components_*.conf`), alongside the existing
@@ -140,23 +157,29 @@ project's agent-testing pattern (`TestModelProvider.fixedResponse(JsonSupport.en
 US3 (build/startup) needs no separate test — the integration test running at all against a started runtime
 *is* the startup check.
 
-**[TO CONFIRM]:** the generated test client class name (`GreeterGrpcEndpointClient` by akka-grpc convention —
-service name + `Client`); confirm from the generated sources. Scala test authoring is expected to be clean
-(no method reference; the client is a generated type with ordinary methods).
+**[MEASURED] (T005): the generated test client is `com.gwgs.akkaagentic.grpc.proto.GreeterGrpcEndpointClient`**
+(alongside a `GreeterGrpcEndpointClientPowerApi`). Confirmed from the generated sources. Scala test authoring
+is expected clean (no method reference; the client is a generated type with ordinary methods) — exercised in
+US1/T007.
 
 ---
 
-## Summary of expected interop verdict (to be confirmed, then written to README §20 / ROADMAP)
+## Summary of interop verdict (build probe done; US1/US2 still to add logic)
 
-- The gRPC family is **build-ordering-clean** in this project: the parent's auto-activated profile generates
-  Java at `generate-sources`, which precedes this project's `process-resources` Scala compile, so a **Scala
-  endpoint can implement the generated Java interface** with no pom change. *(Q-A/Q-B — confirm from clean.)*
+- **CONFIRMED (T005):** the gRPC family is **build-ordering-clean** in this project. The parent's
+  auto-activated profile generates Java at `generate-sources`, which precedes this project's
+  `process-resources` Scala compile, so a **Scala endpoint implements the generated Java interface** — proven
+  from a clean build, with **no pom change**. The A4 bet (build ordering, the one part of the build that had
+  broken twice before) resolved favorably on the first clean run.
 - The endpoint stays **Scala** because it fronts an **agent** (dynamicCall), not an entity. The method-ref
-  wall is not the A4 story. *(Q-C.)*
+  wall is not the A4 story. *(Q-C — confirmed for the stub; the dynamicCall itself is exercised in US1/T008.)*
 - The asymmetry is the honest result: **Scala-authored endpoint over Java-generated stubs** — the wire types
   are Java-shaped by generation, the same boundary exception carried since cap-3, now at a code-generated
-  surface. Not "gRPC in Scala end to end."
-- New descriptor key **`grpc-endpoint`** *(Q-D — confirm spelling from the SDK constant pool.)*
+  surface. Not "gRPC in Scala end to end." The `generateScalaHandlerFactory` is a red herring: emitted as
+  Java.
+- New descriptor key **`grpc-endpoint`** — **CONFIRMED (T004/T005)** by the runtime registering the service.
+- **Still open, for US1/US2:** the live `dynamicCall` to `greeting-agent` returning the mocked reply (T007/T008)
+  and the `GrpcServiceException`/`Status` choice for validation (T011).
 
 Anything above that implementation **disproves** gets corrected here, in place, with what was wrong stated —
 not quietly edited (CLAUDE.md cold-start rule).
