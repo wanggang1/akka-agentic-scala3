@@ -104,11 +104,13 @@ integration test returning the agent's mocked reply.
 
 **residual risks** (resolved in T003–T006):
 
-1. **Exception/`Status` imports.** *(Still open — needed only for US2/T011, not the stub.)* The doc throws
-   `GrpcServiceException(Status.…)`. `akka-grpc-runtime_2.13` 2.5.10 is confirmed on the classpath (it compiled
-   and started), so `akka.grpc.GrpcServiceException` + `io.grpc.Status` are available; the doc also says
-   `IllegalArgumentException` maps to `INVALID_ARGUMENT`. Exact choice/imports decided at T011 and recorded
-   then.
+1. **Exception/`Status` imports.** **RESOLVED (T011):** validation throws
+   `new akka.grpc.GrpcServiceException(io.grpc.Status.INVALID_ARGUMENT.augmentDescription(message))`. Both
+   classes are on the classpath via `akka-grpc-runtime_2.13` 2.5.10. Client-side the blocking
+   `GreeterGrpcEndpointClient.greet` surfaces it as an exception whose message carries both `INVALID_ARGUMENT`
+   and the augmented description (the domain's `"user must not be blank"` / `"text must not be blank"`),
+   asserted in the IT. Chosen over bare `IllegalArgumentException` for an explicit status + message. Scala uses
+   `new` on `GrpcServiceException` (a Java class, not a case class) — no companion `apply`.
 2. **`generateScalaHandlerFactory=true`.** **RESOLVED (T005): it generates JAVA, not Scala.** The generated
    file is `…/proto/GreeterGrpcEndpointScalaHandlerFactory.**java**` — despite the name, a `.java` file. No
    `.scala` escapes the single added source root; nothing extra to compile. (This is why plain-Java SDK

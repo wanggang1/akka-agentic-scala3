@@ -1,10 +1,13 @@
 package com.gwgs.akkaagentic.grpc.api
 
+import akka.grpc.GrpcServiceException
 import akka.javasdk.annotations.Acl
 import akka.javasdk.annotations.GrpcEndpoint
 import akka.javasdk.client.ComponentClient
 import com.gwgs.akkaagentic.application.GreetingAgent
+import com.gwgs.akkaagentic.domain.{GreetingRequest, ValidGreeting}
 import com.gwgs.akkaagentic.grpc.proto.{GreeterGrpcEndpoint, GreetReply, GreetRequest}
+import io.grpc.Status
 
 import java.util.UUID
 
@@ -21,8 +24,9 @@ import java.util.UUID
   * `sendJavaToScalac=true`), so this Scala class compiles against a Java interface that did
   * not exist until mid-build — confirmed from a clean build (specs/021 research Q-B).
   *
-  * Input validation (US2) is added in a later task; this handler currently forwards every
-  * request to the agent.
+  * Input is validated at this boundary via the pure domain [[GreetingRequest]]
+  * (parse-don't-validate): an empty user or message is rejected with `INVALID_ARGUMENT`
+  * before the agent is called, so the model never sees empty input.
   */
 @GrpcEndpoint
 @Acl(allow = Array(new Acl.Matcher(principal = Acl.Principal.INTERNET)))
@@ -30,15 +34,23 @@ class GreeterGrpcEndpointImpl(componentClient: ComponentClient) extends GreeterG
   import GreeterGrpcEndpointImpl.toApi
 
   override def greet(in: GreetRequest): GreetReply =
-    val result = componentClient
+    // proto3 scalars are never null, so an empty string is "absent"; the domain's `validate`
+    // treats a blank field as missing and returns the first failing message.
+    GreetingRequest(Option(in.getUser), Option(in.getText)).validate match
+      case Left(message) =>
+        throw new GrpcServiceException(Status.INVALID_ARGUMENT.augmentDescription(message))
+      case Right(valid) =>
+        toApi(callAgent(valid, blankToNull(in.getTimezone)))
+
+  private def callAgent(valid: ValidGreeting, timezone: String): GreetingAgent.Result =
+    componentClient
       .forAgent()
       .inSession(UUID.randomUUID().toString)
       // GreetingAgent.Request stays Java-shaped (nullable `String` timezone): it travels the
       // component-command serializer's SEPARATE internal mapper (feature 003 R6). proto3
       // scalars are never null, so "absent" is the empty string — bridge "" -> null here.
       .dynamicCall[GreetingAgent.Request, GreetingAgent.Result]("greeting-agent")
-      .invoke(GreetingAgent.Request(in.getUser, in.getText, blankToNull(in.getTimezone)))
-    toApi(result)
+      .invoke(GreetingAgent.Request(valid.user, valid.text, timezone))
 
   /** proto3 string default is "" (never null). Treat blank as absent so the agent falls
     * back to UTC, matching the HTTP endpoint's `Option(..).filter(_.nonEmpty)` semantics.

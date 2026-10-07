@@ -4,7 +4,7 @@ import akka.javasdk.JsonSupport
 import akka.javasdk.testkit.{TestKit, TestKitSupport, TestModelProvider}
 import com.gwgs.akkaagentic.application.GreetingAgent
 import com.gwgs.akkaagentic.grpc.proto.{GreeterGrpcEndpointClient, GreetRequest}
-import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.{assertThat, assertThatThrownBy}
 import org.junit.jupiter.api.Test
 
 /** Drives [[com.gwgs.akkaagentic.grpc.api.GreeterGrpcEndpointImpl]] over gRPC with a
@@ -77,3 +77,23 @@ class GreeterGrpcEndpointIntegrationTest extends TestKitSupport:
 
     assertThat(reply.getGreeting).isEqualTo("Hi Ada!")
     assertThat(reply.getTimeOfDay).isEqualTo("afternoon")
+
+  /** US2 scenario 1: an empty user is rejected with INVALID_ARGUMENT, and the model is
+    * NOT called. No model response is configured here: had validation not run first, the
+    * agent would be invoked and its `onFailure` fallback would return a 200-style reply
+    * (never INVALID_ARGUMENT) — so the status itself proves validation preceded the call.
+    */
+  @Test
+  def emptyUserIsRejected(): Unit =
+    assertThatThrownBy(() =>
+      client.greet(GreetRequest.newBuilder().setUser("").setText("hello there").build())
+    ).hasMessageContaining("INVALID_ARGUMENT")
+      .hasMessageContaining("user must not be blank")
+
+  /** US2 scenario 2: an empty message is rejected with INVALID_ARGUMENT. */
+  @Test
+  def emptyTextIsRejected(): Unit =
+    assertThatThrownBy(() =>
+      client.greet(GreetRequest.newBuilder().setUser("Ada").setText("").build())
+    ).hasMessageContaining("INVALID_ARGUMENT")
+      .hasMessageContaining("text must not be blank")
