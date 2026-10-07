@@ -7,11 +7,30 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 ## Where we are
 
-> **You are here:** Feature 18 (event-sourced wallet, candidate **A3**) — **✅ merged to `main`
+> **You are here:** Feature 19 (gRPC endpoint, candidate **A4**) — **built & green on
+> `021-grpc-endpoint`; final gate passed, PR pending** ([`specs/021-grpc-endpoint`](specs/021-grpc-endpoint/)).
+> The repo's **first gRPC endpoint**, and the **last untouched SDK component family** — the map is now
+> complete. A `.proto` defines a unary `Greet` RPC; the SDK generates a **Java** service interface + message
+> classes; a **Scala** `GreeterGrpcEndpointImpl` implements that interface under `@GrpcEndpoint` and fronts
+> capability 1's `greeting-agent` via `dynamicCall`. US1–US3 built and green (happy path, validation →
+> `INVALID_ARGUMENT`, clean build registers the service).
+>
+> **Interop verdict — the only real risk was build ordering, and it did not bite.** Unlike every capability
+> since §4, the method-reference wall is *not* the story: fronting an **agent** (not an entity) keeps the
+> endpoint Scala (the agent client's `dynamicCall` is on the right side of the wall, §15). The actual A4 bet
+> was the scalac-then-javac build (§13 R3, broken twice before). It held on the first clean run: the parent's
+> `generate-protobuf-endpoints` profile is **auto-activated by `src/main/proto` existing** (no `pom.xml`
+> edit), runs `akka-grpc-maven-plugin` at **`generate-sources`** — *before* this project's `process-resources`
+> scalac — and with `sendJavaToScalac=true` a Scala class compiles against a generated Java interface that did
+> not exist until mid-build. The honest shape is **Scala endpoint over Java-generated stubs**: `blockingApis`
+> gives a Java interface, the messages are Java (builders), ScalaPB is not usable — the cap-3 wire-type
+> exception, now at a code-generated surface. `generateScalaHandlerFactory` is a red herring (emits `.java`).
+> New descriptor key `grpc-endpoint`, confirmed by the runtime registering the service. See specs/021 Q-A–Q-E.
+>
+> **Previously:** Feature 18 (event-sourced wallet, candidate **A3**) — **✅ merged to `main`
 > 2026-10-04 (PR #41)** ([`specs/020-event-sourced-wallet`](specs/020-event-sourced-wallet/)). The
 > repo's **first event-sourced entity**: a `Wallet` ledger whose balance is a fold over
-> `Opened`/`Deposited`/`Withdrawn`/`Closed` events. US1–US3 built and green (fold, rejection-persists-nothing,
-> snapshots); US4/docs + final gate remain.
+> `Opened`/`Deposited`/`Withdrawn`/`Closed` events.
 >
 > **Interop verdict — a Scala 3 sum type cannot be the event hierarchy, for TWO independent SDK reasons.**
 > A Scala 3 `enum` **serializes but cannot be read back** (Jackson: "Cannot reflectively create enum
@@ -158,14 +177,15 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 > verified by mechanism, not by watching it happen.
 >
 >
-> **⏭️ Next:** **A3 is done (capability 18, above, PR #41).** That leaves **exactly one** untouched SDK
-> component family — **A4**, a gRPC endpoint, whose risk is build ordering rather than the wall (and A3
-> gave one reassuring data point: a same-package Scala→Java reference compiled cleanly under `clean
-> verify`). Four forks also stay open: **B2** SSE framing, **B3** delegation observability (one route
-> measured and ruled out), **B4** usage-accurate citations, **B5** streaming with a grounded answer.
+> **⏭️ Next:** **A4 is done (capability 19, above) — every SDK component family has now been built in
+> Scala.** The build-ordering risk resolved favorably on the first clean run. What remains are only the
+> four forks: **B2** SSE framing, **B3** delegation observability (one route measured and ruled out, and
+> **blocked** — needs a newer SDK than the free-tier 3.6.3), **B4** usage-accurate citations, **B5**
+> streaming with a grounded answer. None opens a new component family; they are design/observability
+> refinements on surfaces that already exist.
 >
-> Capabilities 1–18 are **✅ done and merged**. 5–18 were exploratory follow-ups beyond
-> the original four.
+> Capabilities 1–18 are **✅ done and merged**; capability 19 is **built & green, PR pending**. 5–19 were
+> exploratory follow-ups beyond the original four.
 >
 > **📄 Retrospective:** [`FINDINGS.md`](FINDINGS.md) consolidates the single `dynamicCall` finding that
 > explains every Scala-vs-Java outcome, plus the practical rubric. Caps 5–11 extend the through-line: the
@@ -318,7 +338,7 @@ start with `/akka.specify` (never by writing code — see
 ### A. Untouched component families — the project's own axis
 
 Fourteen capabilities in, **four SDK component families had never been built here**; capability 15 took
-the first (A1) and capability 16 the second (A2), so **two remain** (A3 event-sourced entity in Scala, A4 gRPC). This project
+the first (A1), capability 16 the second (A2), capability 18 the third (A3) and capability 19 the fourth and last (A4) — so **all four SDK component families have now been built in Scala**. This project
 exists to answer "which of them can be authored in Scala 3, and what decides it", so these are the
 candidates that still extend the map rather than decorate it.
 
@@ -327,7 +347,7 @@ candidates that still extend the map rather than decorate it.
 | **A1** | **Timed Action** — ✅ **built as capability 15 (PR #31); the bet is resolved** (both sides of the wall, split by operation — see row 15) | Scheduling: `TimerScheduler.createSingleTimer(name, delay, deferred)`, plus the rescheduling-on-failure hazard AGENTS.md warns about. A natural fit is a delayed follow-up on cap-5's approval gate, or expiring a stale case. | **The sharpest bet left, and genuinely unpredictable.** The `deferred` argument is built from the component client — if it is a `DeferredCall` produced from a **method reference**, the wall bites a family we have never tested; if it is id-keyed like `TaskClient`, it is Scala-clean. Nothing in the project so far predicts which. New descriptor key `timed-action`. |
 | **A2** | **Consumer** — ✅ **built as capability 16 (PR #33); the bet is resolved** (Scala-clean end to end; the hazard is the unbounded, blocking redelivery — see row 16) | The largest remaining hole: reacting to entity events or a topic, and publishing to one. It is also where cap-13's "there is **no** `Consume.FromAgent`" finding came from — this is that family, approached from the side that *does* exist. Natural fit: consume cap-6's `TodoEntity` events, or finally give cap-7's delegation **ground-truth** observability. | Component likely **Scala-clean** (`@Consume` is annotation-keyed, like `@McpEndpoint`). The open question is the **handler's event type**: a Scala sealed trait with `@TypeName` has never crossed the internal mapper (§3). New descriptor key `consumer`. |
 | **A3** | ✅ **built & merged as capability 18 (PR #41); the bet is resolved** (see row 18) | Cap-6 has a *key-value* entity, in Java. An event-sourced one means a sealed event hierarchy, `applyEvent`, and snapshots — the persistence model [`docs/akka-persistence-models.md`](docs/akka-persistence-models.md) describes but the repo had never written. | **Resolved by measurement.** Both walls held *and* a new one appeared: a Scala 3 `enum` can't be deserialized and a Scala 3 `sealed trait` fails the SDK's **sealed-interface startup validation** (not just the mapper — a second gate), so events are **Java-authored**; the entity and `Wallet` state are Scala (state round-trips, no sealed gate); the caller is Java. New descriptor key `event-sourced-entity`; `@TypeName`/`snapshot-every` are service-global. |
-| **A4** | **gRPC endpoint** | A `.proto` in `src/main/proto` and a Scala class implementing the protoc-generated **Java** interface, with `toApi` converters. | **A different axis from the wall: build ordering.** Generated Java sources must interleave with cap-11's scalac-then-javac arrangement (§13 R3) — the one part of this build that has already broken twice. Lower interop novelty, higher build risk. |
+| **A4** | ✅ **built as capability 19 (PR pending); the bet is resolved** (see row 19) | A `.proto` in `src/main/proto` and a Scala class implementing the protoc-generated **Java** interface, with `toApi` converters. | **Resolved by measurement: build ordering did not bite.** The parent's codegen profile is auto-activated by `src/main/proto` and runs at `generate-sources`, before this project's `process-resources` scalac — so a Scala class implements the generated Java interface from a clean build, no `pom.xml` change (§13 R3 held). Honest shape: Scala endpoint over Java-generated stubs; fronting an agent keeps it off the method-ref wall. |
 
 ### B. Forks recorded along the way
 
@@ -344,7 +364,7 @@ first fixes something that is actually wrong today.
 
 ### How these are ordered, and why
 
-**A1 → A2 → B1** was the recommended run and is **complete** (capabilities 15, 16, 17). **A3 followed** as capability 18 (merged, PR #41) — the most *interesting* remaining question, and the one that produced the sharpest correction (a sealed trait crosses the mapper but fails startup validation). **A4 (gRPC) is the last untouched family.**
+**A1 → A2 → B1** was the recommended run and is **complete** (capabilities 15, 16, 17). **A3 followed** as capability 18 (merged, PR #41) — the most *interesting* remaining question, and the one that produced the sharpest correction (a sealed trait crosses the mapper but fails startup validation). **A4 (gRPC) followed as capability 19 and closed the set** — every SDK component family has now been built in Scala; its build-ordering risk resolved favorably on the first clean run.
 
 - **A1 (Timed Action) first** because it is small, it is a whole untouched family, and its outcome is
   the one nobody can call in advance. Cap-14 proved the wall still holds surprises fourteen capabilities
@@ -355,8 +375,11 @@ first fixes something that is actually wrong today.
   list that fixes something the project knows is broken.
 - **A3** is the most *interesting* remaining question (can Scala 3 sealed traits cross the internal
   mapper?) but the least *new* shape — two walls already understood, meeting. Good third pick.
-- **A4 and B2–B5 are deliberately last.** A4 risks the build for little interop news; B2 and B5 are
-  design problems rather than interop ones; B4 reopens a tension cap-8 settled on purpose.
+- **A4 was deliberately last among the families** (capability 19): it risked the build for little interop
+  news, and that is exactly how it played out — the build-ordering risk held and the interop finding is the
+  narrow "Scala endpoint over Java-generated stubs." **B2–B5 remain** and are design/observability problems
+  rather than new families: B2 and B5 are design problems, B4 reopens a tension cap-8 settled on purpose, and
+  B3 is blocked on a newer SDK than the free-tier 3.6.3.
 
 Relevant docs already in-repo: `akka-context/sdk/timed-actions.html.md`,
 `akka-context/sdk/consuming-producing.html.md`, `akka-context/sdk/event-sourced-entities.html.md`,

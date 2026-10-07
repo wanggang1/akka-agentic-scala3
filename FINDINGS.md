@@ -611,3 +611,38 @@ exercises snapshots, to avoid changing the runtime-owned `SessionMemoryEntity`).
 same-package Java `sealed interface` compiled cleanly under `mvn clean verify`. gRPC's *generated* sources
 remain the untested case.
 
+## Capability 19 — gRPC: the first family whose finding is *not* the wall, it's the build
+
+The repo's first gRPC endpoint, and the last untouched SDK component family — so the map is complete. A4 was
+chosen knowing it carried **little interop novelty and real build risk**, and that is precisely how it
+resolved.
+
+**The method-ref wall was never the question.** gRPC's answer was already implied: a Scala class implements
+the generated Java service interface (routine), and the endpoint reaches a component via the **agent
+client's `dynamicCall`** — the right side of the wall (cap-15). Fronting capability 1's `greeting-agent`
+rather than an entity is what keeps the endpoint Scala; an entity front would have forced Java (cap-18), off
+A4's actual question.
+
+**The real finding is build ordering, and it held.** The SDK parent carries a profile
+`generate-protobuf-endpoints` **auto-activated by the mere existence of `src/main/proto`** — no `pom.xml`
+edit, no `<plugin>` line. It runs `akka-grpc-maven-plugin` 2.5.10 (Java flavor, `blockingApis=true`) at
+**`generate-sources`**, and `build-helper` adds `target/generated-sources/akka-grpc-java` as a compile source
+root. This project's scalac is bound to **`process-resources`** (later) with `sendJavaToScalac=true`, so the
+generated Java interface is on scalac's path before the Scala compile — a Scala class implements a Java
+interface whose source did not exist until mid-build. `mvn clean verify` was green on the first clean run:
+the §13 R3 arrangement that broke twice before did not break here.
+
+**The honest shape is "Scala endpoint over Java-generated stubs."** `blockingApis` yields the Java interface
+`GreetReply greet(GreetRequest in)`; the messages are Java (builders, proto3 non-null scalars); ScalaPB is
+not usable because the SDK's `@GrpcEndpoint` contract *is* the generated Java interface. This is the §3
+wire-type exception — Java-shaped types at the boundary — now at a **code-generated** surface, not "gRPC in
+Scala end to end." `generateScalaHandlerFactory=true` is a red herring: it emits
+`…ScalaHandlerFactory.**java**`, which is why plain-Java SDK projects (no scalac) build this profile fine.
+
+**Everything else was Scala-clean.** Validation reuses the pure domain `GreetingRequest`; a blank field throws
+`new akka.grpc.GrpcServiceException(io.grpc.Status.INVALID_ARGUMENT.augmentDescription(msg))` before the
+agent is called. The integration test uses the generated blocking client `GreeterGrpcEndpointClient` from
+`getGrpcEndpointClient(...)` with `TestModelProvider` — no method reference anywhere. New descriptor key
+`grpc-endpoint`, confirmed by the runtime registering the service at startup; `akka-grpc-runtime` arrives
+transitively via `akka-javasdk`.
+
