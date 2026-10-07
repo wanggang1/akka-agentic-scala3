@@ -62,5 +62,8 @@ grpcurl -plaintext -d '{"user":"","text":"hi"}' \
 - Second case: empty `user` → expects the invalid-argument status and asserts the model was not invoked.
 
 ```bash
-mvn verify -Dit.test='GreeterGrpcEndpointIntegrationTest' -Dtest='!*'
+mvn verify -Dit.test='GreeterGrpcEndpointIntegrationTest' -Dtest='!*' -DfailIfNoTests=false
 ```
+
+`-Dtest='!*'` deselects every unit test; `-DfailIfNoTests=false` is required so the surefire
+(unit) phase does not abort with "No tests were executed!" before the integration test runs.
