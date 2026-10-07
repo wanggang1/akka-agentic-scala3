@@ -86,7 +86,9 @@ Scala idioms over Java-isms:
 pushing to a PR — never as the check after editing one line. Otherwise, pick the smallest run that
 could actually catch a break in what you changed. See README "Test" for every command and its measured
 cost; the short forms are `mvn test -Pquick` (8.8 s, pure logic), `mvn test -Dtest='XTest,YTest'`
-(5.0 s) and `mvn verify -Dit.test='Cap*IntegrationTest' -Dtest='!*'` (26.5 s, one capability).
+(5.0 s) and `mvn verify -Dit.test='Cap*IntegrationTest' -Dtest='!*' -DfailIfNoTests=false` (26.5 s, one
+capability — the `-DfailIfNoTests=false` is required because `-Dtest='!*'` deselects every unit test, so
+without it the surefire unit phase aborts with "No tests were executed!" before the integration test runs).
 
 | What you touched | What to run |
 |---|---|
