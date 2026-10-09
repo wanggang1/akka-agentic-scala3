@@ -7,15 +7,22 @@ import scala.jdk.CollectionConverters.*
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
-/** T012 / FR-013 — the Java quarantine, asserted against the tree rather than promised in prose.
+/** T012 / FR-013 (cap-14) + T015 (cap-20) — the Java quarantine for the whole `streaming` tree,
+  * asserted against the tree rather than promised in prose.
   *
-  * Capability 14 contains exactly **one** Java production class, and for a measured reason: consuming
-  * an agent's token stream needs a Java method reference (specs/016 research Q-B). Everything else —
-  * the agent, the domain rule, this capability's own tests — is Scala.
+  * The tree now hosts **two** capabilities, and each adds Java only for a measured reason:
+  *   - cap-14: `StreamingChatEndpoint` — consuming an agent's token stream needs a Java method
+  *     reference (specs/016 research Q-B).
+  *   - cap-20: `SseChatEndpoint` — the SAME wall (it also holds `tokenStream(StreamingChatAgent::stream)`),
+  *     and `SseChatEvent` — the SSE wire envelope, Java because the SDK's internal Jackson mapper
+  *     serialises each frame (specs/022 research Q-D).
   *
-  * A prose claim like that decays the first time someone finds it easier to add a second Java helper.
-  * So it is a test. If it fails, the wall reaches further than capability 11 measured, which is a
-  * **finding to record**, not a line to update.
+  * So the quarantine is now **three** Java files, all in `api`. Everything either capability *calls* —
+  * the agent, both domain rules — is Scala, so neither wall spread from an endpoint to its collaborators.
+  *
+  * A prose claim like that decays the first time someone adds a Java helper "just here". So it is a
+  * test. If the Java set changes, that is a **finding to record** (the wall reached further, or a new
+  * wire type appeared), not a line to quietly update.
   */
 class JavaQuarantineTest:
 
@@ -36,15 +43,23 @@ class JavaQuarantineTest:
         .sorted
 
   @Test
-  def exactlyOneJavaProductionClassExistsAndItIsTheEndpoint(): Unit =
+  def exactlyTheThreeKnownJavaProductionClassesExist(): Unit =
     assertThat(filesUnder(javaMain, ".java").mkString(", "))
-      .isEqualTo("src/main/java/com/gwgs/akkaagentic/streaming/api/StreamingChatEndpoint.java")
+      .isEqualTo(
+        List(
+          "src/main/java/com/gwgs/akkaagentic/streaming/api/SseChatEndpoint.java",
+          "src/main/java/com/gwgs/akkaagentic/streaming/api/SseChatEvent.java",
+          "src/main/java/com/gwgs/akkaagentic/streaming/api/StreamingChatEndpoint.java"
+        ).mkString(", ")
+      )
 
-  /** The other half of the claim: the quarantine is one *class*, not one *layer*. The agent and the
-    * domain rule are Scala, so the wall did not spread from the endpoint to what it calls. */
+  /** The other half of the claim: the quarantine is a handful of *api* classes, not whole *layers*.
+    * Both agents' collaborators — the agent and both domain rules — are Scala, so neither wall spread
+    * from an endpoint to what it calls. */
   @Test
-  def theAgentAndTheDomainRuleAreScala(): Unit =
+  def theAgentAndBothDomainRulesAreScala(): Unit =
     val scalaFiles = filesUnder(scalaMain, ".scala")
 
     assertThat(scalaFiles.exists(_.endsWith("application/StreamingChatAgent.scala"))).isTrue()
     assertThat(scalaFiles.exists(_.endsWith("domain/StreamQuestion.scala"))).isTrue()
+    assertThat(scalaFiles.exists(_.endsWith("domain/SseErrorReason.scala"))).isTrue()

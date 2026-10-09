@@ -646,3 +646,47 @@ agent is called. The integration test uses the generated blocking client `Greete
 `grpc-endpoint`, confirmed by the runtime registering the service at startup; `akka-grpc-runtime` arrives
 transitively via `akka-javasdk`.
 
+## Capability 20 — SSE: the SDK's own helper reproduces the defect it was meant to fix
+
+The first capability that is neither a new SDK component family nor a bug fix — a wire-format refinement
+(fork B2). It adds a second streaming surface `POST /sse-chat/{sessionId}` beside cap-14's raw-chunked
+`/stream-chat` (left untouched as the baseline), framing the **same** agent's answer as Server-Sent Events
+with explicit `event: data` / `event: error`, so a failure is self-describing instead of cap-14's silent
+empty `200`.
+
+**SSE is first-class in the SDK, and the 3-arg overload is the one that matters.**
+`HttpResponses.serverSentEvents(source, extractEventId, extractEventType)` renders each element to a `data:`
+frame and labels it with `extractEventType` — so `event: data` / `event: error` is just a sealed envelope
+(`SseChatEvent.Data` / `.ErrorEvent`) mapped to `"data"` / `"error"`. Two costs fall out of the API shape:
+the `data:` payload is **JSON** via the SDK's *internal* mapper (`{"text":"…"}`, not raw text — so clients
+concatenate decoded `text` fields, and the envelope is a **Java** record, the §3 boundary on an SSE surface),
+and the type-setting overload **also requires an id function** with no type-only alternative, so a one-shot
+answer still emits a bare `id:` line per frame.
+
+**The headline is that `serverSentEvents` cannot convey a stream *failure* — it silently empties.** Its
+implementation ends in `.recoverWith(…) → Source.empty()` with the comment *"no natural way to convey stream
+errors to client with SSE — the HTTP response with status is already sent."* A `Throwable` reaching the
+helper is logged server-side and the stream completes **empty and successful-looking** — cap-14's exact
+defect, one level up. So switching to SSE buys nothing *by itself*. The capability's whole value is one
+operator upstream of the helper: `.recover { case t => new SseChatEvent.ErrorEvent(SseErrorReason.reasonFor(t)) }`
+(javadsl `PFBuilder`), which consumes the failure and substitutes a **final element**, so the helper never
+sees a Throwable and the error flows through as an ordinary `event: error` frame. The guards' timeouts
+(`initialTimeout`/`idleTimeout`) raise `TimeoutException` into the stream and are caught by the same
+`.recover`. The error element must be trivially serialisable, or the inner `recoverWith` swallows *its*
+serialisation failure too — so `ErrorEvent` is a flat single-String record.
+
+**Still exactly one Java class per the §16 wall, plus the Java wire type.** The endpoint holds
+`tokenStream(StreamingChatAgent::stream)` (Java method ref), and `SseChatEvent` is Java because the internal
+mapper serialises it. The agent, the domain rule (`StreamQuestion`), the reason mapping (`SseErrorReason`)
+and all the integration tests are Scala; a `JavaQuarantineTest` pins the streaming tree's Java set at exactly
+those three `api` classes across both capabilities.
+
+**Verified live (Ollama `qwen3:8b`), and the live run closed an offline gap.** Happy path streamed
+`event: data` frames (a multibyte emoji survived the framing, beyond the offline `\n` round-trip). A real
+provider error (`OLLAMA_MODEL=does-not-exist`) produced `event: error` / `{"reason":"the request failed"}` —
+the **generic `Failed`** branch that no offline test could reach: offline, a mocked `failWith` goes silent, so
+`initialTimeout` fires and the reason is `TimedOut`; a live provider error materialises as a stream failure
+that `.recover` catches as a non-`TimeoutException`, mapping to `Failed`. The mid-stream "N data frames *then*
+error" ordering over HTTP remains live-only — `TestModelProvider` cannot produce a gap between tokens
+(cap-14's measured limit) — and is pinned instead on a synthetic source using the same `PFBuilder` recover.
+

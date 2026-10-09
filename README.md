@@ -1303,6 +1303,47 @@ writing components in Scala needs explicit workarounds:
     New descriptor key `grpc-endpoint` (confirmed by the runtime registering the service at startup). No
     `pom.xml` change; `akka-grpc-runtime` comes transitively via `akka-javasdk`. See specs/021 research Q-A–Q-E.
 
+22. **SSE framing exists in the SDK — but its helper *silently swallows* a failing stream, so the fix is
+    to convert the failure to an *element* before the helper sees it.** Capability 20
+    (`com.gwgs.akkaagentic.streaming.api.SseChat*`, fork **B2**) adds a second streaming surface
+    `POST /sse-chat/{sessionId}` beside capability 14's raw-chunked `/stream-chat` (left untouched as the
+    baseline). It frames the **same** agent's answer as Server-Sent Events (`text/event-stream`) with explicit
+    `event: data` / `event: error`, so a failure is self-describing instead of cap-14's silent empty `200`
+    (a pre-first-token failure there is byte-identical to a successful empty answer).
+
+    - **The SDK's SSE is first-class, and the 3-arg overload sets the event type.**
+      `HttpResponses.serverSentEvents(source, extractEventId, extractEventType)` renders each element to a
+      `data:` frame (JSON, via the SDK's **internal** mapper) and labels it with `extractEventType`. So
+      `event: data` / `event: error` is achievable by mapping a sealed envelope (`SseChatEvent.Data` /
+      `.ErrorEvent`). Two costs: each `data:` payload is **JSON** (`{"text":"…"}`), not raw text — clients
+      concatenate the decoded `text` fields (the §3 wire-type boundary, now on an SSE surface, so the envelope
+      is a **Java** record); and the type-setting overload **also requires an id function**, so a one-shot
+      answer (no reconnection) still emits a bare **`id:`** line per frame. There is no type-only overload.
+
+    - **THE finding: `serverSentEvents` cannot convey a stream *failure*.** Its implementation ends with
+      `.recoverWith(…) → Source.empty()` and the comment *"no natural way to convey stream errors to client
+      with SSE — the HTTP response with status is already sent."* So a `Throwable` reaching the helper is
+      logged server-side and the stream is **silently completed empty** — cap-14's exact defect, reproduced
+      one level up. The capability's whole value is one line upstream of the helper:
+      `.recover { case t => SseChatEvent.ErrorEvent(SseErrorReason.reasonFor(t)) }` (javadsl `PFBuilder`),
+      which consumes the failure and substitutes a **final element**, so the helper never sees a Throwable and
+      the error flows through as an ordinary `event: error` frame. The error element must be trivially
+      serialisable, or the same inner `recoverWith` swallows *its* serialisation failure too.
+
+    - **Still exactly one Java class per the wall — plus the Java wire type.** The endpoint holds
+      `tokenStream(StreamingChatAgent::stream)` (§16's method-ref wall), so it is Java; `SseChatEvent` is Java
+      because the internal mapper serialises it. The agent, the domain rule (`StreamQuestion`), and the new
+      reason mapping (`SseErrorReason`) are **Scala**, and the capability's own integration tests are Scala. A
+      `JavaQuarantineTest` pins the streaming tree's Java set at exactly those three `api` classes.
+
+    - **Verified live (Ollama `qwen3:8b`), both branches.** Happy path streams `event: data` frames (emoji
+      survived the framing). A real provider error (`OLLAMA_MODEL=does-not-exist`) produced
+      `event: error` / `data: {"reason":"the request failed"}` — the **generic** (`Failed`) reason that no
+      offline test could reach (offline, a mocked failure goes silent, so `initialTimeout` fires and the reason
+      is `TimedOut`; a live provider error materialises as a stream failure that maps to `Failed`). The
+      mid-stream "N data frames *then* error" ordering over HTTP stays live-only (the test model cannot gap
+      between tokens — cap-14's measured limit). See specs/022 research Q-A–Q-H.
+
 ### Calling the gRPC endpoint
 
 The gRPC endpoint is served on the service's HTTP/2 port (dev mode enables reflection), alongside the HTTP
