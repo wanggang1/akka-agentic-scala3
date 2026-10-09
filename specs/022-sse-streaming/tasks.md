@@ -108,12 +108,12 @@ are unchanged.
 
 **Purpose**: record the capability and its findings; run the final gate. Docs are their own commit.
 
-- [ ] T016 Run quickstart.md validation: start the service and exercise the happy-path `curl --no-buffer` from `specs/022-sse-streaming/quickstart.md`; confirm `event: data` frames and clean end-of-stream (SC-005 incremental delivery observable).
-- [ ] T017 [P] Add README "Scala interop notes" §20 documenting: the Q-C headline (serverSentEvents silently empties a failing source; `.recover`-to-element is the fix), the one-Java-class cost (Q-F), JSON `data` payloads (Q-D), and the Q-G heartbeat correction (10 s not 5 s).
-- [ ] T018 [P] Flip ROADMAP.md "Where we are" to capability 20 (fork B2, built & green) and add the table row; note it is the first capability that is neither a new SDK family nor a bug fix — a wire-format refinement (per the "honest shape" caveat).
-- [ ] T019 [P] Add the FINDINGS.md entry for capability 20 (the silent-empty-on-failure finding + heartbeat correction).
-- [ ] T020 [P] Update memory: new finding file for the SSE/serverSentEvents behavior and link it from MEMORY.md; update the roadmap memory `akka-agentic-exploration-roadmap.md` (B2 done; remaining forks B4 available, B3 blocked, B5 design).
-- [ ] T021 Run the full gate `mvn clean verify` and confirm all tests green including cap-14 (SC-004) before declaring done (CLAUDE.md: the gate, not the loop).
+- [X] T016 Run quickstart.md validation: start the service and exercise the happy-path `curl --no-buffer` from `specs/022-sse-streaming/quickstart.md`; confirm `event: data` frames and clean end-of-stream (SC-005 incremental delivery observable).
+- [X] T017 [P] Add README "Scala interop notes" §20 documenting: the Q-C headline (serverSentEvents silently empties a failing source; `.recover`-to-element is the fix), the one-Java-class cost (Q-F), JSON `data` payloads (Q-D), and the Q-G heartbeat correction (10 s not 5 s).
+- [X] T018 [P] Flip ROADMAP.md "Where we are" to capability 20 (fork B2, built & green) and add the table row; note it is the first capability that is neither a new SDK family nor a bug fix — a wire-format refinement (per the "honest shape" caveat).
+- [X] T019 [P] Add the FINDINGS.md entry for capability 20 (the silent-empty-on-failure finding + heartbeat correction).
+- [X] T020 [P] Update memory: new finding file for the SSE/serverSentEvents behavior and link it from MEMORY.md; update the roadmap memory `akka-agentic-exploration-roadmap.md` (B2 done; remaining forks B4 available, B3 blocked, B5 design).
+- [X] T021 Run the full gate `mvn clean verify` and confirm all tests green including cap-14 (SC-004) before declaring done (CLAUDE.md: the gate, not the loop).
 
 **Checkpoint**: docs + memory current; full gate green. COMMIT docs (`docs(022): cap-20 (B2 SSE) — README §20, ROADMAP flip, FINDINGS, memory`). Then open/continue the PR.
 

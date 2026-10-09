@@ -7,25 +7,43 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 
 ## Where we are
 
-> **You are here:** Feature 19 (gRPC endpoint, candidate **A4**) — **built & green on
-> `021-grpc-endpoint`; final gate passed, PR pending** ([`specs/021-grpc-endpoint`](specs/021-grpc-endpoint/)).
-> The repo's **first gRPC endpoint**, and the **last untouched SDK component family** — the map is now
-> complete. A `.proto` defines a unary `Greet` RPC; the SDK generates a **Java** service interface + message
-> classes; a **Scala** `GreeterGrpcEndpointImpl` implements that interface under `@GrpcEndpoint` and fronts
-> capability 1's `greeting-agent` via `dynamicCall`. US1–US3 built and green (happy path, validation →
-> `INVALID_ARGUMENT`, clean build registers the service).
+> **You are here:** Feature 20 (SSE streaming surface, fork **B2**) — **built & green on
+> `022-sse-streaming`; final gate passed, draft PR open** ([`specs/022-sse-streaming`](specs/022-sse-streaming/)).
+> A second streaming surface `POST /sse-chat/{sessionId}` beside capability 14's raw-chunked `/stream-chat`
+> (left **untouched** as the baseline). It frames the **same** agent's answer as Server-Sent Events
+> (`text/event-stream`) with explicit `event: data` / `event: error`, so a failure is self-describing instead
+> of cap-14's silent empty `200`. **The first capability that is neither a new SDK component family nor a bug
+> fix — a wire-format refinement of an existing surface.** US1–US3 built and green (data-frame parity incl. a
+> newline round-trip; `.recover`→`event: error`; cap-14 untouched).
 >
-> **Interop verdict — the only real risk was build ordering, and it did not bite.** Unlike every capability
-> since §4, the method-reference wall is *not* the story: fronting an **agent** (not an entity) keeps the
-> endpoint Scala (the agent client's `dynamicCall` is on the right side of the wall, §15). The actual A4 bet
-> was the scalac-then-javac build (§13 R3, broken twice before). It held on the first clean run: the parent's
-> `generate-protobuf-endpoints` profile is **auto-activated by `src/main/proto` existing** (no `pom.xml`
-> edit), runs `akka-grpc-maven-plugin` at **`generate-sources`** — *before* this project's `process-resources`
-> scalac — and with `sendJavaToScalac=true` a Scala class compiles against a generated Java interface that did
-> not exist until mid-build. The honest shape is **Scala endpoint over Java-generated stubs**: `blockingApis`
-> gives a Java interface, the messages are Java (builders), ScalaPB is not usable — the cap-3 wire-type
-> exception, now at a code-generated surface. `generateScalaHandlerFactory` is a red herring (emits `.java`).
-> New descriptor key `grpc-endpoint`, confirmed by the runtime registering the service. See specs/021 Q-A–Q-E.
+> **Interop verdict — the SDK's SSE helper swallows a failing stream, so the capability *is* catching the
+> failure before the helper does.** `HttpResponses.serverSentEvents(source, idFn, typeFn)` is first-class and
+> its 3-arg overload sets the `event:` type — but its implementation ends in `.recoverWith(…) → Source.empty()`
+> with the comment *"no natural way to convey stream errors to client with SSE."* So a `Throwable` reaching it
+> is logged and the stream silently completes empty — cap-14's defect, one level up. The fix is one line
+> upstream: `.recover { case t => SseChatEvent.ErrorEvent(SseErrorReason.reasonFor(t)) }` turns the failure
+> into a **final element**, which flows through as a normal `event: error` frame. Costs: `data:` payloads are
+> **JSON** via the internal mapper (so the envelope is a **Java** record — §3 boundary on an SSE surface), and
+> the type-setting overload drags along an id function (a bare `id:` line per frame; no type-only overload).
+> Still exactly **one Java class** per the §16 wall (the endpoint) plus the Java wire type; agent, domain rule
+> and `SseErrorReason` are Scala, as are the tests. **Verified live on Ollama `qwen3:8b`:** happy path streams
+> `event: data` (emoji survived); `OLLAMA_MODEL=does-not-exist` produced `event: error` /
+> `{"reason":"the request failed"}` — the generic `Failed` branch offline could not reach. See specs/022
+> research Q-A–Q-H and README §22.
+>
+> **Previously:** Feature 19 (gRPC endpoint, candidate **A4**) — **✅ merged to `main` 2026-10-09 (PR #43,
+> merge `c5919af`)** ([`specs/021-grpc-endpoint`](specs/021-grpc-endpoint/)). The repo's **first gRPC
+> endpoint** and the **last untouched SDK component family** — so all four component families are now built in
+> Scala. A `.proto` unary `Greet` RPC; the SDK generates a **Java** service interface + messages; a **Scala**
+> `GreeterGrpcEndpointImpl` implements it under `@GrpcEndpoint` and fronts capability 1's `greeting-agent` via
+> `dynamicCall`. **Interop verdict — the only real risk was build ordering, and it did not bite.** The
+> method-reference wall is *not* the story (fronting an **agent** keeps the endpoint Scala, §15); the actual
+> bet was scalac-then-javac (§13 R3). The parent's `generate-protobuf-endpoints` profile is auto-activated by
+> `src/main/proto` existing, runs `akka-grpc-maven-plugin` at `generate-sources` before this project's
+> `process-resources` scalac, and with `sendJavaToScalac=true` a Scala class compiles against a generated Java
+> interface. Honest shape: **Scala endpoint over Java-generated stubs** (`blockingApis`, Java messages, ScalaPB
+> unusable — the cap-3 wire-type exception at a code-generated surface). New descriptor key `grpc-endpoint`.
+> See specs/021 Q-A–Q-E.
 >
 > **Previously:** Feature 18 (event-sourced wallet, candidate **A3**) — **✅ merged to `main`
 > 2026-10-04 (PR #41)** ([`specs/020-event-sourced-wallet`](specs/020-event-sourced-wallet/)). The
@@ -220,6 +238,8 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 | 16 | **Reacting to activity — Consumer** (candidate A2) — a Scala `Consumer` over capability 6's `TodoEntity` keeps an activity feed (`GET /todo-activity`, `/{username}`, `/set-aside`) and publishes each change to the `todo-activity` topic. **Headline: the family is Scala-clean end to end — NO JAVA IN PRODUCTION** (first since cap-13), against cap-11's View on the *same* entity needing a Java querying endpoint: same source, two projections, two verdicts. The real finding is the failure contract — a throwing handler is redelivered **without limit** and **blocks every other entity** until it stops (measured schedule, doubling to 27.6 s+), so the consumer bounds its own attempts and sets a delivery aside; the SDK exposes no attempt number and `ce-id` changes per redelivery, so the key is the message's content. Also: the TestKit's key-value mock **drops** failing messages (false green → failure tested on the real path); a handler is chosen by **parameter type** (wrong type = starts, never called); one `@Produce.ToTopic` stops the whole service booting without topic support; the consumer **resumes** after a restart and replays nothing | [`specs/018-event-consumer`](specs/018-event-consumer/) | ✅ Done — merged (PR #33) |
 | 17 | **Session compaction** (fork B1) — when a session's history passes `compaction.max-bytes` it is replaced by a prose summary; applies to **every** session, so caps 4/6/14 gain the bound un-edited (empty `git diff`). `GET /compaction[/{sessionId}]` reports what happened. **Headline: the wall claims a THIRD method of the agent client** — `withDetailedReply` is method-ref only, after `invoke` (rescued) and `tokenStream` (not), so `dynamicCall` means *plain request/response and nothing else*. ONE Java class holds all three method refs and **no logic**, because a Java caller cannot construct a Scala 3 `enum` case. Also: a Scala consumer reaches the runtime-owned `SessionMemoryEntity`; `compactHistory` **merges** (events after the sequence number are replayed on top) and reports nothing either way, so success is verified by re-reading; a `ServiceSetup.onStartup` failure does **not** stop the service, and a per-message constructor turns a throw into a **40-redelivery loop**, so bad config is loud once and degrades to off. **Four of its findings were corrections of things this project had already written down** | [`specs/019-session-compaction`](specs/019-session-compaction/) | ✅ Done — merged (PR #37) |
 | 18 | **Event-sourced wallet — Event Sourced Entity** (candidate A3, the repo's first ESE) — a `Wallet` ledger (`POST /wallets/{id}/{open,deposit,withdraw,close}`, `GET /wallets/{id}`) whose balance is a fold over `Opened`/`Deposited`/`Withdrawn`/`Closed` events; rejected commands persist nothing. **Headline: a Scala 3 sum type cannot be the event hierarchy, for TWO independent reasons** — an `enum` serializes but can't be read back ("cannot reflectively create enum objects"); a `sealed trait` round-trips through the mapper but **fails the SDK's "must be a sealed interface" startup validation** (Scala 3.3.8 emits no JVM sealed). This **corrects** the old "sum types can't cross the mapper" shorthand: it's a *second* gate. So events are **one Java file**; the entity + `Wallet` state stay Scala (state round-trips, no sealed gate); the caller is Java (entity client method-ref-only). Also: the unit `EventSourcedTestKit` needs a Java method ref (Scala lambda → `ClassCastException`); `@TypeName` and `snapshot-every` are **service-global**; build ordering held for a same-package Scala→Java ref. No model anywhere | [`specs/020-event-sourced-wallet`](specs/020-event-sourced-wallet/) | ✅ Done — merged (PR #41) |
+| 19 | **gRPC endpoint — Scala over Java-generated stubs** (candidate A4, the repo's first gRPC endpoint and the **last untouched SDK component family**) — a `.proto` unary `Greet` RPC; a Scala `GreeterGrpcEndpointImpl` implements the protoc-generated **Java** interface under `@GrpcEndpoint` and fronts cap-1's `greeting-agent` via `dynamicCall`; blank `user`/`text` → `INVALID_ARGUMENT` before the agent is called. **Headline: the real bet was BUILD ORDERING, and it held from clean** — the parent's `generate-protobuf-endpoints` profile is auto-activated by `src/main/proto` existing (no `pom.xml` edit), runs akka-grpc codegen at `generate-sources` *before* this project's `process-resources` scalac, so with `sendJavaToScalac=true` a Scala class compiles against a Java interface that didn't exist until mid-build. The method-ref wall is NOT the story (fronting an agent keeps it Scala, §15). Honest shape: Scala endpoint over Java-generated stubs (`blockingApis`, Java messages, ScalaPB unusable — the §3 wire-type exception at a code-generated surface). New descriptor key `grpc-endpoint` | [`specs/021-grpc-endpoint`](specs/021-grpc-endpoint/) | ✅ Done — merged (PR #43) |
+| 20 | **SSE streaming surface** (fork B2) — a second streaming surface `POST /sse-chat/{sessionId}` beside cap-14's raw-chunked `/stream-chat` (left **untouched** as baseline); frames the **same** agent's answer as Server-Sent Events (`text/event-stream`) with explicit `event: data` / `event: error`, so a failure is self-describing instead of cap-14's silent empty `200`. **The first capability that is neither a new SDK family nor a bug fix — a wire-format refinement.** **Headline: the SDK's `serverSentEvents` SILENTLY EMPTIES a failing stream** (its own code: `.recoverWith → Source.empty()`, *"no natural way to convey stream errors to client with SSE"*), reproducing cap-14's defect one level up — so the capability IS the one line upstream: `.recover { case t => ErrorEvent(reasonFor(t)) }` turns the failure into a final **element** the helper passes through as `event: error`. The 3-arg overload sets the `event:` type but drags along an id fn (bare `id:` per frame; no type-only overload); `data:` payloads are JSON via the internal mapper (envelope is a **Java** record — §3 on an SSE surface). Still one Java class per §16 wall + the Java wire type; agent/rule/`SseErrorReason`/tests are Scala. **Verified live (Ollama `qwen3:8b`):** happy path streams `event: data` (emoji survived); a bogus model → `event: error` / `{"reason":"the request failed"}` = the generic `Failed` branch offline couldn't reach | [`specs/022-sse-streaming`](specs/022-sse-streaming/) | ✅ Done — draft PR open |
 
 **Status legend:** ✅ done · 📋 planned (spec written) · 🚧 in progress · ⬜ not started
 
@@ -357,7 +377,7 @@ first fixes something that is actually wrong today.
 | # | Fork | Where it was recorded | Why it was declined then |
 |---|---|---|---|
 | **B1** | **Session compaction** — ✅ **built as capability 17 (PR #37); the motivation was corrected by its own probe** (see row 17) — summarise old turns instead of letting the oldest be discarded | cap-6 (README §8, live caveat) | `readLast(N)` orphans tool-call pairs and breaks tool-using sessions, so cap-6 keeps **full history**. ⚠️ **Motivation corrected by capability 17's Phase 0 probe (specs/019 S-1/S-2):** history is NOT unbounded — the SDK bounds it at **510 KiB** by default — and that bound is **turn-aligned and safe**, so no orphan risk is latent. What remains is real but narrower: 510 KiB is ~100k+ tokens re-sent per turn, and FIFO eviction discards the oldest turns leaving nothing behind. Compaction shrinks history **while keeping what it meant**. |
-| **B2** | **SSE framing for the streaming surface** | cap-14 (research, contract, `docs/streaming-vs-request-response.md`) | Deliberately not taken: it would make a pre-token failure self-describing instead of a normally-completed empty `200`, but it changes the wire format for **every** client, for a failure path. |
+| **B2** | **SSE framing for the streaming surface** — ✅ **built as capability 20 (draft PR open); the interop bet is resolved** (see row 20) | cap-14 (research, contract, `docs/streaming-vs-request-response.md`) | Was deliberately deferred: it makes a pre-token failure self-describing instead of a normally-completed empty `200`, at the cost of a richer wire format for every client. **Built as a NEW parallel surface** (`/sse-chat`), cap-14 left untouched, so the cost falls only on clients that opt in. The sharp finding was unforeseen: the SDK's SSE helper itself silently empties a failing stream, so the fix is to convert failure→element upstream. |
 | **B3** | **Delegation observability via runtime notifications** — ⚠️ **one route measured and ruled out** (cap-16): a Scala consumer *can* read the runtime-owned `TaskEntity`, but a live cap-7 run created **no tasks** for its request-based specialists, so task events cannot say which ran | cap-7 (D6) | `consultedSpecialists` is **model self-reported** and small models under-report it. Ground truth needs the runtime's notification stream — which pairs naturally with **A2**, and is the reason to consider them together. |
 | **B4** | **Usage-accurate citations** | cap-8 (README, "Future work") | Cap-8 cites what was **retrieved**, not what was **used**. Fixing it means asking the model which sources it used — reintroducing exactly the self-report unreliability cap-8 was built to avoid. A genuine tension, not a free upgrade. |
 | **B5** | **Streaming + grounded answer** | cap-14 (spec, Assumptions) | Forked out of cap-14 on purpose: a tool call *inside* a stream is undocumented on this SDK, and citations cannot honestly follow text already sent. |

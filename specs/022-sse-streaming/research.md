@@ -187,6 +187,50 @@ endpoint, so it adds **no new** Java beyond the one class the wall already requi
 
 ---
 
+## Q-H — Live validation (T016), against real Ollama `qwen3:8b`
+
+Run after implementation, to confirm the offline findings and close the offline-only gaps. Both paths
+verified end to end through the live SSE surface.
+
+**Happy path** — `POST /sse-chat/demo-1`, "Say hello in one short sentence.":
+
+```
+data:{"text":"Hello! How can"}
+event:data
+id:
+
+data:{"text":" I assist you today?"}
+event:data
+id:
+
+data:{"text":" 😊"}
+event:data
+id:
+```
+
+Confirms: `event: data` frames, JSON `data:` payloads (Q-D), incremental arrival, and a multibyte emoji
+surviving the framing byte-for-byte (FR-007, beyond the offline `\n` case). Also observed, and worth
+recording: Akka HTTP emits the SSE fields in the order **`data:` then `event:` then `id:`**, and the
+no-op id function (Q-E) renders as a bare **`id:`** line on every frame — harmless but real noise, the
+price of the 3-arg overload being the only one that sets event type.
+
+**Real provider error** — service restarted with `OLLAMA_MODEL=does-not-exist-99b`, same request:
+
+```
+data:{"reason":"the request failed"}
+event:error
+id:
+```
+
+**This closes the gap the offline tests flagged as live-only.** Offline, a `failWith` turn goes silent,
+so `initialTimeout` fires and the reason is `TimedOut`. Live, a genuine provider error materialises as a
+stream failure that `.recover` catches as a **non-`TimeoutException`**, mapping to **`Failed`** ("the
+request failed") — the generic branch of `SseErrorReason` that no offline test could reach. So both
+branches of the reason mapping are now measured, and the capability's whole point — a failure is a
+self-describing `event: error` frame, not a silent empty `200` — is confirmed against a real model.
+
+---
+
 ## Summary of decisions feeding Phase 1
 
 | # | Decision |

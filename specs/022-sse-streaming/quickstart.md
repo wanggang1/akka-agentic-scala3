@@ -15,16 +15,27 @@ mvn compile                 # fast check while building
 mvn test -Dtest='SseChat*'  # the new tests, once they exist
 ```
 
-Local service + live call:
+Local service + live call (uses local Ollama by default — no API key, no network):
 
 ```bash
-mvn compile exec:java        # start the service (port 9000)
+# 1. Start Ollama and pull the default model (once). Ollama serves on :11434.
+#    macOS: `brew install ollama` then `ollama serve` (or launch the Ollama app).
+ollama serve &                 # if not already running as a service
+ollama pull qwen3:8b           # the model application.conf defaults to (OLLAMA_MODEL overrides)
 
-# happy path — watch frames arrive incrementally
+# verify Ollama is up
+curl -s http://localhost:11434/api/tags >/dev/null && echo "ollama up"
+
+# 2. Start the service (port 9000); it talks to local Ollama out of the box.
+mvn compile exec:java
+
+# 3. Happy path — watch frames arrive incrementally.
 curl --no-buffer -N -X POST http://localhost:9000/sse-chat/demo-1 \
   -H 'Content-Type: application/json' \
   -d '{"message":"Explain durable execution in two sentences."}'
 ```
+
+To use Gemini instead of Ollama: `GOOGLE_AI_GEMINI_API_KEY=… MODEL_PROVIDER=googleai-gemini mvn compile exec:java`.
 
 Expect `event: data` frames whose `data: {"text":...}` payloads concatenate to the answer, then a clean
 end-of-stream.
