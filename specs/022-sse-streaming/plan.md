@@ -105,11 +105,15 @@ recorded finding, not silent drift.
 
 ## Descriptor note
 
-`SseChatEndpoint` is an HTTP endpoint (no `@Component`), so — like cap-14 — it needs **no** entry in the
-hand-maintained Scala component descriptor (`scala-akka-component-descriptor`). Confirm during
-implementation that no descriptor change is required (endpoints are discovered differently from
-components). This is a `mvn clean verify`-class check (CLAUDE.md test-selection table: touching the
-endpoint surface → run this capability's integration tests; the final gate is full `clean verify`).
+⚠️ **CORRECTED during implementation (T002).** The initial assumption — "an HTTP endpoint is not a
+component, so it needs no descriptor entry" — is **wrong for this project**. The mixed build runs the
+javac annotation processor OFF (`-proc:none`, memory `akka-mixed-java-scala-descriptor-proc-none`), so
+there is no auto-discovery for *anything*: every component is hand-listed, Java endpoints included.
+Cap-14's **Java** `StreamingChatEndpoint` is registered at line 96 of
+`src/main/resources/META-INF/akka-javasdk-components_com.gwgs_akka-agentic-scala3.conf`. So the new
+`SseChatEndpoint.java` **must** be added there too (T008b); omitting it means the route 404s at runtime.
+The data types (`SseChatEvent`, `SseErrorReason`) are not components and need no entry. This is a
+`mvn clean verify`-class check (CLAUDE.md test-selection table: the component descriptor row).
 
 ## Phase sequencing (for /akka.tasks)
 
