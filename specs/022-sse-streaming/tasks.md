@@ -97,8 +97,8 @@ are unchanged.
 **Independent Test**: cap-14's existing streaming tests pass unmodified; `/stream-chat` still returns
 `text/plain` chunked (SC-004).
 
-- [ ] T014 [US3] Run cap-14's existing streaming tests unchanged and confirm green: `mvn verify -Dit.test='StreamingChat*IntegrationTest' -Dtest='!*' -DfailIfNoTests=false` (plus `StreamQuestionTest`). Confirm `StreamingChatEndpoint.java` has zero diff (FR-010).
-- [ ] T015 [US3] Update `JavaQuarantineTest` (cap-14's quarantine pin, in `src/test/scala/com/gwgs/akkaagentic/streaming/...`) to expect exactly the two new Java files (`SseChatEndpoint.java`, `SseChatEvent.java`) alongside cap-14's `StreamingChatEndpoint.java`, so quarantine growth is a recorded finding, not silent drift (plan "Structure Decision").
+- [X] T014 [US3] Run cap-14's existing streaming tests unchanged and confirm green: `mvn verify -Dit.test='StreamingChat*IntegrationTest' -Dtest='!*' -DfailIfNoTests=false` (plus `StreamQuestionTest`). Confirm `StreamingChatEndpoint.java` has zero diff (FR-010).
+- [X] T015 [US3] Update `JavaQuarantineTest` (cap-14's quarantine pin, in `src/test/scala/com/gwgs/akkaagentic/streaming/...`) to expect exactly the two new Java files (`SseChatEndpoint.java`, `SseChatEvent.java`) alongside cap-14's `StreamingChatEndpoint.java`, so quarantine growth is a recorded finding, not silent drift (plan "Structure Decision").
 
 **Checkpoint**: baseline green and untouched; quarantine pinned. COMMIT (`test(022): cap-20 US3 — cap-14 baseline regression + quarantine pin`). STOP for approval.
 
