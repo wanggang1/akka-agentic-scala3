@@ -1,6 +1,7 @@
 package com.gwgs.akkaagentic.streaming.api;
 
 import akka.http.javadsl.model.HttpResponse;
+import akka.japi.pf.PFBuilder;
 import akka.javasdk.annotations.Acl;
 import akka.javasdk.annotations.http.HttpEndpoint;
 import akka.javasdk.annotations.http.Post;
@@ -9,6 +10,7 @@ import akka.javasdk.http.HttpResponses;
 import akka.stream.javadsl.Source;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.gwgs.akkaagentic.streaming.application.StreamingChatAgent;
+import com.gwgs.akkaagentic.streaming.domain.SseErrorReason;
 import com.gwgs.akkaagentic.streaming.domain.StreamQuestion;
 import com.typesafe.config.Config;
 import scala.Option;
@@ -96,11 +98,20 @@ public class SseChatEndpoint {
     Source<SseChatEvent, ?> events =
         tokens
             // Fail if the model never produces a first token, or stalls after it began — otherwise the
-            // stream hangs. US2 turns these failures into a final event: error frame via .recover.
+            // stream hangs. Both guards raise a TimeoutException INTO the stream (FR-009).
             .initialTimeout(duration(FIRST_TOKEN_TIMEOUT_KEY, DEFAULT_FIRST_TOKEN_TIMEOUT))
             .idleTimeout(duration(IDLE_TIMEOUT_KEY, DEFAULT_IDLE_TIMEOUT))
             .groupedWithin(GROUP_SIZE, GROUP_WINDOW)
-            .map(group -> (SseChatEvent) new SseChatEvent.Data(String.join("", group)));
+            .map(group -> (SseChatEvent) new SseChatEvent.Data(String.join("", group)))
+            // THE load-bearing move (research Q-C): convert a stream failure — a model error, or one of
+            // the timeout guards above — into a FINAL event: error element, so it flows through as a
+            // normal frame. Without this, a Throwable reaching serverSentEvents is logged and the stream
+            // is silently emptied (the SDK's own recoverWith: "no natural way to convey stream errors to
+            // client with SSE"), which would reproduce cap-14's silent-empty-200 defect over SSE.
+            .recover(
+                new PFBuilder<Throwable, SseChatEvent>()
+                    .matchAny(t -> new SseChatEvent.ErrorEvent(SseErrorReason.reasonFor(t)))
+                    .build());
 
     return HttpResponses.serverSentEvents(events, SSE_EVENT_ID, SSE_EVENT_TYPE);
   }
