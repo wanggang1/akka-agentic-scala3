@@ -1380,6 +1380,13 @@ writing components in Scala needs explicit workarounds:
       bottleneck (the model *can* report — see the 1-of-3 / 2-of-3 cases), so a stronger model is the natural
       follow-up, and needs one beyond the free-tier local one. See specs/023 research R6.
 
+    - **Sharper (3 more runs of the same question):** the model's problem is *mirroring* its source into the
+      structured field, not *identifying* it. On two runs it wrote an inline `[1]` marker into the answer
+      prose — it knew it used source [1] — but only one of those also populated `usedSources`. So the
+      under-reporting is a structured-output *population* inconsistency; the attribution signal is present
+      (the `[1]`), it just doesn't reliably reach the typed field. A prompt tweak to suppress inline markers
+      and push labels into `usedSources` is a candidate follow-up — a model-reliability gamble, not a sure win.
+
     ```bash
     # Usage-accurate: only the source(s) the model reports using, a subset of what was retrieved.
     curl -s -X POST http://localhost:9000/cited-ask -H "Content-Type: application/json" \
