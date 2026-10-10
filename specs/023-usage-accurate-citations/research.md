@@ -140,6 +140,31 @@ out-of-corpus decline. Each retrieved K=3.
   structured schema are not the bottleneck — #2/#3 prove the model *can* do it); that is the natural
   follow-up, and needs a model beyond the free-tier local one.
 
+**SHARPER OBSERVATION (post-merge, 3 more live runs of the *same* question "what makes agent work survive a
+restart?").** This refines the finding above: the model's problem is **mirroring** its source into the
+structured field, not *identifying* it. The three runs:
+
+| run | answer text | `usedSources` | `citedSources` |
+|---|---|---|---|
+| 1 | "…recovery after crashes or restarts. No additional workflow…" (no marker) | `[]` | `[]` |
+| 2 | "…recovery after crashes or restarts **[1]**." | `[]` | `[]` |
+| 3 | "…recovery after crashes or restarts **[1]**." | `["durability-tasks"]` | `["durability-tasks"]` |
+
+In runs 2 **and** 3 the model wrote an inline **`[1]`** marker into the *answer prose* — i.e. it *did*
+identify that it used source [1] (= `durability-tasks`) — but only run 3 propagated that into the structured
+`usedSources` field. So the under-reporting is specifically a **structured-output population inconsistency**:
+the attribution exists in the model's output (it emits `[1]`), it just doesn't reliably reach the typed field.
+This is a more precise, and more hopeful, characterisation than "the model doesn't report its sources" — the
+signal is there to be captured.
+
+Two consequences worth recording (neither acted on in this capability — candidate follow-ups):
+- **The `[1]` marker leaks into the answer prose** — a numbering the caller never sees (the prompt presents
+  sources as `[n] (label) text`, so the model naturally echoes `[n]`). A mild output artifact.
+- **A prompt tweak is the obvious lever** ("do not put citation markers in the answer; list the labels only
+  in `usedSources`"), and might both clean the prose and improve field population. But it is a model-reliability
+  gamble, not a guaranteed win, and parsing `[n]` out of the prose as a fallback would re-introduce the
+  fragile numbering→label mapping the structured field exists to avoid. Left as future work, honestly flagged.
+
 ## R7 — Endpoint surface
 
 **Decision:** New endpoint class `CitedDocsEndpoint` (`@HttpEndpoint`, `POST /cited-ask`), injecting
