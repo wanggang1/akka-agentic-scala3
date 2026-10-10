@@ -1344,6 +1344,59 @@ writing components in Scala needs explicit workarounds:
       mid-stream "N data frames *then* error" ordering over HTTP stays live-only (the test model cannot gap
       between tokens — cap-14's measured limit). See specs/022 research Q-A–Q-H.
 
+23. **Usage-accurate citations re-open self-report on purpose — and the measured failure is *under*-reporting,
+    not hallucination, which is exactly what the honesty floor is designed for.** Capability 21
+    (`com.gwgs.akkaagentic.docs.{domain.UsageCitations, application.CitingDocsAgent, api.CitedDocsEndpoint}`,
+    fork **B4**) adds a second RAG surface `POST /cited-ask` beside capability 8's `/ask` (left untouched).
+    Cap-8 cites every passage it **retrieved** (ground truth, but over-inclusive); this surface asks the model
+    which sources it actually **used** (structured output `{answer, usedSources}`) and cites only those. That
+    deliberately reintroduces the self-report unreliability cap-8 was built to avoid (cap-7's D6, §9) — the
+    point of the capability is to **measure** that trade on this stack, not to assume it.
+
+    - **No new interop ground; it reuses proven pieces.** Structured output is
+      `responseConformsTo(classOf[CitedAnswer])` — the same mechanism as the §15 evaluator, and `CitedAnswer`
+      is a **Java-shaped** record (the §3 internal-mapper boundary). It is a *new* agent only because an `Agent`
+      has one command handler and cap-8's returns a bare `String`, which also leaves cap-8 literally untouched.
+      The citation decision is a pure, framework-free domain function (`UsageCitations.select`), unit-tested in
+      isolation. `citing-docs-agent` is deliberately **ungoverned** (cap-12's guardrails attach to `docs-agent`
+      only) — a recorded scope boundary, not an oversight.
+
+    - **The honesty floor.** A self-reported label is cited only if it was also genuinely retrieved
+      (`reported ∩ retrieved`), so self-report can only ever *narrow* the ground-truth set, never invent a
+      citation. A decline cites nothing; a non-decline answer whose reported sources don't intersect the
+      retrieved set cites nothing too (FR-007 — we do **not** fall back to cap-8's full set, so an unverifiable
+      usage claim stays visible instead of being papered over). The reply carries **both** `citedSources`
+      (usage-accurate) and `retrievedSources` (ground truth) so the divergence is observable from one response.
+
+    - **THE finding (measured live, Ollama `qwen3:8b`, 6 runs).** The unreliability is **under-reporting, not
+      hallucination.** The floor held perfectly — across every run *no* cited label was ever un-retrieved (0
+      invariant violations) — and when the model named sources it even narrowed *correctly* (1-of-3 and 2-of-3,
+      dropping the irrelevant passage). But **3 of 5** grounded answers returned an **empty** `usedSources`
+      (stable across a re-run) despite answers plainly grounded in a retrieved passage, so `/cited-ask` cited
+      nothing. Precision is excellent *when it reports*; the recall of the reporting itself is poor on an 8B
+      local model. On the very question cap-8 uses to illustrate *over*-citation ("survive a restart"), B4 on
+      this model cites **nothing** — it trades over-citation for **under**-citation. Opposite failure modes of
+      the same hard problem; B4's is at least honest about its own uncertainty. The prompt/schema are not the
+      bottleneck (the model *can* report — see the 1-of-3 / 2-of-3 cases), so a stronger model is the natural
+      follow-up, and needs one beyond the free-tier local one. See specs/023 research R6.
+
+    ```bash
+    # Usage-accurate: only the source(s) the model reports using, a subset of what was retrieved.
+    curl -s -X POST http://localhost:9000/cited-ask -H "Content-Type: application/json" \
+      -d '{"question":"how does the coordinator pick which specialist to consult?"}'
+    # {"answer":"The coordinator's model selects specialists at runtime ...",
+    #  "citedSources":["cap-7-activity-coordinator"],
+    #  "retrievedSources":["cap-7-activity-coordinator","cap-6-delegation","cap-3-help-desk"]}
+
+    # Under-report in the wild: a clearly-grounded answer the model fails to attribute -> cite nothing,
+    # NOT a fallback to the full retrieved set (FR-007). The divergence is visible, not masked.
+    curl -s -X POST http://localhost:9000/cited-ask -H "Content-Type: application/json" \
+      -d '{"question":"what makes agent work survive a restart without writing persistence code?"}'
+    # {"answer":"The agent's task and process state are automatically persisted ...",
+    #  "citedSources":[],
+    #  "retrievedSources":["durability-tasks","cap-3-help-desk","cap-4-session-memory"]}
+    ```
+
 ### Calling the gRPC endpoint
 
 The gRPC endpoint is served on the service's HTTP/2 port (dev mode enables reflection), alongside the HTTP
