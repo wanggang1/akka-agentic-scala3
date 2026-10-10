@@ -106,7 +106,39 @@ usage-accurate intersection, and a judgement of subset-faithfulness (no hallucin
 R4; and whether the model under-reported a genuinely-used source, judged by reading the answer). The
 headline number is how far self-report narrows the retrieved set and whether that narrowing is trustworthy.
 
-**UNVERIFIED until the live run.** No faithfulness claim is made here in advance.
+**MEASURED (2026-10-10, live, Ollama `qwen3:8b`).** Six runs — five in-corpus grounded answers, one
+out-of-corpus decline. Each retrieved K=3.
+
+| # | Question (abbrev) | retrieved | model `usedSources` → `citedSources` | verdict |
+|---|---|---|---|---|
+| 1 | survive a restart | durability-tasks, cap-3-help-desk, cap-4-session-memory | **[]** → [] | **under-reported** (answer clearly used durability-tasks) |
+| 2 | coordinator picks specialist | cap-7-activity-coordinator, cap-6-delegation, cap-3-help-desk | [cap-7-activity-coordinator] → **[cap-7-activity-coordinator]** | **faithful + precise** (1 of 3) |
+| 3 | why Java not Scala | interop-method-ref-wall, interop-two-mapper, durability-tasks | [interop-method-ref-wall, interop-two-mapper] → **same (2 of 3)** | **faithful + precise** (dropped the irrelevant 3rd) |
+| 4 | remember across requests | cap-6-delegation, cap-4-session-memory, cap-1-greeting | **[]** → [] | **under-reported** (answer clearly used cap-4-session-memory) |
+| 5 | capital of France (out-of-corpus) | cap-3-help-desk, cap-1-greeting, cap-7-activity-coordinator | decline → **[]** | **correct decline** |
+| 6 | survive a restart (re-run of #1) | durability-tasks, cap-3-help-desk, cap-4-session-memory | **[]** → [] | **under-reported, stable** |
+
+**The finding — the unreliability is UNDER-reporting, not hallucination.**
+- **The honesty floor held perfectly:** across every run, *no* cited label was ever one that was not
+  retrieved — 0 invariant violations (SC-002). When qwen3 named a source, it was always a real one, and on
+  #2/#3 it even narrowed correctly to exactly the passages the answer used. So the half of the cap-7-D6
+  fear that is about *fabricated* citations did **not** materialise: the intersection prevents it by
+  construction, and the model never even tried.
+- **But qwen3:8b under-reports badly:** 3 of 5 grounded answers (#1, #4, #6 — and #1/#6 show it is *stable*,
+  not a fluke) returned an **empty** `usedSources` despite an answer plainly grounded in a retrieved
+  passage. B4 then cites nothing. Precision is excellent *when it reports*; the recall of the reporting
+  itself is poor on an 8B local model.
+- **This vindicates FR-007 ("cite nothing").** Because we did **not** fall back to cap-8's full retrieved
+  set, the under-report is **visible in the wire output** (`citedSources: []` beside a non-empty
+  `retrievedSources` and a real answer) — which is the whole point of the measurement. Falling back would
+  have silently masked it.
+- **The crisp comparison with cap-8:** on the very question cap-8's README uses to illustrate
+  *over*-citation ("survive a restart" → cap-8 cites all three), B4 on this model cites **nothing** — it
+  trades cap-8's over-citation for under-citation. Neither is "correct"; they are opposite failure modes of
+  the same hard problem, and B4's is at least honest about its own uncertainty rather than confidently
+  over-inclusive. A larger/stronger model would likely report more of its used sources (the prompt and
+  structured schema are not the bottleneck — #2/#3 prove the model *can* do it); that is the natural
+  follow-up, and needs a model beyond the free-tier local one.
 
 ## R7 — Endpoint surface
 
