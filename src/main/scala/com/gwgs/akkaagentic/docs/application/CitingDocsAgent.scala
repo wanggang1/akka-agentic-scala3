@@ -8,7 +8,7 @@ import com.fasterxml.jackson.annotation.{JsonCreator, JsonProperty}
 import com.gwgs.akkaagentic.docs.application.DocsAgent.DontKnow
 import org.slf4j.LoggerFactory
 
-/** Capability B4 (feature 023): the usage-reporting twin of [[DocsAgent]].
+/** Capability 21 (fork B4, feature 023): the usage-reporting twin of [[DocsAgent]].
   *
   * [[DocsAgent]] answers grounded in the retrieved passages and the endpoint cites **everything it
   * retrieved** — ground truth, but over-inclusive. This agent instead asks the model which sources it

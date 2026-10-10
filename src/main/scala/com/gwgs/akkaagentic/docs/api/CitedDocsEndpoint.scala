@@ -13,7 +13,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.gwgs.akkaagentic.docs.application.{CitingDocsAgent, DocsAgent, KnowledgeStore}
 import com.gwgs.akkaagentic.docs.domain.{AskQuestion, UsageCitations}
 
-/** Capability B4 (feature 023). `POST /cited-ask` — the **usage-accurate** twin of cap-8's `/ask`.
+/** Capability 21 (fork B4, feature 023). `POST /cited-ask` — the **usage-accurate** twin of cap-8's `/ask`.
   *
   * Same corpus, same retrieval, same grounding. The difference is the citation: cap-8 cites every
   * retrieved passage (ground truth, over-inclusive); this surface asks [[CitingDocsAgent]] which sources
