@@ -1,6 +1,6 @@
 # Contract: `POST /cited-ask`
 
-A new, parallel RAG surface (feature 023 / cap-B4). Cap-8's `POST /ask` is unchanged (FR-001, SC-004).
+A new, parallel RAG surface (capability 21, fork B4 / feature 023). Cap-8's `POST /ask` is unchanged (FR-001, SC-004).
 
 ## Request
 

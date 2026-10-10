@@ -1,7 +1,7 @@
 package com.gwgs.akkaagentic.docs.domain
 
-/** The citation-honesty rule for capability B4 (feature 023), kept framework-free so it is provable in
-  * isolation (constitution §II/§III).
+/** The citation-honesty rule for capability 21 (fork B4, feature 023), kept framework-free so it is
+  * provable in isolation (constitution §II/§III).
   *
   * Capability 8 cites every passage it **retrieved**; this capability cites only the ones the model
   * reports **using**. But a model that self-reports its sources is unreliable (capability 7's D6 finding,

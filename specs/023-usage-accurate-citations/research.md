@@ -1,4 +1,4 @@
-# Research: Usage-accurate citations (feature 023 / cap-B4)
+# Research: Usage-accurate citations (capability 21, fork B4 / feature 023)
 
 Phase 0. Findings are recorded here **as measured** (CLAUDE.md). Anything not yet measured is marked
 UNVERIFIED and carries no confident prose.
