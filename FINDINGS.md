@@ -690,3 +690,40 @@ that `.recover` catches as a non-`TimeoutException`, mapping to `Failed`. The mi
 error" ordering over HTTP remains live-only — `TestModelProvider` cannot produce a gap between tokens
 (cap-14's measured limit) — and is pinned instead on a synthetic source using the same `PFBuilder` recover.
 
+## Capability 21 — usage-accurate citations: the finding is about the *model*, not interop
+
+Fork **B4**, and the second capability (after cap-20) that is neither a new component family nor a bug fix.
+It adds a second RAG surface `POST /cited-ask` beside cap-8's `/ask` (left untouched): instead of citing
+every passage **retrieved** (cap-8, ground truth but over-inclusive), it asks the model which sources it
+actually **used** (structured output `{answer, usedSources}`) and cites only those. That deliberately
+re-opens the self-report unreliability cap-8 was built to avoid (cap-7's D6).
+
+**Interop-wise there is nothing new — it is pointedly Scala-clean.** Structured output is
+`responseConformsTo(classOf[CitedAnswer])`, the same mechanism cap-13's evaluator uses, with a Java-shaped
+reply record (the §3 internal-mapper boundary). It is a *separate* agent (`citing-docs-agent`) only because
+an `Agent` has exactly one command handler and cap-8's returns a bare `String` — not an interop limit, a
+component rule, and it is what keeps cap-8 literally untouched. The citation decision is a pure, framework-free
+domain function (`UsageCitations.select`), unit-tested with no runtime. `citing-docs-agent` is deliberately
+**ungoverned** — cap-12's guardrails attach by config to `docs-agent` only, and wiring them onto a new surface
+was out of scope (one config line if ever wanted). No new descriptor key; the agent and endpoint are two
+ordinary lines.
+
+**The honesty floor is what makes re-opening self-report defensible.** A self-reported label is cited only if
+it was *also* genuinely retrieved (`reported ∩ retrieved`), so the model can only ever *narrow* the
+ground-truth set, never invent a citation. A decline cites nothing; a non-decline answer whose reported
+sources don't intersect the retrieved set also cites nothing (FR-007 — no fallback to cap-8's full set), so an
+unverifiable claim stays visible rather than masked. The reply carries both `citedSources` and
+`retrievedSources` so divergence is readable from one response.
+
+**The headline is a measurement, and it inverts the expected failure.** Live on Ollama `qwen3:8b`, 6 runs:
+the unreliability is **under-reporting, not hallucination.** The floor held perfectly (0 un-retrieved
+citations across all runs), and when the model *did* name sources it narrowed *correctly* — 1-of-3 and 2-of-3,
+dropping the irrelevant passage. But **3 of 5** grounded answers returned an **empty** `usedSources` (stable
+across a re-run) despite answers plainly grounded in a retrieved passage, so `/cited-ask` cited nothing.
+Precision is excellent *when it reports*; the recall of the reporting itself is poor on an 8B local model. On
+the exact question cap-8's README uses to illustrate *over*-citation ("survive a restart"), B4 here cites
+**nothing** — it trades over-citation for **under**-citation. Both are failure modes of the same hard problem;
+B4's is at least honest about its own uncertainty. The prompt and schema are not the bottleneck (the model
+*can* report — the 1-of-3 / 2-of-3 cases prove it), so a stronger model is the natural follow-up and needs one
+beyond the free-tier local one. See specs/023 research R6 and README §23.
+
