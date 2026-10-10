@@ -136,6 +136,13 @@ Create one component and a corresponding test at a time, with user feedback in b
    them makes the PR unreviewable per-step and defeats `git bisect`. Documentation updates
    (README/ROADMAP/FINDINGS) are their own final commit. Squash-on-merge remains available if a
    single commit on `main` is wanted.
+8. **Commit the SDD artifacts before any implementation code.** Investigation, planning and design are
+   their own gate: at the end of `/akka.tasks` — *before* Step 0/Step 1 of implementation — commit the
+   whole feature directory (`spec.md`, `plan.md`, `research.md`, `data-model.md`, `contracts/`,
+   `quickstart.md`, `tasks.md`, `checklists/`) with a scoped `docs(NNN): spec + plan + tasks` message,
+   then **push and open a Draft PR** so every later gate pushes onto it. This keeps the "start cold from
+   the repository" guarantee (see "Start here") true for the design phase too: an un-committed plan is
+   reasoning that exists only in this conversation, and a cold start cannot recover it.
 
 This approach enables early validation, catches issues before coding, and allows mid-course adjustments.
 
