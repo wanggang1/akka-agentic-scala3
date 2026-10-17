@@ -27,11 +27,12 @@ class CitedDocsEndpointIntegrationTest extends TestKitSupport:
   @BeforeEach
   def reset(): Unit = citingModel.reset()
 
-  /** Mock a structured reply as the model would emit it (JSON for `responseConformsTo`). */
-  private def mockReply(answer: String, usedSources: String*): Unit =
+  /** Mock a structured reply as the model would emit it (JSON for `responseConformsTo`). `usedSources`
+    * is now the list of 1-based source NUMBERS the model reports using (the contract change under test). */
+  private def mockReply(answer: String, usedSourceNumbers: Int*): Unit =
     citingModel.fixedResponse(
       JsonSupport.encodeToString(
-        CitingDocsAgent.CitedAnswer(answer, java.util.List.copyOf(java.util.Arrays.asList(usedSources*)))
+        CitingDocsAgent.CitedAnswer(answer, usedSourceNumbers.map(Integer.valueOf).asJava)
       )
     )
 
@@ -49,16 +50,15 @@ class CitedDocsEndpointIntegrationTest extends TestKitSupport:
   @Test
   def inCorpusAnswerCitesOnlyTheUsedSource(): Unit =
     val grounded = "The runtime persists the task and the agent's state as the loop runs, so the work survives a restart."
-    mockReply(grounded, "durability-tasks") // model reports using just one of the retrieved passages
+    mockReply(grounded, 1) // model reports using source number 1 — the first presented passage
 
     val reply = ask("what makes agent work survive a restart without writing persistence code?")
 
     assertThat(reply.status()).isEqualTo(StatusCodes.OK)
     assertThat(reply.body().answer).isEqualTo(grounded)
-    // usage-accurate: exactly the one source the model reported using
-    assertThat(reply.body().citedSources.asJava).containsExactly("durability-tasks")
+    // usage-accurate: exactly the one source number 1 resolves to (asserted against real retrieval order)
+    assertThat(reply.body().citedSources.asJava).containsExactly(reply.body().retrievedSources.head)
     // ground truth kept alongside (FR-006), and strictly larger — proving reduced over-citation (SC-001)
-    assertThat(reply.body().retrievedSources.asJava).contains("durability-tasks")
     assertThat(reply.body().citedSources.size).isLessThan(reply.body().retrievedSources.size)
     // invariant: everything cited was retrieved (SC-002)
     assertThat(reply.body().retrievedSources.asJava).containsAll(reply.body().citedSources.asJava)
@@ -79,7 +79,7 @@ class CitedDocsEndpointIntegrationTest extends TestKitSupport:
     * names sources, the surface cites nothing — a decline has no citations by definition. */
   @Test
   def declineOverridesReportedSources(): Unit =
-    mockReply(DocsAgent.DontKnow, "durability-tasks", "cap-3-help-desk") // contradictory, but a decline
+    mockReply(DocsAgent.DontKnow, 1, 2) // contradictory (names sources), but a decline
 
     val reply = ask("what is the capital of France?")
 
@@ -87,31 +87,30 @@ class CitedDocsEndpointIntegrationTest extends TestKitSupport:
     assertThat(reply.body().answer).isEqualTo(DocsAgent.DontKnow)
     assertThat(reply.body().citedSources.asJava).isEmpty()
 
-  /** US3 / FR-004 / SC-002: a self-reported label that was NOT retrieved is dropped — the model cannot
-    * cite a source it was never offered. The genuinely-retrieved label it also reports survives, and
-    * the invariant `citedSources ⊆ retrievedSources` holds. This is the honesty floor that keeps B4
-    * defensible despite reopening self-report. */
+  /** US3 / FR-004 / SC-002: a self-reported source number that was NOT presented (out of range) is
+    * dropped — the model cannot cite a source it was never offered. The genuinely-presented number it
+    * also reports survives, and the invariant `citedSources ⊆ retrievedSources` holds. This is the
+    * honesty floor, now structural: an index outside `1..k` resolves to nothing. */
   @Test
-  def aReportedLabelThatWasNotRetrievedIsDropped(): Unit =
+  def aReportedNumberThatWasNotRetrievedIsDropped(): Unit =
     val grounded = "The runtime persists the task and the agent's state, so work survives a restart."
-    mockReply(grounded, "durability-tasks", "totally-made-up-label")
+    mockReply(grounded, 1, 99) // 1 was presented; 99 is out of range
 
     val reply = ask("what makes agent work survive a restart without writing persistence code?")
 
     assertThat(reply.status()).isEqualTo(StatusCodes.OK)
-    assertThat(reply.body().citedSources.asJava).contains("durability-tasks")
-    assertThat(reply.body().citedSources.asJava).doesNotContain("totally-made-up-label")
+    assertThat(reply.body().citedSources.asJava).containsExactly(reply.body().retrievedSources.head)
     // invariant: nothing cited was un-retrieved (SC-002), and ground truth is present (FR-006)
     assertThat(reply.body().retrievedSources.asJava).containsAll(reply.body().citedSources.asJava)
     assertThat(reply.body().retrievedSources.asJava).isNotEmpty()
 
-  /** US3 / FR-007: a real (non-decline) answer whose only reported sources were never retrieved cites
+  /** US3 / FR-007: a real (non-decline) answer whose only reported numbers were never presented cites
     * NOTHING — we do not fall back to cap-8's full retrieved set. An unverifiable usage claim stays
     * visible as "no honest citation available", which is what makes the measurement meaningful. */
   @Test
   def nonDeclineAnswerWithOnlyNonRetrievedSourcesCitesNothing(): Unit =
     val grounded = "An answer the model gave but could not honestly attribute."
-    mockReply(grounded, "only-non-retrieved")
+    mockReply(grounded, 99) // out of range — nothing verifiable
 
     val reply = ask("what makes agent work survive a restart without writing persistence code?")
 

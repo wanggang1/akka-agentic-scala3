@@ -15,10 +15,11 @@ import org.slf4j.LoggerFactory
   * actually **used**, as structured output ([[CitedAnswer]]), so the endpoint can cite only those.
   *
   * This deliberately reopens capability 7's D6 self-report tension (a model naming its own sources is
-  * unreliable, especially small ones). The defence is not to trust the model: the endpoint intersects
-  * `usedSources` with what was actually retrieved ([[com.gwgs.akkaagentic.docs.domain.UsageCitations]]),
-  * so self-report can only narrow the ground-truth set, never invent a citation. Measuring how faithful
-  * that self-report is on `qwen3:8b` is the capability's real deliverable (spec SC-005).
+  * unreliable, especially small ones). The defence is not to trust the model: the endpoint resolves each
+  * reported source number against what was actually retrieved
+  * ([[com.gwgs.akkaagentic.docs.domain.RetrievedSources]]), so self-report can only narrow the
+  * ground-truth set, never invent a citation. Measuring how faithful that self-report is on `qwen3:8b` is
+  * the capability's real deliverable (spec SC-005).
   *
   * A separate component from `docs-agent` on purpose (research R2): an `Agent` allows one command handler
   * and [[DocsAgent.ask]] returns a bare `String`, so a structured reply needs its own agent — which also
@@ -28,12 +29,19 @@ import org.slf4j.LoggerFactory
 object CitingDocsAgent:
 
   /** The structured object the model must emit. Java-shaped: an agent reply crosses the SDK's *internal*
-    * mapper, which is not Scala-aware (README §3). `usedSources` is **self-reported and untrusted** —
-    * the endpoint intersects it with the retrieved set before anything is cited.
+    * mapper, which is not Scala-aware (README §3). `usedSources` is the list of **source numbers** `[n]`
+    * the model reports using — **self-reported and untrusted**: the endpoint resolves each number against
+    * the presented set ([[com.gwgs.akkaagentic.docs.domain.RetrievedSources]]) before anything is cited,
+    * so an out-of-range or fabricated number cites nothing.
+    *
+    * Numbers rather than label strings on purpose (cap-21 live finding R6): on `qwen3:8b` the model
+    * reliably knows which source it used (it emits an inline `[n]`) but inconsistently mirrors the
+    * *label* into the structured field. Reporting the number it already tracks is the thing this contract
+    * change tests.
     */
   final case class CitedAnswer @JsonCreator() (
       @JsonProperty("answer") answer: String,
-      @JsonProperty("usedSources") usedSources: java.util.List[String]
+      @JsonProperty("usedSources") usedSources: java.util.List[Integer]
   )
 
   private val SystemMessage: String =
@@ -42,10 +50,12 @@ object CitingDocsAgent:
        |knowledge, and do not guess.
        |
        |Your response must be a single JSON object with exactly these fields:
-       |- "answer": your concise answer in one or two sentences, grounded strictly in the sources.
-       |- "usedSources": a JSON array of the exact (label) strings of ONLY the sources you actually used
-       |  to compose the answer. Use the label text between the parentheses, nothing else. Include a
-       |  source only if your answer genuinely relied on it; omit the ones you did not use.
+       |- "answer": your concise answer in one or two sentences, grounded strictly in the sources. Write
+       |  the answer as plain prose only. Do NOT put source markers like [1] or (label) in the answer
+       |  text; report which sources you used in the "usedSources" field instead.
+       |- "usedSources": a JSON array of the source NUMBERS (the n in each [n]) of ONLY the sources you
+       |  actually used to compose the answer, e.g. [1, 3]. Use the integers, not the labels. Include a
+       |  number only if your answer genuinely relied on that source; omit the ones you did not use.
        |
        |If the sources do not contain enough information to answer the question, set "answer" to EXACTLY
        |"$DontKnow" and "usedSources" to an empty array [].""".stripMargin

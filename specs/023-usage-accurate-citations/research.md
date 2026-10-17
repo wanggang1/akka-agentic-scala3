@@ -157,13 +157,50 @@ the attribution exists in the model's output (it emits `[1]`), it just doesn't r
 This is a more precise, and more hopeful, characterisation than "the model doesn't report its sources" — the
 signal is there to be captured.
 
-Two consequences worth recording (neither acted on in this capability — candidate follow-ups):
+Two consequences worth recording (both acted on in the follow-up below):
 - **The `[1]` marker leaks into the answer prose** — a numbering the caller never sees (the prompt presents
   sources as `[n] (label) text`, so the model naturally echoes `[n]`). A mild output artifact.
-- **A prompt tweak is the obvious lever** ("do not put citation markers in the answer; list the labels only
-  in `usedSources`"), and might both clean the prose and improve field population. But it is a model-reliability
-  gamble, not a guaranteed win, and parsing `[n]` out of the prose as a fallback would re-introduce the
-  fragile numbering→label mapping the structured field exists to avoid. Left as future work, honestly flagged.
+- **A prompt/schema change is the obvious lever** ("do not put citation markers in the answer; report the
+  source you used"), which might both clean the prose and improve field population.
+
+### R6 ADDENDUM — the index-based contract (follow-up, MEASURED 2026-10-17, live, Ollama `qwen3:8b`)
+
+**What changed.** Branch `023-cited-index-contract`. Rather than parse `[n]` out of the prose as a fallback
+(which would re-introduce the fragile numbering→label mapping the structured field exists to avoid), the
+*structured field itself* was changed to carry what the model already tracks reliably: `usedSources` is now a
+list of 1-based source **numbers** (`java.util.List[Integer]`), not `(label)` strings. The number→label
+mapping lives in the pure domain (`RetrievedSources`, which replaced `UsageCitations`), with opaque newtypes
+`SourceIndex`/`Label` making the honesty floor *structural* (an out-of-range/fabricated number resolves to
+`None`). The system message also now instructs the model to keep `[n]`/`(label)` markers out of the answer
+prose. Correctness still proven offline (`RetrievedSourcesTest` 9/9, `CitedDocsEndpointIntegrationTest` 9/9).
+
+**The hypothesis (from the sharper observation above):** the model *identifies* its source (it emits `[1]`)
+but inconsistently *mirrors* the label into the typed field. Having it report the **number** it already
+emits should capture that signal.
+
+**MEASURED — the hypothesis held.** Same model, same question set as the original R6 table (18 runs total:
+`survive a restart` ×6, three other grounded questions ×3, the out-of-corpus decline ×3).
+
+| Question | baseline (label-based) | after (index-based) |
+|---|---|---|
+| survive a restart | 1/3 populated; 2/3 leaked `[1]`; mostly `[]`→`[]` | **6/6** → `[durability-tasks]` |
+| coordinator picks specialist | faithful (1 of 3) | **3/3** → `[cap-7-activity-coordinator]` |
+| why Java not Scala | faithful (2 of 3) | **3/3** → `[interop-method-ref-wall, interop-two-mapper]` |
+| remember across requests | **under-reported** `[]`→`[]` | **3/3** → `[cap-6-delegation, cap-4-session-memory]` |
+| capital of France (decline) | correct decline | **3/3** decline, `[]` |
+
+- **Under-reporting essentially eliminated on this set.** The two questions that returned empty `usedSources`
+  in the baseline now populate correctly and *stably on every run* — no `[]`→`[]` under-report recurred.
+- **Zero marker leakage across all 18 runs** (baseline leaked on 2 of 3 sharpened runs). The "plain prose"
+  instruction worked.
+- **The honesty floor held throughout** — every `citedSources ⊆ retrievedSources`, every grounded answer a
+  strict subset, 0 invariant violations. The out-of-range index `99` is dropped structurally (unit-tested).
+- **Honest scope.** Two of the four grounded questions were already faithful in the baseline, so the new
+  *gain* is concentrated on the two previously-failing ones — but those flipped completely and repeatably.
+  This is **one 8B model on a fixed question set**: it confirms the R6 *mechanism* (the signal was present;
+  it was a mirroring/population failure, not mis-identification), it does not prove a universal result. The
+  original FR-007 "cite nothing" design still matters — it is what kept the baseline under-report *visible*
+  so this diagnosis was possible in the first place.
 
 ## R7 — Endpoint surface
 

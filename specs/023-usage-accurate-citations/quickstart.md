@@ -7,7 +7,7 @@ reflect what the model *used*, not everything that was *retrieved*.
 
 ```bash
 # unit — pure citation-selection logic (fast)
-mvn test -Dtest='UsageCitationsTest'
+mvn test -Dtest='RetrievedSourcesTest'
 
 # integration — the new endpoint, model mocked (deterministic)
 mvn verify -Dit.test='CitedDocsEndpointIntegrationTest' -Dtest='!*' -DfailIfNoTests=false

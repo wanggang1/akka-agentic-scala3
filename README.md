@@ -1346,27 +1346,34 @@ writing components in Scala needs explicit workarounds:
 
 23. **Usage-accurate citations re-open self-report on purpose — and the measured failure is *under*-reporting,
     not hallucination, which is exactly what the honesty floor is designed for.** Capability 21
-    (`com.gwgs.akkaagentic.docs.{domain.UsageCitations, application.CitingDocsAgent, api.CitedDocsEndpoint}`,
+    (`com.gwgs.akkaagentic.docs.{domain.RetrievedSources, application.CitingDocsAgent, api.CitedDocsEndpoint}`,
     fork **B4**) adds a second RAG surface `POST /cited-ask` beside capability 8's `/ask` (left untouched).
     Cap-8 cites every passage it **retrieved** (ground truth, but over-inclusive); this surface asks the model
-    which sources it actually **used** (structured output `{answer, usedSources}`) and cites only those. That
-    deliberately reintroduces the self-report unreliability cap-8 was built to avoid (cap-7's D6, §9) — the
-    point of the capability is to **measure** that trade on this stack, not to assume it.
+    which sources it actually **used** (structured output `{answer, usedSources}`, where `usedSources` is the
+    list of source **numbers** `[n]` it relied on) and cites only those. That deliberately reintroduces the
+    self-report unreliability cap-8 was built to avoid (cap-7's D6, §9) — the point of the capability is to
+    **measure** that trade on this stack, not to assume it.
 
     - **No new interop ground; it reuses proven pieces.** Structured output is
       `responseConformsTo(classOf[CitedAnswer])` — the same mechanism as the §15 evaluator, and `CitedAnswer`
       is a **Java-shaped** record (the §3 internal-mapper boundary). It is a *new* agent only because an `Agent`
       has one command handler and cap-8's returns a bare `String`, which also leaves cap-8 literally untouched.
-      The citation decision is a pure, framework-free domain function (`UsageCitations.select`), unit-tested in
+      The citation decision is a pure, framework-free domain value (`RetrievedSources`), unit-tested in
       isolation. `citing-docs-agent` is deliberately **ungoverned** (cap-12's guardrails attach to `docs-agent`
       only) — a recorded scope boundary, not an oversight.
 
-    - **The honesty floor.** A self-reported label is cited only if it was also genuinely retrieved
-      (`reported ∩ retrieved`), so self-report can only ever *narrow* the ground-truth set, never invent a
-      citation. A decline cites nothing; a non-decline answer whose reported sources don't intersect the
-      retrieved set cites nothing too (FR-007 — we do **not** fall back to cap-8's full set, so an unverifiable
+    - **The honesty floor — structural, via opaque newtypes.** `RetrievedSources` holds the presented sources
+      in the order and multiplicity the model is shown them, and the model reports back 1-based **numbers**.
+      A reported number resolves to a citation only through `label(SourceIndex): Option[Label]` /
+      `cite(...)`, which look it up in that set — an out-of-range or fabricated number resolves to `None`, so
+      self-report can only ever *narrow* the ground-truth set, never invent a citation. `SourceIndex` and
+      `Label` are Scala 3 **opaque types** (newtypes, zero runtime cost): a raw `Int` or `String` cannot enter
+      the citation logic without going through `RetrievedSources.of`, making the parse-don't-validate boundary
+      nominal rather than conventional. A decline cites nothing; a non-decline answer whose reported numbers
+      don't resolve cites nothing too (FR-007 — we do **not** fall back to cap-8's full set, so an unverifiable
       usage claim stays visible instead of being papered over). The reply carries **both** `citedSources`
-      (usage-accurate) and `retrievedSources` (ground truth) so the divergence is observable from one response.
+      (usage-accurate labels) and `retrievedSources` (ground truth) so the divergence is observable from one
+      response.
 
     - **THE finding (measured live, Ollama `qwen3:8b`, 6 runs).** The unreliability is **under-reporting, not
       hallucination.** The floor held perfectly — across every run *no* cited label was ever un-retrieved (0
@@ -1384,8 +1391,20 @@ writing components in Scala needs explicit workarounds:
       structured field, not *identifying* it. On two runs it wrote an inline `[1]` marker into the answer
       prose — it knew it used source [1] — but only one of those also populated `usedSources`. So the
       under-reporting is a structured-output *population* inconsistency; the attribution signal is present
-      (the `[1]`), it just doesn't reliably reach the typed field. A prompt tweak to suppress inline markers
-      and push labels into `usedSources` is a candidate follow-up — a model-reliability gamble, not a sure win.
+      (the `[1]`), it just doesn't reliably reach the typed field.
+
+    - **Follow-up, now DONE — the index-based contract closes the gap (measured).** Acting on that diagnosis,
+      the contract was changed so `usedSources` carries the source **numbers** `[n]` the model already emits,
+      rather than the `(label)` strings it kept failing to copy, and the prompt now tells it to keep markers
+      out of the answer prose. Re-measured live on the *same* `qwen3:8b`, same question set (18 runs): the two
+      questions that returned empty `usedSources` in the baseline (`survive a restart`, `remember across
+      requests`) now populate **correctly and stably on every run** — `survive a restart` went from 1-of-3 to
+      **6/6**, `remember across requests` from `[]`→`[]` to **3/3** — the already-faithful questions stayed
+      faithful, every decline still cited nothing, and the `[n]` marker **stopped leaking into prose on all 18
+      runs**. The honesty floor held throughout (every `citedSources ⊆ retrievedSources`, always a strict
+      subset). The R6 diagnosis was right: the attribution signal was present; having the model report the
+      number it already tracks was enough to capture it. This is one 8B model on a fixed question set, so it
+      confirms the *mechanism*, not a universal result. See specs/023 research R6 (addendum).
 
     ```bash
     # Usage-accurate: only the source(s) the model reports using, a subset of what was retrieved.
@@ -1395,12 +1414,13 @@ writing components in Scala needs explicit workarounds:
     #  "citedSources":["cap-7-activity-coordinator"],
     #  "retrievedSources":["cap-7-activity-coordinator","cap-6-delegation","cap-3-help-desk"]}
 
-    # Under-report in the wild: a clearly-grounded answer the model fails to attribute -> cite nothing,
-    # NOT a fallback to the full retrieved set (FR-007). The divergence is visible, not masked.
+    # The question cap-8 over-cites (all three): with the index-based contract, qwen3:8b now reports the one
+    # source it used, stably across runs. (On the original label-based contract this returned citedSources:[]
+    # — a clearly-grounded answer the model failed to attribute; the R6 addendum records that before/after.)
     curl -s -X POST http://localhost:9000/cited-ask -H "Content-Type: application/json" \
       -d '{"question":"what makes agent work survive a restart without writing persistence code?"}'
-    # {"answer":"The agent's task and process state are automatically persisted ...",
-    #  "citedSources":[],
+    # {"answer":"The runtime automatically persists the agent's task and process state ...",
+    #  "citedSources":["durability-tasks"],
     #  "retrievedSources":["durability-tasks","cap-3-help-desk","cap-4-session-memory"]}
     ```
 
