@@ -11,14 +11,15 @@ import akka.javasdk.client.ComponentClient
 import akka.javasdk.http.HttpResponses
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.gwgs.akkaagentic.docs.application.{CitingDocsAgent, DocsAgent, KnowledgeStore}
-import com.gwgs.akkaagentic.docs.domain.{AskQuestion, UsageCitations}
+import com.gwgs.akkaagentic.docs.domain.{AskQuestion, RetrievedSources}
+import com.gwgs.akkaagentic.docs.domain.RetrievedSources.SourceIndex
 
 /** Capability 21 (fork B4, feature 023). `POST /cited-ask` — the **usage-accurate** twin of cap-8's `/ask`.
   *
   * Same corpus, same retrieval, same grounding. The difference is the citation: cap-8 cites every
   * retrieved passage (ground truth, over-inclusive); this surface asks [[CitingDocsAgent]] which sources
-  * it actually used and cites only those, intersected with what was retrieved
-  * ([[UsageCitations]] — the honesty floor). The reply carries **both** lists (`citedSources` and
+  * it actually used (as source *numbers* `[n]`) and cites only those, resolved against what was retrieved
+  * ([[RetrievedSources]] — the honesty floor). The reply carries **both** lists (`citedSources` and
   * `retrievedSources`) so the divergence between used and retrieved is visible from one response, which
   * is what makes the self-report faithfulness measurable (spec SC-005/FR-006).
   *
@@ -66,7 +67,9 @@ class CitedDocsEndpoint(componentClient: ComponentClient, knowledgeStore: Knowle
         HttpResponses.badRequest(message)
       case Right(valid) =>
         val retrieved = knowledgeStore.retrieve(valid.question, TopK)
-        val retrievedLabels = retrieved.map(_.source).distinct
+        // The presented set the model numbers `[n]` against — same order and multiplicity the agent
+        // shows (no dedup), so a reported number lines up with the n-th passage.
+        val sources = RetrievedSources.of(retrieved.map(_.source))
         val agentRequest = DocsAgent.Request(
           valid.question,
           retrieved.map(r => DocsAgent.Passage(r.source, r.text)).asJava
@@ -77,9 +80,8 @@ class CitedDocsEndpoint(componentClient: ComponentClient, knowledgeStore: Knowle
           .dynamicCall[DocsAgent.Request, CitingDocsAgent.CitedAnswer]("citing-docs-agent")
           .invoke(agentRequest)
 
-        val cited = UsageCitations.select(
-          reportedUsed = Option(reply.usedSources).map(_.asScala.toList).getOrElse(Nil),
-          retrievedLabels = retrievedLabels,
-          declined = isDecline(reply.answer)
-        )
-        HttpResponses.ok(CitedAskReply(reply.answer, cited, retrievedLabels))
+        val reportedIndexes = Option(reply.usedSources)
+          .map(_.asScala.toList.map(n => SourceIndex(n.intValue)))
+          .getOrElse(Nil)
+        val cited = sources.cite(reportedIndexes, declined = isDecline(reply.answer)).map(_.value)
+        HttpResponses.ok(CitedAskReply(reply.answer, cited, retrieved.map(_.source).distinct))
