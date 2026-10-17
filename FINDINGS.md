@@ -703,7 +703,7 @@ re-opens the self-report unreliability cap-8 was built to avoid (cap-7's D6).
 reply record (the §3 internal-mapper boundary). It is a *separate* agent (`citing-docs-agent`) only because
 an `Agent` has exactly one command handler and cap-8's returns a bare `String` — not an interop limit, a
 component rule, and it is what keeps cap-8 literally untouched. The citation decision is a pure, framework-free
-domain function (`UsageCitations.select`), unit-tested with no runtime. `citing-docs-agent` is deliberately
+domain value (`RetrievedSources`, originally `UsageCitations.select`), unit-tested with no runtime. `citing-docs-agent` is deliberately
 **ungoverned** — cap-12's guardrails attach by config to `docs-agent` only, and wiring them onto a new surface
 was out of scope (one config line if ever wanted). No new descriptor key; the agent and endpoint are two
 ordinary lines.
@@ -726,4 +726,19 @@ the exact question cap-8's README uses to illustrate *over*-citation ("survive a
 B4's is at least honest about its own uncertainty. The prompt and schema are not the bottleneck (the model
 *can* report — the 1-of-3 / 2-of-3 cases prove it), so a stronger model is the natural follow-up and needs one
 beyond the free-tier local one. See specs/023 research R6 and README §23.
+
+**Follow-up (2026-10-17) — the fix was a contract change, not a stronger model.** The sharper R6 observation
+pinned the failure precisely: the model *identifies* its source (it emits an inline `[1]`) but inconsistently
+*mirrors* the `(label)` string into the typed field. So the typed field was changed to carry what the model
+already emits reliably — the 1-based source **number**. `usedSources` became `List[Integer]`; the pure domain
+`UsageCitations.select` was replaced by `RetrievedSources` with opaque newtypes `SourceIndex`/`Label` that make
+the honesty floor *structural* (an out-of-range number resolves to `None`, cannot cite); and the prompt now
+keeps markers out of the answer prose. Re-measured on the *same* `qwen3:8b`, same question set (18 runs): the
+two baseline under-reporters now populate **6/6** and **3/3** correctly and stably, the already-faithful
+questions stayed faithful, every decline still cited nothing, and the `[n]` marker **stopped leaking into prose
+on all 18 runs** — floor intact throughout. The take-away sharpens the earlier one: the signal *was* there on
+the 8B model; the bottleneck was asking it to copy a string it kept dropping, not model capacity. (Still one
+model, one question set — the *mechanism* is confirmed, not a universal claim.) The original FR-007 "cite
+nothing" design is what kept the baseline under-report visible enough to diagnose. See specs/023 research R6
+addendum.
 
