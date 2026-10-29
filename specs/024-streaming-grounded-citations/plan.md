@@ -166,6 +166,24 @@ answer cite nothing regardless, so this governs only the FR-007-vs-decline label
 `com.gwgs.akkaagentic.docs.application.StreamingCitedDocsAgent` (Scala agent — else `tokenStream` lookup
 fails). The data types need no entry. This is a `mvn clean verify`-class check.
 
+## Setup record (T002) — measured before any code
+
+Baseline `mvn test -Pquick` green (274 tests) on branch `024-streaming-grounded-citations` (T001).
+
+**The two descriptor lines this capability adds** (research R8), to
+`src/main/resources/META-INF/akka-javasdk-components_com.gwgs_akka-agentic-scala3.conf`:
+- `com.gwgs.akkaagentic.docs.api.StreamingCitedDocsEndpoint` — Java endpoint (T011); omit → route 404s.
+- `com.gwgs.akkaagentic.docs.application.StreamingCitedDocsAgent` — Scala agent (T009); omit → `tokenStream` lookup fails.
+The data types (`GroundedSseEvent`, `CitationMarkers`, `GroundedCitedPrep`) are not components — no entry.
+
+**JavaQuarantine expectation (measured, resolving the "if present" hedge):** the `docs` tree
+(`src/main/java/com/gwgs/akkaagentic/docs`) currently holds **zero** Java files — `DocsAgent`,
+`CitingDocsAgent`, `DocsEndpoint`, `CitedDocsEndpoint` are all Scala. The existing `JavaQuarantineTest`s
+cover only the `reminders` and `streaming` trees; there is **no** `docs` one. So cap-22 introduces the
+**first two** Java files into the docs tree — `docs/api/StreamingCitedDocsEndpoint.java` and
+`docs/api/GroundedSseEvent.java` — and T020 **creates** a new `docs` quarantine test asserting exactly
+those two (modeled on `streaming/api/JavaQuarantineTest.scala`), rather than updating an existing one.
+
 ## Phase sequencing (for /akka.tasks)
 
 Follows CLAUDE.md's incremental, gate-committed workflow — one component + its test per approved gate:

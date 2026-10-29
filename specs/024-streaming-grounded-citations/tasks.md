@@ -28,8 +28,8 @@ the honesty floor, and capability 20's `SseErrorReason`.
 
 **Purpose**: Establish the capability's footprint and the gates that will catch wiring mistakes.
 
-- [ ] T001 Confirm branch `024-streaming-grounded-citations` and a green baseline (`mvn test -Pquick`) before adding code, so later breaks are attributable to this capability.
-- [ ] T002 Record in plan/tasks the two descriptor lines this capability will add (research R8) and the JavaQuarantine expectation (exactly two new Java files: `docs/api/StreamingCitedDocsEndpoint.java`, `docs/api/GroundedSseEvent.java`). No code yet.
+- [x] T001 Confirm branch `024-streaming-grounded-citations` and a green baseline (`mvn test -Pquick`) before adding code, so later breaks are attributable to this capability. — DONE: 274 tests green.
+- [x] T002 Record in plan/tasks the two descriptor lines this capability will add (research R8) and the JavaQuarantine expectation (exactly two new Java files: `docs/api/StreamingCitedDocsEndpoint.java`, `docs/api/GroundedSseEvent.java`). No code yet. — DONE: recorded in plan.md "Setup record (T002)"; measured that the docs tree has zero Java files today and no docs quarantine test exists, so T020 creates one.
 
 **Checkpoint**: Baseline green; the descriptor + quarantine obligations are written down.
 
