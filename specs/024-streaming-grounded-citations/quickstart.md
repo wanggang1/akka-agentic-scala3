@@ -39,13 +39,14 @@ the model's inline `[n]` markers, parsed server-side and **stripped** from the p
 computed from the whole turn's markers and emitted *after* the prose, without buffering the answer, by:
 
 ```
-data.concat( lazySource( () -> Source.single( citationsFrame(reported.get()) ) ) )
+data.concatLazy( lazySource( () -> Source.single( citationsFrame(reported.get()) ) ) )
     .recover( t -> errorFrame(reasonFor(t)) )
 ```
 
-- `concat` subscribes the citations source only after `data` completes, so the accumulated `reported`
-  numbers are final by then.
-- If `data` **fails**, `concat` never reaches the citations source, and `.recover` turns the failure into
+- `concatLazy` (NOT plain `concat`, which eagerly materialises its second source at stream start — measured
+  at T012, research R5) subscribes the citations source only after `data` completes, so the accumulated
+  `reported` numbers are final by then.
+- If `data` **fails**, `concatLazy` never reaches the citations source, and `.recover` turns the failure into
   a terminal `event: error` — so a failed stream carries **no** citations frame (the honest signal cap-20
   established, reused). This `.recover`-to-element is required: the SDK's `serverSentEvents` otherwise
   silently empties a failing stream (`akka-sse-helper-swallows-failure`).

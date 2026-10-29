@@ -213,3 +213,37 @@ consistent with cap-20's resolution.
   are network-flushed before a later failure (the HTTP-level happy/decline tests exercise that delivery),
   and whether a real `qwen3:8b` mid-answer failure delivers its partial answer-then-error is the one thing
   left to the live run (T017).
+
+## R10 — SC-006: is the streamed end-of-stream self-report consistent with cap-21's non-streamed path?
+
+**MEASURED (2026-10-29, live, Ollama `qwen3:8b`).** The capability's headline deliverable. Ran the cap-21
+question set over the new `POST /sse-cited-ask` AND cap-21's `POST /cited-ask` back-to-back in the same live
+session, and compared the streamed `usedSources` (inline `[n]` markers parsed server-side and floored)
+against the non-streamed `citedSources` (the structured index field). The headline question was run 4× total
+(once in the set + 3 stability repeats).
+
+| Question | streamed `usedSources` (`/sse-cited-ask`) | batch `citedSources` (`/cited-ask`) | retrieved | match? |
+|---|---|---|---|---|
+| survive a restart (×4) | `[durability-tasks]` (all 4) | `[durability-tasks]` | 3 | ✅ identical |
+| coordinator picks specialist | `[cap-7-activity-coordinator]` | `[cap-7-activity-coordinator]` | 3 | ✅ identical |
+| why Java not Scala | `[interop-method-ref-wall, interop-two-mapper]` | same | 3 | ✅ identical |
+| remember across requests | `[cap-6-delegation, cap-4-session-memory]` | same | 3 | ✅ identical |
+| capital of France (decline) | `[]`, prose `I don't know` | `[]` | 3 | ✅ identical |
+
+**Finding: the streamed self-report is consistent with the non-streamed path — parity, not degradation.**
+On every question the streamed `usedSources` equalled the non-streamed `citedSources`, and both equalled
+cap-21's own index-contract results (research 023 R6-ADDENDUM: 6/6 `durability-tasks`, 3/3 coordinator, etc.).
+
+**Why this is the interesting result.** Cap-21's whole point was that the model reliably *emits* an inline
+`[n]` marker but inconsistently *mirrors* it into a structured field; its fix was to make the structured
+field carry the number the model already emits. A streamed turn has **no structured field at all** (R1), so
+B5 goes back to the raw inline `[n]` — the very signal cap-21 observed is reliable — and parses it
+server-side. The measurement confirms the mechanism transfers: reading the marker directly recovers the same
+signal the structured index field carried, so the streaming surface achieves **parity** with the structured
+path rather than reintroducing cap-21's baseline under-reporting.
+
+**Also observed:** zero marker leakage in the delivered prose across all 8 streamed calls (the stripper
+removed every `[n]`); the honesty floor held on every call (every `usedSources ⊆ retrievedSources`, every
+grounded answer a strict subset, the decline cited nothing). **Honest scope:** one 8B model, a fixed
+five-question set — this confirms the *mechanism* (the marker signal survives streaming and the strip+floor
+pipeline is faithful), not a universal claim about every model.
