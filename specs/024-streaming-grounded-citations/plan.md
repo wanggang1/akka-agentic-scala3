@@ -139,14 +139,16 @@ Source<GroundedSseEvent> data = tokens
 Source<GroundedSseEvent> citations = Source.lazySource(() ->        // read reported AFTER data completes
     Source.single(GroundedCitedPrep.citationsEvent(sources, reported.get(), declinedFlag)));
 
-Source<GroundedSseEvent> events = data.concat(citations)            // failure in `data` ⇒ citations skipped
+Source<GroundedSseEvent> events = data.concatLazy(citations)        // concatLazy, NOT concat — see T012 note
     .recover(matchAny(t -> new GroundedSseEvent.ErrorEvent(SseErrorReason.reasonFor(t))));
 
 return HttpResponses.serverSentEvents(events, _ -> "", EVENT_TYPE); // EVENT_TYPE: data|citations|error
 ```
 
 Two correctness points, both load-bearing:
-1. **`concat` after a lazy source** reads the fully-accumulated `reported` numbers at the right moment and
+1. **`concatLazy` after a lazy source** (NOT plain `concat`, which eagerly materialises its second source
+   at stream start — measured at T012, see research R5 correction) reads the fully-accumulated `reported`
+   numbers at the right moment and
    makes "failure ⇒ no citations frame" automatic (the second source is never subscribed if the first
    fails). This reuses cap-20's `.recover`-to-element move for the error path (research R5).
 2. **The carry in `CitationMarkers`** is what makes a boundary-split marker strip cleanly; it is the one

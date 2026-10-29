@@ -83,11 +83,21 @@ describe text the caller never saw. One turn keeps the citation honest about the
 
 ## R5 — Emitting a terminal frame computed from the whole stream, without buffering the answer
 
-**Decision**: Build the SSE source as `dataFrames.concat(citationsSource).recover(errorElement)`, where
+**Decision**: Build the SSE source as `dataFrames.concatLazy(citationsSource).recover(errorElement)`, where
 `dataFrames` emits stripped `Data` frames incrementally (flushing the carry on completion via
 `statefulMap`'s completion hook) and writes the extracted numbers into an `AtomicReference[StripTotals]`
-held in the endpoint; `citationsSource` is a `lazySource` that reads that reference — populated by the
-time `concat` subscribes to it, because `concat` only starts the second source after the first completes.
+held in the endpoint; `citationsSource` is a `lazySource` that reads that reference.
+
+**CORRECTION (measured at T012, implementation).** The original decision wrote `concat`, on the stated
+assumption that "`concat` only starts the second source after the first completes." That is **wrong**, and
+the happy-path IT proved it: plain `concat` **eagerly materialises** its second source at stream start, so
+`lazySource`'s factory ran before any token flowed and the citations frame read the `AtomicReference` while
+it still held its initial empty value — the stream produced correct, marker-stripped prose but an empty
+`usedSources`. The fix is **`concatLazy`**, which is precisely the operator that defers materialising the
+second source until the first completes (its existence as a distinct method is the tell that `concat` is
+eager). `lazySource` is still needed to defer the `reported.get()` read (a `Source.single(...)` argument is
+evaluated eagerly at construction); `concatLazy` + `lazySource` together read the accumulated numbers at the
+right moment. The failure-skips-citations property (below) holds for `concatLazy` as well.
 
 **Why**: The citations frame depends on the *whole* turn's markers, but we must not buffer the prose. A
 lazily-evaluated concatenated source reads the fully-accumulated numbers at exactly the right moment.
