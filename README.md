@@ -1424,6 +1424,74 @@ writing components in Scala needs explicit workarounds:
     #  "retrievedSources":["durability-tasks","cap-3-help-desk","cap-4-session-memory"]}
     ```
 
+24. **Streaming an honest citation has no structured channel — so the signal goes back to the inline `[n]`
+    marker, stripped from the prose and floored server-side.** Capability 22
+    (`com.gwgs.akkaagentic.docs.{domain.CitationMarkers, application.{GroundedCitedPrep, StreamingCitedDocsAgent},
+    api.{StreamingCitedDocsEndpoint, GroundedSseEvent}}`, fork **B5**) adds `POST /sse-cited-ask`: it streams
+    cap-8/21's grounded answer as Server-Sent Events (cap-20's framing, §22) and then emits **one terminal
+    `event: citations` frame** that cites honestly (used ⊆ retrieved, cap-21's floor, §23). Caps 8/14/20/21 are
+    untouched.
+
+    - **THE constraint (research R1).** A streamed turn has **no structured output** — `streamEffects()` has no
+      `responseConformsTo`, so cap-21's `{answer, usedSources}` field does not exist here. The only signal for
+      which sources the model used is the inline `[n]` marker it writes into the prose. So B5 **reverses
+      cap-21's follow-up**: where §23 told the model to keep markers *out* of the prose (it had a typed field
+      for them), B5 tells it to *emit* them — they are the signal — and then **strips them server-side** before
+      the caller reads the prose. In both capabilities the caller never sees a raw marker; only the source of
+      the signal differs.
+
+    - **The stripper is a pure, immutable value (`CitationMarkers`), and its one hard case is the chunk
+      boundary.** It runs inside the stream's `statefulMap`, carrying a partial `[1`-at-end-of-chunk across to
+      the next chunk so a marker split as `"…restart [1"` + `"2] …"` reassembles to number `12` with no `[1`
+      leaking into the prose. Proven offline by splitting a 3-marker answer at **every** position and checking
+      the chunked output equals a single-pass regex oracle.
+
+    - **The wiring — `concatLazy`, not `concat` (measured correction).** The citations frame depends on the
+      *whole* turn's markers but the prose must not be buffered, so the numbers accumulate into an
+      `AtomicReference` as they are stripped, and a `lazySource` reads it *after* the data stream completes:
+      `data.concatLazy(lazySource(citationsFrame)).recover(errorFrame)`. The design first used plain `concat`
+      and the happy-path test caught it: **`concat` eagerly materialises its second source at stream start**, so
+      the lazy factory read the reference while still empty (correct prose, empty `usedSources`). `concatLazy`
+      defers materialisation until the data source completes — and never subscribes it if the data source
+      **fails**, so a failed stream carries **no** citations frame; `.recover` turns the failure into a terminal
+      `event: error` (cap-20's move, §22, reused — without it the SDK's SSE helper silently empties a failing
+      stream). Measured directly: `statefulMap`'s completion hook does **not** flush its carry on a failure, so
+      no partial marker leaks after the point of failure.
+
+    - **Two forced-Java files, the same two kinds as §16/§22.** `StreamingCitedDocsEndpoint` (the
+      `tokenStream(StreamingCitedDocsAgent::stream)` method-ref wall) and `GroundedSseEvent` (the SSE wire
+      envelope, §3 internal-mapper boundary). The agent, the stripper, and the retrieval/floor façade
+      (`GroundedCitedPrep`, which keeps every opaque-newtype conversion on the Scala side) are all Scala — the
+      wall claims only `api`, asserted by a `docs`-tree `JavaQuarantineTest`.
+
+    - **THE finding (measured live, Ollama `qwen3:8b`): parity, not degradation.** Running the cap-21 question
+      set over `/sse-cited-ask` and cap-21's `/cited-ask` back-to-back, the streamed `usedSources` was
+      **identical** to the non-streamed `citedSources` on every question (and to cap-21's own index-contract
+      results): `survive a restart` → `[durability-tasks]` (stable over 4 runs), `coordinator picks specialist`
+      → `[cap-7-activity-coordinator]`, `why Java not Scala` → `[interop-method-ref-wall, interop-two-mapper]`,
+      the decline → `[]`. Zero marker leakage across 8 streamed calls; the floor held every time. The point:
+      cap-21 found the model *identifies* its source (it emits `[n]`) but inconsistently *mirrors* it into a
+      typed field — a stream has no typed field, so B5 reads the `[n]` directly and recovers the *same* signal.
+      One 8B model, fixed question set: confirms the mechanism. See specs/024 research R1/R5/R10.
+
+    ```bash
+    # Streams event: data frames of CLEAN prose (no [n]), then ONE event: citations frame.
+    curl -N -X POST http://localhost:9000/sse-cited-ask -H "Content-Type: application/json" \
+      -d '{"question":"what makes agent work survive a restart?"}'
+    # event: data
+    # data: {"text":"The agent's work survives a restart because the runtime persists the task..."}
+    # ...
+    # event: citations
+    # data: {"usedSources":["durability-tasks"],
+    #        "retrievedSources":["durability-tasks","cap-3-help-desk","cap-4-session-memory"]}
+
+    # An out-of-corpus question streams the decline and cites nothing.
+    curl -N -X POST http://localhost:9000/sse-cited-ask -H "Content-Type: application/json" \
+      -d '{"question":"what is the capital of France?"}'
+    # event: data  → data: {"text":"I don't know"}
+    # event: citations → data: {"usedSources":[],"retrievedSources":[...]}
+    ```
+
 ### Calling the gRPC endpoint
 
 The gRPC endpoint is served on the service's HTTP/2 port (dev mode enables reflection), alongside the HTTP
