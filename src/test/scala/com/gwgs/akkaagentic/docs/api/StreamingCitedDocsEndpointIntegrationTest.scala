@@ -77,6 +77,44 @@ class StreamingCitedDocsEndpointIntegrationTest extends TestKitSupport:
     assertThat(used.asJava).containsExactly(retrieved(0), retrieved(1)) // markers 1,2 → first two presented
     assertThat(used.size).isLessThan(retrieved.size) // usage-accurate: fewer than cap-8 would cite
 
+  /** US2 / SC-003 / FR-007 — an honest decline streams the decline prose and cites nothing, while the
+    * retrieved set is still shown (so the decline is visible, not a silent empty frame). */
+  @Test
+  def aDeclineStreamsTheDeclineAndCitesNothing(): Unit =
+    model.reset()
+    model.fixedResponse("I don't know") // the DocsAgent.DontKnow sentinel — no markers
+
+    val frames = parseFrames(bodyOf(sseRequest("what is the airspeed velocity of an unladen swallow?")))
+
+    // The clean prose is the decline itself.
+    val reassembled = frames.filter(_.event == "data").map(f => decodeText(f.data)).mkString
+    assertThat(reassembled).isEqualTo("I don't know")
+
+    // Exactly one citations frame; usedSources empty; retrievedSources still populated.
+    assertThat(frames.last.event).isEqualTo("citations")
+    val (used, retrieved) = citations(frames.last.data)
+    assertThat(used.asJava).isEmpty()
+    assertThat(retrieved.asJava).isNotEmpty()
+
+  /** US2 / FR-008 — a non-decline answer that reports only an OUT-OF-RANGE marker cites nothing (the floor
+    * drops a number that was never presented), while the retrieved set is still shown. No fabricated
+    * source ever appears. */
+  @Test
+  def anOutOfRangeMarkerCitesNothingButShowsRetrieved(): Unit =
+    model.reset()
+    // Only 3 passages are retrieved, so [9] was never presented — the floor must drop it.
+    model.fixedResponse("Agent work is coordinated by a durable process [9].")
+
+    val frames = parseFrames(bodyOf(sseRequest("how is agent work coordinated?")))
+
+    val reassembled = frames.filter(_.event == "data").map(f => decodeText(f.data)).mkString
+    assertThat(reassembled).doesNotContain("[") // marker stripped from prose regardless
+
+    val (used, retrieved) = citations(frames.last.data)
+    assertThat(used.asJava).isEmpty() // out-of-range number resolves to nothing (honesty floor)
+    assertThat(retrieved.asJava).isNotEmpty()
+    assertThat(retrieved.asJava).doesNotContain("9") // never a fabricated source
+
   /** FR-012 — a blank question is rejected before any retrieval or model call, as an ordinary non-streamed
     * 400. No `responseBodyAs` (it throws on non-2xx — the project's httpClient failure-status pattern). */
   @Test

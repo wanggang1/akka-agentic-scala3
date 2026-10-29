@@ -10,6 +10,7 @@ import akka.javasdk.client.ComponentClient;
 import akka.javasdk.http.HttpResponses;
 import akka.stream.javadsl.Source;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.gwgs.akkaagentic.docs.application.DocsAgent;
 import com.gwgs.akkaagentic.docs.application.GroundedCitedPrep;
 import com.gwgs.akkaagentic.docs.application.KnowledgeStore;
 import com.gwgs.akkaagentic.docs.application.StreamingCitedDocsAgent;
@@ -75,6 +76,11 @@ public class StreamingCitedDocsEndpoint {
   private static final int GROUP_SIZE = 20;
   private static final Duration GROUP_WINDOW = Duration.ofMillis(100);
 
+  /** The decline is detected on the leading clean prose, so only this many characters of it are ever
+   * retained — enough to hold the decline sentinel plus any leading whitespace, never the whole answer
+   * (research R3: the prose is not buffered). */
+  private static final int DECLINE_PREFIX_CAP = 48;
+
   // Reuse cap-20's streaming guard configuration keys and defaults verbatim.
   private static final String FIRST_TOKEN_TIMEOUT_KEY = "streaming.first-token-timeout";
   private static final String IDLE_TIMEOUT_KEY = "streaming.idle-timeout";
@@ -115,6 +121,9 @@ public class StreamingCitedDocsEndpoint {
 
     // The model's reported citation numbers, accumulated across the stream as the stripper extracts them.
     AtomicReference<List<Integer>> reported = new AtomicReference<>(List.of());
+    // The leading clean prose, bounded to DECLINE_PREFIX_CAP — just enough to decide whether the answer is
+    // the decline sentinel, without buffering the whole answer (US2 / FR-007).
+    AtomicReference<String> cleanPrefix = new AtomicReference<>("");
 
     Source<GroundedSseEvent, ?> data =
         tokens
@@ -131,11 +140,13 @@ public class StreamingCitedDocsEndpoint {
                 (carry, chunk) -> {
                   var r = CitationMarkers.step(carry, chunk);
                   reported.updateAndGet(acc -> concat(acc, r.numbers()));
+                  accumulatePrefix(cleanPrefix, r.emit());
                   return Pair.create(r.carry(), r.emit());
                 },
                 carry -> {
                   var f = CitationMarkers.finish(carry);
                   reported.updateAndGet(acc -> concat(acc, f.numbers()));
+                  accumulatePrefix(cleanPrefix, f.emit());
                   return Optional.of(f.emit());
                 })
             .filter(text -> !text.isEmpty())
@@ -153,7 +164,7 @@ public class StreamingCitedDocsEndpoint {
                         GroundedCitedPrep.citationsEvent(
                             prepared.sources(),
                             reported.get(),
-                            false, // declined flag is computed in US2 (T013); the floor is unaffected
+                            isDecline(cleanPrefix.get()), // a decline cites nothing (FR-007)
                             prepared.retrievedLabels())));
 
     Source<GroundedSseEvent, ?> events =
@@ -180,6 +191,21 @@ public class StreamingCitedDocsEndpoint {
   /** A one-shot answer, not a resumable stream, so there is no meaningful id (cap-20); a constant empty
    * id satisfies the 3-arg {@code serverSentEvents} signature without advertising reconnection. */
   private static final Function<GroundedSseEvent, String> SSE_EVENT_ID = event -> "";
+
+  /** Grow the retained clean prefix with newly-emitted clean text, but never past {@link
+   * #DECLINE_PREFIX_CAP} — the decline decision needs only the start of the prose, not the whole answer. */
+  private static void accumulatePrefix(AtomicReference<String> prefix, String more) {
+    if (more.isEmpty()) {
+      return;
+    }
+    prefix.updateAndGet(p -> p.length() >= DECLINE_PREFIX_CAP ? p : p + more);
+  }
+
+  /** True when the (stripped) answer is the decline sentinel — normalized trimmed, case-insensitive,
+   * mirroring cap-8/21's {@code DocsEndpoint.isDecline}. A decline must cite nothing (FR-007). */
+  private static boolean isDecline(String answer) {
+    return answer.trim().toLowerCase().startsWith(DocsAgent.DontKnow().toLowerCase());
+  }
 
   /** Append two number lists into a new immutable list (the AtomicReference holds an immutable value). */
   private static List<Integer> concat(List<Integer> acc, List<Integer> more) {
