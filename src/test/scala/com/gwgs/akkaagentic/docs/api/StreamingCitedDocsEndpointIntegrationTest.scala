@@ -1,16 +1,20 @@
 package com.gwgs.akkaagentic.docs.api
 
+import java.util.Optional
 import java.util.concurrent.TimeUnit
 
 import scala.jdk.CollectionConverters.*
 
 import akka.http.javadsl.Http
 import akka.http.javadsl.model.{ContentTypes, HttpRequest, MediaTypes, StatusCodes}
+import akka.japi.Pair
+import akka.japi.pf.PFBuilder
 import akka.javasdk.testkit.{TestKit, TestKitSupport, TestModelProvider}
-import akka.stream.javadsl.Sink
+import akka.stream.javadsl.{Sink, Source}
 import akka.util.ByteString
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.gwgs.akkaagentic.docs.application.StreamingCitedDocsAgent
+import com.gwgs.akkaagentic.docs.domain.CitationMarkers
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.{BeforeEach, Test}
 
@@ -40,6 +44,11 @@ class StreamingCitedDocsEndpointIntegrationTest extends TestKitSupport:
   override protected def testKitSettings(): TestKit.Settings =
     TestKit.Settings.DEFAULT
       .withAdditionalConfig("akka.javasdk.agent.googleai-gemini.api-key = n/a")
+      // A short first-token timeout so the pre-first-token failure test (a hanging model — cap-16 proved
+      // failWith on a streamed agent hangs rather than surfacing a failure) fails fast via the endpoint's
+      // initialTimeout guard. Scripted happy/decline responses produce their first token instantly, well
+      // inside this bound, so it does not affect them.
+      .withAdditionalConfig("streaming.first-token-timeout = 3s")
       .withModelProvider(classOf[StreamingCitedDocsAgent], model)
 
   @BeforeEach
@@ -132,6 +141,73 @@ class StreamingCitedDocsEndpointIntegrationTest extends TestKitSupport:
   def anAbsentQuestionIsRejectedTheSameWay(): Unit =
     val response = httpClient.POST("/sse-cited-ask").withRequestBody("{}").invoke()
     assertThat(response.status()).isEqualTo(StatusCodes.BAD_REQUEST)
+
+  /** US3 / T015 — the load-bearing failure mechanics, MEASURED directly on the real operators rather than
+    * assumed. A model failure after N tokens is not materializable with TestModelProvider (cap-16 proved
+    * failWith on a streamed agent hangs, not fails), so this probe runs the endpoint's exact pipeline shape
+    * — the real [[CitationMarkers]] stripper, `concatLazy` to a lazy citations source, `.recover` to a
+    * terminal element — over an upstream that emits a chunk holding a partial marker (`"hello [1"`) and
+    * then fails. It answers two questions the endpoint's correctness rests on:
+    *   1. does `statefulMap`'s completion hook flush the held carry (`"[1"`) on a FAILURE, leaking a frame
+    *      after the point of failure? (plan risk — it must not)
+    *   2. does `concatLazy` subscribe the citations source when the data source FAILED? (research R5 — it
+    *      must not, so a failed stream emits no citations frame) */
+  @Test
+  def aFailureAfterAPartialMarkerFlushesNoCarryAndEmitsNoCitations(): Unit =
+    val data = Source
+      .single("hello [1")
+      .concat(Source.failed[String](new RuntimeException("boom")))
+      .statefulMap[CitationMarkers.State, String](
+        () => CitationMarkers.empty,
+        (carry, chunk) => { val r = CitationMarkers.step(carry, chunk); Pair.create(r.carry, r.emit) },
+        carry => { val f = CitationMarkers.finish(carry); Optional.of(f.emit) }
+      )
+      .filter((s: String) => !s.isEmpty)
+      .map((s: String) => "D:" + s)
+
+    val citations = Source.lazySource(() => Source.single("CITATIONS"))
+
+    val out = data
+      .concatLazy(citations)
+      .recover(new PFBuilder[Throwable, String]().matchAny(_ => "ERR").build())
+      .runWith(Sink.seq[String], testKit.getMaterializer())
+      .toCompletableFuture
+      .get(10, TimeUnit.SECONDS)
+      .asScala
+      .toList
+
+    // MEASURED: the two properties T015 rests on hold decisively — no leaked "[1" carry (statefulMap does
+    // NOT flush its completion hook on a failure) and no CITATIONS (concatLazy does NOT subscribe its
+    // second source when the first failed), and the stream ends with the terminal error element.
+    //
+    // NOTE (honest limitation): a synthetic `Source.single(...).concat(Source.failed)` fails essentially
+    // synchronously with no network flush, so the already-processed clean prefix ("D:hello ") is dropped
+    // in-memory rather than delivered — the observed output here is just ["ERR"]. Over real SSE the earlier
+    // data frames are network-flushed before the later failure, which the HTTP-level tests exercise; this
+    // probe is only reliable for the no-leak / no-citations / terminal-error invariants below.
+    assertThat(out.filter(_.startsWith("D:[")).asJava).isEmpty() // no carry/partial-marker flush on failure
+    assertThat(out.asJava).doesNotContain("CITATIONS") // concatLazy skips citations on a failed data source
+    assertThat(out.last).isEqualTo("ERR") // the failure becomes the terminal element via .recover
+
+  /** US3 / FR-009 / FR-010 — a failure before the first token ends the stream with a terminal
+    * `event: error` carrying a client-safe reason and NO `citations` frame. Materialized offline by a
+    * hanging model caught by the endpoint's `initialTimeout` (see the short timeout in testKitSettings). */
+  @Test
+  def aPreFirstTokenFailureEndsWithAnErrorFrameAndNoCitations(): Unit =
+    model.reset()
+    model.whenMessage(_ => true).failWith(new RuntimeException("simulated model failure"))
+
+    val frames = parseFrames(bodyOf(sseRequest("anything at all")))
+
+    // Terminal error frame; no citations frame ever follows a failure (FR-009).
+    assertThat(frames.last.event).isEqualTo("error")
+    assertThat(frames.map(_.event).asJava).doesNotContain("citations")
+
+    // The reason is client-safe: no exception message, no class name (FR-010 / cap-20's SseErrorReason).
+    val reason = mapper.readTree(frames.last.data).get("reason").asText()
+    assertThat(reason).doesNotContain("simulated model failure")
+    assertThat(reason).doesNotContain("Exception")
+    assertThat(reason).isNotEmpty()
 
   // --- helpers -------------------------------------------------------------------------------------
 

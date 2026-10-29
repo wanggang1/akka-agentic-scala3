@@ -191,3 +191,25 @@ the model and can only be measured live (same split as cap-21, `akka-testing-slo
 streamed source (cap-20 recorded this as possibly live-only — specs/022 risks). If it cannot, the happy
 and fail-after-N paths are proven offline and the pre-first-token failure is noted as live-verified,
 consistent with cap-20's resolution.
+
+**RESOLVED (measured at T015/T016, implementation).**
+- *A model failure is not directly materializable offline on a streamed agent.* Confirmed cap-16's probe:
+  `whenMessage(...).failWith` on a streamed agent **hangs** (no failure surfaces) rather than failing the
+  token stream. So neither "fail-after-N-tokens" nor a mid-stream model error can be scripted with
+  `TestModelProvider`.
+- *But the framing IS proven offline, via the endpoint's `initialTimeout` guard.* A hanging model with a
+  short `streaming.first-token-timeout` (3s in the test) raises a `TimeoutException` **into** the stream →
+  `.recover` → a terminal `event: error` with the client-safe reason, and **no** `citations` frame. This
+  exercises the real failure path end-to-end over HTTP (FR-009/FR-010). The failure *kind* is a timeout
+  rather than a model error, but the pipeline behaviour asserted (terminal error, no citations, no leaked
+  internals) is identical.
+- *The two load-bearing operator properties were measured directly* on the real operators (a probe running
+  `CitationMarkers` → `concatLazy` → `.recover` over an upstream that holds a partial-marker carry then
+  fails): (1) `statefulMap`'s completion hook does **NOT** flush the held carry on a **failure** — no
+  partial-marker leak, so the plan's "move the tail flush" contingency is **not needed**; (2) `concatLazy`
+  does **NOT** subscribe the citations source when the data source failed — no citations frame. A caveat
+  recorded honestly: a synthetic `single.concat(failed)` fails synchronously with no network flush, so the
+  already-processed clean prefix is dropped in-memory in that probe; over real SSE the earlier `data` frames
+  are network-flushed before a later failure (the HTTP-level happy/decline tests exercise that delivery),
+  and whether a real `qwen3:8b` mid-answer failure delivers its partial answer-then-error is the one thing
+  left to the live run (T017).
