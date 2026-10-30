@@ -253,15 +253,14 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 > verified by mechanism, not by watching it happen.
 >
 >
-> **⏭️ Next:** **A4 is done (capability 19, above) — every SDK component family has now been built in
-> Scala.** The build-ordering risk resolved favorably on the first clean run. What remains are only the
-> four forks: **B2** SSE framing, **B3** delegation observability (one route measured and ruled out, and
-> **blocked** — needs a newer SDK than the free-tier 3.6.3), **B4** usage-accurate citations, **B5**
-> streaming with a grounded answer. None opens a new component family; they are design/observability
-> refinements on surfaces that already exist.
+> **⏭️ Next:** **Every SDK component family has now been built in Scala — A4/gRPC was the last (capability
+> 19).** The build-ordering risk resolved favorably on the first clean run. Of the forks, **B2** (SSE
+> framing, cap-20), **B4** (usage-accurate citations, cap-21) and **B5** (streaming grounded answer,
+> cap-22) have since been built and merged; only **B3** delegation observability remains — measured, one
+> route ruled out, and **blocked** on a newer SDK than the free-tier 3.6.3. No fork opens a new component
+> family; they are design/observability refinements on surfaces that already exist.
 >
-> Capabilities 1–18 are **✅ done and merged**; capability 19 is **built & green, PR pending**. 5–19 were
-> exploratory follow-ups beyond the original four.
+> Capabilities 1–22 are **✅ done and merged**. 5–22 were exploratory follow-ups beyond the original four.
 >
 > **📄 Retrospective:** [`FINDINGS.md`](FINDINGS.md) consolidates the single `dynamicCall` finding that
 > explains every Scala-vs-Java outcome, plus the practical rubric. Caps 5–11 extend the through-line: the
@@ -427,7 +426,7 @@ candidates that still extend the map rather than decorate it.
 | **A1** | **Timed Action** — ✅ **built as capability 15 (PR #31); the bet is resolved** (both sides of the wall, split by operation — see row 15) | Scheduling: `TimerScheduler.createSingleTimer(name, delay, deferred)`, plus the rescheduling-on-failure hazard AGENTS.md warns about. A natural fit is a delayed follow-up on cap-5's approval gate, or expiring a stale case. | **The sharpest bet left, and genuinely unpredictable.** The `deferred` argument is built from the component client — if it is a `DeferredCall` produced from a **method reference**, the wall bites a family we have never tested; if it is id-keyed like `TaskClient`, it is Scala-clean. Nothing in the project so far predicts which. New descriptor key `timed-action`. |
 | **A2** | **Consumer** — ✅ **built as capability 16 (PR #33); the bet is resolved** (Scala-clean end to end; the hazard is the unbounded, blocking redelivery — see row 16) | The largest remaining hole: reacting to entity events or a topic, and publishing to one. It is also where cap-13's "there is **no** `Consume.FromAgent`" finding came from — this is that family, approached from the side that *does* exist. Natural fit: consume cap-6's `TodoEntity` events, or finally give cap-7's delegation **ground-truth** observability. | Component likely **Scala-clean** (`@Consume` is annotation-keyed, like `@McpEndpoint`). The open question is the **handler's event type**: a Scala sealed trait with `@TypeName` has never crossed the internal mapper (§3). New descriptor key `consumer`. |
 | **A3** | ✅ **built & merged as capability 18 (PR #41); the bet is resolved** (see row 18) | Cap-6 has a *key-value* entity, in Java. An event-sourced one means a sealed event hierarchy, `applyEvent`, and snapshots — the persistence model [`docs/akka-persistence-models.md`](docs/akka-persistence-models.md) describes but the repo had never written. | **Resolved by measurement.** Both walls held *and* a new one appeared: a Scala 3 `enum` can't be deserialized and a Scala 3 `sealed trait` fails the SDK's **sealed-interface startup validation** (not just the mapper — a second gate), so events are **Java-authored**; the entity and `Wallet` state are Scala (state round-trips, no sealed gate); the caller is Java. New descriptor key `event-sourced-entity`; `@TypeName`/`snapshot-every` are service-global. |
-| **A4** | ✅ **built as capability 19 (PR pending); the bet is resolved** (see row 19) | A `.proto` in `src/main/proto` and a Scala class implementing the protoc-generated **Java** interface, with `toApi` converters. | **Resolved by measurement: build ordering did not bite.** The parent's codegen profile is auto-activated by `src/main/proto` and runs at `generate-sources`, before this project's `process-resources` scalac — so a Scala class implements the generated Java interface from a clean build, no `pom.xml` change (§13 R3 held). Honest shape: Scala endpoint over Java-generated stubs; fronting an agent keeps it off the method-ref wall. |
+| **A4** | ✅ **merged as capability 19 (PR #43); the bet is resolved** (see row 19) | A `.proto` in `src/main/proto` and a Scala class implementing the protoc-generated **Java** interface, with `toApi` converters. | **Resolved by measurement: build ordering did not bite.** The parent's codegen profile is auto-activated by `src/main/proto` and runs at `generate-sources`, before this project's `process-resources` scalac — so a Scala class implements the generated Java interface from a clean build, no `pom.xml` change (§13 R3 held). Honest shape: Scala endpoint over Java-generated stubs; fronting an agent keeps it off the method-ref wall. |
 
 ### B. Forks recorded along the way
 
