@@ -742,3 +742,58 @@ model, one question set — the *mechanism* is confirmed, not a universal claim.
 nothing" design is what kept the baseline under-report visible enough to diagnose. See specs/023 research R6
 addendum.
 
+## Capability 22 — streaming grounded citations: no structured channel, so the marker *is* the signal
+
+Fork **B5**, the third capability (after cap-20, cap-21) that is neither a new component family nor a bug
+fix. It adds a third RAG surface `POST /sse-cited-ask` beside cap-8's `/ask` and cap-21's `/cited-ask` (both
+untouched): it streams cap-8/21's grounded answer as Server-Sent Events (cap-20's framing) and then emits
+**one** terminal `event: citations` frame citing honestly — the sources the model reports using, intersected
+with what was retrieved (cap-21's floor), with the retrieved list alongside.
+
+**The finding that shaped the whole design: a streamed turn has no structured-output channel.**
+`streamEffects()` offers `systemMessage`/`userMessage`/`memory` but **no `responseConformsTo`** — so cap-21's
+typed `{answer, usedSources}` field, the thing its whole follow-up was built around, simply does not exist on
+a stream. The only signal for which sources the model used is the inline `[n]` marker it writes into the
+prose. So B5 **reverses** cap-21's follow-up: where cap-21 told the model to keep markers *out* of the prose
+(it had a typed field), B5 tells it to *emit* them — they are the signal — and strips them server-side before
+the caller reads the prose. In both, the caller never sees a raw marker; only the signal's source differs.
+
+**The stripper is a pure, immutable domain value, and its one hard case is the chunk boundary.**
+`CitationMarkers` (framework-free, no `var`, tail-recursive) runs inside the stream's `statefulMap`, carrying
+a partial `[1`-at-end-of-chunk across to the next chunk so a marker split as `"…restart [1"` + `"2] …"`
+reassembles to number `12` with no `[1` leaking into the delivered prose. Proven offline by splitting a
+3-marker answer at **every** position and asserting the chunked output equals a single-pass regex oracle. It
+exposes a Java-shaped boundary (opaque `State`, `numbers: java.util.List[Integer]`) because the forced-Java
+endpoint drives it — the stripping logic stays idiomatic Scala.
+
+**The measured correction: `concat` is eager, `concatLazy` is not.** The citations frame needs the *whole*
+turn's markers but the prose must not be buffered, so the numbers accumulate into an `AtomicReference` as
+they are stripped and a `lazySource` reads it after the data stream completes:
+`data.concatLazy(lazySource(citationsFrame)).recover(errorFrame)`. The design first used plain `concat`, and
+the happy-path test caught it immediately — **`concat` eagerly materialises its second source at stream
+start**, so the lazy factory read the reference while it was still empty (correct prose, *empty*
+`usedSources`). `concatLazy` defers materialisation until the data source completes, and never subscribes it
+if the data source **fails** — so a failed stream carries no citations frame, and `.recover` turns the
+failure into a terminal `event: error` (cap-20's move, reused; without it the SDK's SSE helper silently
+empties a failing stream). Measured directly on the operators: `statefulMap`'s completion hook does **not**
+flush its carry on a failure, so no partial marker leaks past the point of failure.
+
+**Interop-wise it is cap-20's shape — two forced-Java files, nothing more.** `StreamingCitedDocsEndpoint`
+(the `tokenStream(StreamingCitedDocsAgent::stream)` method-ref wall) and `GroundedSseEvent` (the SSE wire
+envelope, §3 internal-mapper boundary). The streaming agent, the stripper, and the retrieval/floor façade
+(`GroundedCitedPrep`, which keeps every opaque-newtype conversion on the Scala side so the Java endpoint
+never touches a Scala `List` or newtype) are all Scala — the wall claims only `api`, asserted by a new
+`docs`-tree `JavaQuarantineTest`. No new descriptor key; two ordinary lines (agent + endpoint).
+
+**The headline is a measurement: parity, not degradation.** Live on Ollama `qwen3:8b`, running the cap-21
+question set over `/sse-cited-ask` and cap-21's `/cited-ask` back-to-back, the streamed `usedSources` was
+**identical** to the non-streamed `citedSources` on every question — `survive a restart` → `[durability-tasks]`
+(stable over 4 runs), `coordinator picks specialist` → `[cap-7-activity-coordinator]`, `why Java not Scala` →
+`[interop-method-ref-wall, interop-two-mapper]`, the decline → `[]` — and identical to cap-21's own
+index-contract results. Zero marker leakage across 8 streamed calls; the honesty floor held every time. The
+point lands against cap-21's finding: cap-21 showed the model reliably *identifies* its source (it emits
+`[n]`) but inconsistently *mirrors* it into a typed field; a stream has no typed field, so B5 reads the `[n]`
+directly and recovers the *same* signal — the streaming surface reaches parity with the structured path
+rather than reintroducing cap-21's baseline under-reporting. One 8B model on a fixed question set: this
+confirms the *mechanism*, not a universal claim. See specs/024 research R1/R5/R10 and README §24.
+
