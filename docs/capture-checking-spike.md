@@ -119,5 +119,9 @@ project's value and its hazards actually live.
 ## Exit status
 
 Met: one file type-checks the pure transform and the impure one is rejected (recorded + reproducible),
-plus this boundary write-up. Branch is a throwaway; see the final commit for whether it is kept,
-merged, or dropped.
+plus this boundary write-up.
+
+**Disposition: kept permanently as the spike's home on branch `spike/capture-checking-37-probe`; not
+merged.** `main` stays on Scala 3.3.8 LTS (the 3.7.3 bump and the demo code live only here) and surfaces
+this spike through its ROADMAP "Evaluated, not pursued" entry, which carries the verdict and findings and
+points back to this branch. This write-up is the single canonical copy — it is not duplicated onto `main`.
