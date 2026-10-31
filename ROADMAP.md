@@ -476,9 +476,21 @@ Relevant docs already in-repo: `akka-context/sdk/timed-actions.html.md`,
   the SDK** — there is no agent-generated Scala source to check, the SDK's reflective/Java-interop core is
   exactly what the feature's "safe subset" disables, and we're on Scala 3.3.8 LTS (the article's form needs
   3.7+ nightly). For the actual goal (agent safety on this SDK), **Guardrails** above is the pragmatic
-  lever. A narrow **pure-`domain`-layer capture-checking spike** is possible as a *Scala-3 feature*
-  demonstration only (explicitly not agent safety). Full evaluation + spike scope:
-  [`docs/capture-checking-evaluation.md`](docs/capture-checking-evaluation.md).
+  lever. Full evaluation: [`docs/capture-checking-evaluation.md`](docs/capture-checking-evaluation.md).
+
+  A narrow **pure-`domain`-layer capture-checking spike** was then **built** as a *Scala-3 feature*
+  demonstration only (explicitly not agent safety). It lives permanently on branch
+  **`spike/capture-checking-37-probe`** (not merged — `main` stays on Scala 3.3.8 LTS); the full
+  write-up and runnable code are there, in `docs/capture-checking-spike.md`. Outcome:
+  - **Build-compat probe PASS** — `scala-maven-plugin` 4.9.2 drives a Scala **3.7.3** compiler on the
+    mixed Java/Scala build with **akka-javasdk pinned at 3.6.3**; `mvn clean verify` green (252 IT),
+    one-line pom change. Confirms Scala 3.7 and the free-tier SDK 3.6.3 are independent axes (no paid plan).
+  - **Demo works** — a retrieved `Passage` is `Classified` so only a pure `Passage -> Label` transform may
+    observe it; an impure closure capturing a `Sink` capability is rejected (`->{sink}` not `<:` `->`).
+  - **Tracking dies at the SDK edge** — `effects()`/`ComponentClient`/Jackson are Java + reflective;
+    capture checking is enforcing only *within* the pure domain layer. Two tooling findings: capture
+    checking tracks capability *values*, not `def`-returned ones; and `typeChecks` / `<:<` are both
+    capture-blind (so the negative is recorded-and-reproducible, not a green assertion).
 
 ## Also merged along the way
 
