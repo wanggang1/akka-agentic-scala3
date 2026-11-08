@@ -4,8 +4,6 @@
 .settings/
 
 # Intellij
-.idea
-!.idea/
 .idea/*
 !.idea/runConfigurations/Run_locally.xml
 *.iml

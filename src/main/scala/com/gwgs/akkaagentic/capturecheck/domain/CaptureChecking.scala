@@ -68,3 +68,11 @@ final class Classified[T](private val value: T):
   /** Declassify to a derived value with a PURE function. The result (e.g. a `Label`) is what
     * leaves the boundary — never the raw passage, and never via a captured capability. */
   def use[U](f: T -> U): U = f(value)
+
+object Classified:
+  val label: Passage -> Label = p => Label(p.id.length, p.id) // pure function, compiles
+  val sourceId = Classified(Passage("src-7", "...")).transform(label).use(_.sourceId)  // "src-7"
+
+/** Impure (Sink is a Capability) can't be used to return a pure function */
+// object NegProbe:
+//   def leak(sink: Sink): Passage -> Label = p => { sink.emit(p.text); Label(0, p.id) }
