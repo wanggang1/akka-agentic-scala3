@@ -492,6 +492,14 @@ Relevant docs already in-repo: `akka-context/sdk/timed-actions.html.md`,
     checking tracks capability *values*, not `def`-returned ones; and `typeChecks` / `<:<` are both
     capture-blind (so the negative is recorded-and-reproducible, not a green assertion).
 
+  **Branch status — divergent by design, not reconciled.** The branch forks from `main` at their
+  shared ancestor `515d4bf` and is deliberately **not rebased and not merged**: it carries the Scala
+  **3.7.3** bump that `main` refuses (`main` stays on 3.3.8 LTS), so `main` has since moved on
+  (e.g. this pointer) while the branch holds its frozen config. It will stay divergent — rebasing a
+  frozen reference onto `main` only buys force-push churn for no gain, and merging would drag 3.7.3
+  onto `main`. To read or run it: `git checkout spike/capture-checking-37-probe`; the branch is not a
+  base for new work and expects no further commits.
+
 ## Also merged along the way
 
 Small additions made outside the four-capability path, useful as reference:
