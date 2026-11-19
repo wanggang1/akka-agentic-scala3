@@ -13,6 +13,9 @@ are compiled alongside the SDK via the `scala-maven-plugin`. See
 
 ## Project layout
 
+> To go the other way — from a `specs/<NNN-feature>/` directory to the capability, interop note (§)
+> and source files that implement it — see [`docs/spec-source-map.md`](docs/spec-source-map.md).
+
 ```text
 # Capability 1 — Scala (single agent: structured output + tool)
 src/main/scala/com/gwgs/akkaagentic/domain/         # GreetingRequest (+ validation), TimeOfDay
