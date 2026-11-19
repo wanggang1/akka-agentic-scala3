@@ -12,8 +12,11 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 > ([`specs/024-streaming-grounded-citations`](specs/024-streaming-grounded-citations/)). A third RAG surface
 > `POST /sse-cited-ask`: it streams cap-8/21's grounded answer as Server-Sent Events (cap-20's framing) and
 > then emits **one** terminal `event: citations` frame citing honestly (used ⊆ retrieved, cap-21's floor).
-> Caps 8/14/20/21 untouched. With B5 merged, of the recorded forks only **B3** (delegation observability,
-> **blocked** on a newer SDK than free-tier 3.6.3) remains. A natural place to wind down.
+> Caps 8/14/20/21 untouched. With B5 merged, of the recorded forks only **B3** (delegation observability)
+> remains — the **designated next TODO**, and **no longer blocked**. (The earlier "free-tier 3.6.3 ceiling"
+> was corrected 2026-11-19: `akka-javasdk` is on plain **Maven Central** through 3.15.19 — no token, no paid
+> plan — so 3.7.0+ is freely downloadable; B3 needs only an SDK bump, not an entitlement.) A natural place to
+> wind down.
 >
 > **Interop verdict — no new wall; the streamed surface has NO structured channel, so the citation signal goes
 > back to the inline `[n]` marker, stripped from the prose and floored server-side.** `streamEffects()` has no
@@ -257,8 +260,9 @@ full design detail for any feature lives in its `specs/<id>/` folder.
 > 19).** The build-ordering risk resolved favorably on the first clean run. Of the forks, **B2** (SSE
 > framing, cap-20), **B4** (usage-accurate citations, cap-21) and **B5** (streaming grounded answer,
 > cap-22) have since been built and merged; only **B3** delegation observability remains — measured, one
-> route ruled out, and **blocked** on a newer SDK than the free-tier 3.6.3. No fork opens a new component
-> family; they are design/observability refinements on surfaces that already exist.
+> route ruled out, and **no longer blocked**: the SDK is freely on **Maven Central** through 3.15.19 (the old
+> "free-tier 3.6.3 ceiling" was wrong, corrected 2026-11-19), so it needs only an SDK bump. No fork opens a
+> new component family; they are design/observability refinements on surfaces that already exist.
 >
 > Capabilities 1–22 are **✅ done and merged**. 5–22 were exploratory follow-ups beyond the original four.
 >
@@ -437,7 +441,7 @@ first fixes something that is actually wrong today.
 |---|---|---|---|
 | **B1** | **Session compaction** — ✅ **built as capability 17 (PR #37); the motivation was corrected by its own probe** (see row 17) — summarise old turns instead of letting the oldest be discarded | cap-6 (README §8, live caveat) | `readLast(N)` orphans tool-call pairs and breaks tool-using sessions, so cap-6 keeps **full history**. ⚠️ **Motivation corrected by capability 17's Phase 0 probe (specs/019 S-1/S-2):** history is NOT unbounded — the SDK bounds it at **510 KiB** by default — and that bound is **turn-aligned and safe**, so no orphan risk is latent. What remains is real but narrower: 510 KiB is ~100k+ tokens re-sent per turn, and FIFO eviction discards the oldest turns leaving nothing behind. Compaction shrinks history **while keeping what it meant**. |
 | **B2** | **SSE framing for the streaming surface** — ✅ **built & merged as capability 20 (PR #44); the interop bet is resolved** (see row 20) | cap-14 (research, contract, `docs/streaming-vs-request-response.md`) | Was deliberately deferred: it makes a pre-token failure self-describing instead of a normally-completed empty `200`, at the cost of a richer wire format for every client. **Built as a NEW parallel surface** (`/sse-chat`), cap-14 left untouched, so the cost falls only on clients that opt in. The sharp finding was unforeseen: the SDK's SSE helper itself silently empties a failing stream, so the fix is to convert failure→element upstream. |
-| **B3** | **Delegation observability via runtime notifications** — ⚠️ **one route measured and ruled out** (cap-16): a Scala consumer *can* read the runtime-owned `TaskEntity`, but a live cap-7 run created **no tasks** for its request-based specialists, so task events cannot say which ran | cap-7 (D6) | `consultedSpecialists` is **model self-reported** and small models under-report it. Ground truth needs the runtime's notification stream — which pairs naturally with **A2**, and is the reason to consider them together. |
+| **B3** | **Delegation observability via runtime notifications** — ⚠️ **one route measured and ruled out** (cap-16): a Scala consumer *can* read the runtime-owned `TaskEntity`, but a live cap-7 run created **no tasks** for its request-based specialists, so task events cannot say which ran. **No longer blocked (2026-11-19): the SDK is freely on Maven Central through 3.15.19 — needs only an SDK bump, not a paid tier.** | cap-7 (D6) | `consultedSpecialists` is **model self-reported** and small models under-report it. Ground truth needs the runtime's notification stream — which pairs naturally with **A2**, and is the reason to consider them together. |
 | **B4** | **Usage-accurate citations** — ✅ **built & merged as capability 21 (PR #46); the tension resolved by measurement** (see row 21) | cap-8 (README, "Future work") | Cap-8 cites what was **retrieved**, not what was **used**. Fixing it means asking the model which sources it used — reintroducing exactly the self-report unreliability cap-8 was built to avoid. A genuine tension, not a free upgrade. **Resolved by measurement:** the unreliability turned out to be **under-reporting, not hallucination** — the honesty floor (`reported ∩ retrieved`) prevented every fabricated citation (0 in 6 live runs), while qwen3:8b returned empty `usedSources` on 3 of 5 grounded answers. B4 trades cap-8's over-citation for under-citation; FR-007 ("cite nothing") keeps the under-report visible rather than masking it behind the full retrieved set. **Follow-up (2026-10-17, merged PR #48): the under-reporting was fixed by a contract change** — report the source **number** `[n]` the model already emits instead of the `(label)` it kept dropping (`RetrievedSources` + opaque newtypes, structural floor). Live re-measure (18 runs, same qwen3:8b): both baseline under-reporters → 6/6 + 3/3 stable, 0 prose leakage. A contract problem, not model capacity. |
 | **B5** | **Streaming + grounded answer** — ✅ **merged as capability 22 (PR #50); the "citations can't honestly follow streamed text" worry is resolved by measurement** (see row 22) | cap-14 (spec, Assumptions) | Forked out of cap-14 on purpose: a tool call *inside* a stream is undocumented on this SDK, and citations cannot honestly follow text already sent. **Resolved:** the honest citation is a single terminal `event: citations` frame emitted *after* the prose, computed from the whole turn's inline `[n]` markers (the only signal a stream has — no structured channel, research R1) stripped server-side and floored against what was retrieved. Measured live on `qwen3:8b`, the streamed self-report reached **parity** with cap-21's non-streamed `/cited-ask` (identical `usedSources` on every question). No new wall; the `concat`→`concatLazy` eager-materialisation trap was the one surprise. |
 
@@ -459,8 +463,9 @@ first fixes something that is actually wrong today.
   narrow "Scala endpoint over Java-generated stubs." Of the forks, **B2 (cap-20), B4 (cap-21) and B5 (cap-22)
   are now built**, all design problems rather than new families — and each resolved by measurement (B2: the SSE
   helper swallows failures; B4: self-report is under-reporting, fixed by a contract change; B5: a stream has no
-  structured channel, so the inline `[n]` marker reaches parity with the non-streamed path). **Only B3 remains**,
-  blocked on a newer SDK than the free-tier 3.6.3.
+  structured channel, so the inline `[n]` marker reaches parity with the non-streamed path). **Only B3 remains**
+  (the designated next TODO), **no longer blocked** — the SDK is freely on Maven Central through 3.15.19, so it
+  needs only an SDK bump (the old "free-tier 3.6.3 ceiling" was corrected 2026-11-19).
 
 Relevant docs already in-repo: `akka-context/sdk/timed-actions.html.md`,
 `akka-context/sdk/consuming-producing.html.md`, `akka-context/sdk/event-sourced-entities.html.md`,
