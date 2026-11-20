@@ -43,6 +43,10 @@ import java.time.Duration;
  *
  * <h2>Execution &amp; persistence model (durable FSM, not a blocking call)</h2>
  *
+ * <p>A Workflow is a <b>durable finite-state machine backed by Akka persistence</b> — the same
+ * persistent-component substrate as the entities. The runtime (not this code) records its progress to
+ * the workflow's journal, so the FSM survives restarts. Concretely:
+ *
  * <ul>
  *   <li><b>Async from the caller.</b> {@code start(...)} returns {@code Done} immediately
  *       ({@code transitionTo(toneStep).thenReply(...)}); the steps run afterward. Callers poll
