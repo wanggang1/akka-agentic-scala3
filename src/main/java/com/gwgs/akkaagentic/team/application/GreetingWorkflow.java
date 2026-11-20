@@ -22,6 +22,41 @@ import java.time.Duration;
  * <p>Both agents share one session (the workflow id) so context flows between the steps (FR-007).
  * Durability (FR-006): a terminal tone-step failure fails over to a neutral tone and still composes;
  * the composer's own {@code onFailure} covers compose failures.
+ *
+ * <h2>Two state mechanisms (don't conflate them)</h2>
+ *
+ * <ul>
+ *   <li><b>Workflow durable state</b> — the {@link State} record, read with {@code currentState()}
+ *       and replaced with {@code updateState(...)}. This is the FSM data AND the real hand-off
+ *       between steps: {@code toneStep} writes the detected tone into {@code State}, and
+ *       {@code composeStep} reads it back and passes it <em>explicitly</em> in {@link ComposeRequest}.
+ *   <li><b>Agent session memory</b> — the {@code SessionMemoryEntity} addressed by
+ *       {@code .inSession(sessionId())}. Both agents use the SAME id (the workflow id), so with the
+ *       default (limited-window) memory provider each call reads the session's prior turns and writes
+ *       its own user+assistant turn back. That is how conversational context "flows" (FR-007).
+ * </ul>
+ *
+ * The two are independent. The correctness of {@code composeStep} depends on the workflow State
+ * (the explicit {@code ComposeRequest}), NOT on what the composer reads from the shared session — the
+ * shared session is continuity/future-proofing here. Each agent also sets its own system message per
+ * call; only the user/assistant turn history travels through the session, not system messages.
+ *
+ * <h2>Execution &amp; persistence model (durable FSM, not a blocking call)</h2>
+ *
+ * <ul>
+ *   <li><b>Async from the caller.</b> {@code start(...)} returns {@code Done} immediately
+ *       ({@code transitionTo(toneStep).thenReply(...)}); the steps run afterward. Callers poll
+ *       {@code getResult()}, which errors until {@code status == COMPLETED}.
+ *   <li><b>Blocking inside a step.</b> {@code .invoke(...)} is synchronous — a step body blocks on its
+ *       agent call, then returns a {@code StepEffect}.
+ *   <li><b>Durable, persisted transitions.</b> This is an Akka <em>persistent</em> component: like a
+ *       Key Value Entity it records state CHANGES (not developer-defined events) to the workflow's
+ *       journal. Each step persists the new State + next transition before the next step runs, so a
+ *       restart/rebalance/rolling-update resumes at the current non-completed step rather than from
+ *       the start — a durable state machine, not an in-memory one.
+ *   <li><b>Serialized per instance.</b> A workflow instance is single-writer; its steps never run
+ *       concurrently. Timeouts and {@link #settings()} recovery act at these step boundaries.
+ * </ul>
  */
 @Component(id = "greeting-workflow")
 public class GreetingWorkflow extends Workflow<GreetingWorkflow.State> {
