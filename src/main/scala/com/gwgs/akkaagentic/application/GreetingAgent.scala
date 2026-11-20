@@ -63,6 +63,29 @@ object GreetingAgent:
       |  "timeOfDay": "<exactly the value the time-of-day tool returned: morning, afternoon, evening, or night>"
       |}""".stripMargin
 
+/** A greeting agent with one function tool.
+  *
+  * ==Tool discovery & scope==
+  * A `@FunctionTool` method declared on the agent class itself is the DEFAULT tool
+  * scope: when a command handler runs, the SDK reflectively scans this class for
+  * `@FunctionTool`-annotated methods and offers each to the model for that turn. No
+  * registration call is needed for these — `.tools(obj)` / `.mcpTools(...)` are only for
+  * tools that live in a SEPARATE object or a remote MCP server. The method must be
+  * PUBLIC (a Scala `private def` name-mangles so the reflective scanner may miss it).
+  *
+  * ==How the model picks a tool (schema, not prose)==
+  * The SDK turns each tool into a SCHEMA it sends to the model alongside the messages:
+  *   - name        = the method name (`currentTimeOfDay`), unless `@FunctionTool(name=...)`
+  *                   overrides it;
+  *   - description = the `@FunctionTool(description=...)` text;
+  *   - parameters  = each parameter, described by its `@Description`.
+  * The model does NOT match on the English phrase "the time-of-day tool" in the system
+  * message. That phrase is guidance; the model maps it SEMANTICALLY to the tool whose
+  * DESCRIPTION is about the time of day, then emits a tool call using the schema NAME
+  * (`currentTimeOfDay`). The SDK matches that name back to this method and invokes it.
+  * Consequence: keep the prompt wording aligned with the tool's DESCRIPTION, and let the
+  * description (not the method name) carry the meaning the model has to recognize.
+  */
 @Component(id = "greeting-agent")
 class GreetingAgent extends Agent:
   import GreetingAgent.*
@@ -103,10 +126,17 @@ class GreetingAgent extends Agent:
 
   /** Reports the current time of day for an optional IANA timezone.
     *
+    * This is the agent's single function tool. It is discovered automatically because it
+    * is a public `@FunctionTool` method on the agent class — see the class doc above for
+    * how tool discovery, default scope, and name/description resolution work.
+    *
     * Public (not private) on purpose: `@FunctionTool` methods are discovered by
     * reflection, and a Scala `private def` name-mangles in a way the scanner may not
-    * find (research R3). Delegates to the pure [[TimeOfDay]] domain function; the
-    * model-supplied timezone `String` is converted `null/"" -> None` at this boundary.
+    * find (research R3). The model sees this tool as name `currentTimeOfDay` (the method
+    * name) plus the `description` below — that description is what makes the system
+    * message's "the time-of-day tool" resolve here. Delegates to the pure [[TimeOfDay]]
+    * domain function; the model-supplied timezone `String` is converted `null/"" -> None`
+    * at this boundary.
     */
   @FunctionTool(
     description =
