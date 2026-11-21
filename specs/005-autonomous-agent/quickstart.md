@@ -5,6 +5,11 @@ the untouched Scala cap-1 and Java cap-2. It is a single **Autonomous Agent** th
 through a model-driven loop (optionally consulting a knowledge-base tool) and completes a **typed
 task**, exposed async (start → poll).
 
+> **New to `AutonomousAgent` / `Task`?** Read [`concepts.md`](concepts.md) first — it explains what each
+> primitive is, how they relate (definition vs. durable instance, the decision loop), and *when* an
+> AutonomousAgent is the right choice (with the honest caveat that this capability is a minimal demo,
+> not a representative use case). This file is the how-to-run; that one is the what-and-why.
+
 ## Build & test (offline, no API key)
 
 ```shell
