@@ -226,6 +226,43 @@ reads the typed result off the `COMPLETED` ones, and folds all three into one `C
 `outcomeOf` helper collapses the SDK's seven-value `TaskStatus` into the domain's five-way `TaskOutcome`,
 and the pure `ApprovalCase` state machine decides what that means — unit-testable with no runtime.
 
+## Why this stays in Scala — the wall is client-based, not ownership-based
+
+Capability 5 is authored entirely in Scala, tests included. It is tempting to explain that as *"the
+tasks are runtime-owned, so there is no method-reference wall in our code."* **That reasoning is wrong**
+(and the project corrected exactly this confusion once already — see the cap-13 note in memory).
+
+The **method-reference wall** is a property of **which client API you use to reach a component**, not of
+who authored the component. Runtime-ownership does not exempt you: capability 6's `SessionMemoryEntity`
+is *also* runtime-owned, yet querying it **forces Java**, because it is reached through the
+event-sourced-entity client, which is `.method(E::cmd)`-only with no `dynamicCall`. Capability 11's View
+is the same story (the View client is method-ref-only → its endpoint is Java).
+
+| Client | Shape | Wall? |
+|---|---|---|
+| Entity client (`forEventSourcedEntity` / `forKeyValueEntity`) | `.method(E::cmd)` — method reference | **Yes** → forces Java (cap-6) |
+| View client (`forView`) | `.method(V::query)` | **Yes** → forces Java (cap-11) |
+| Workflow client | `.method(W::step)` | **Yes** → forces Java (cap-2/4) |
+| **Task client** (`forTask(id)`) | `create` / `get(def)` / `assign` / `complete` / `fail` — ids + definitions | **No** → Scala-clean |
+| **AutonomousAgent client** (`forAutonomousAgent(Class, id)`) | `assignTasks(ids)` — Class + id strings | **No** → Scala-clean |
+| Agent client | `.method(A::m)`, **but** `dynamicCall(id)` is an escape hatch | No, for request/response (cap-13) |
+
+So the accurate statement for capability 5 is: **every call it makes goes through two id/definition-keyed
+clients — `TaskClient` and the autonomous-agent client — and neither takes a method reference.** `create`,
+`assign`, `complete`, `fail`, `get`, `assignTasks` are all strings and objects.
+
+What runtime-ownership *does* buy is one step removed: because the runtime owns the task entity, **we were
+never forced to touch a method-ref client at all.** Had we modeled the case as our own
+`ApprovalCaseEntity` and queried it via `forEventSourcedEntity(...).method(...)`, the wall would have
+returned and pushed this capability into Java — which is exactly what the endpoint comment means by
+"an Entity would have reintroduced the wall" (`research.md` R2). The win is that the SDK exposes the
+task's durable state through a *purpose-built, id-based client*, so we consume runtime-owned persistence
+**without ever picking up a method-ref client.**
+
+> One line: **not "runtime-owned ⇒ no wall," but "reached through an id-keyed client (`TaskClient`) ⇒ no
+> wall" — and the reason we never had to touch a method-ref client is that the runtime, not us, owns the
+> entity.**
+
 ## The one sentence
 
 The `AutonomousAgent` is "used" at exactly two moments, both the **runtime's** doing and neither a call
