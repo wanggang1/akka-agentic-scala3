@@ -3,6 +3,13 @@
 A durable human-approval gate on the Akka Autonomous Agent **external-input** pattern — draft → human
 gate → publish — authored entirely in Scala (tests included). Start → poll → decide → poll.
 
+> **New to `AutonomousAgent` / `Task`, or unsure how the three tasks actually move?** Read
+> [`concepts.md`](concepts.md) first — it explains what each primitive is, how the agent and the task
+> relate (the agent produces a result, the task is where it lands), and walks the full lifecycle of all
+> three tasks (draft → gate → publish): what triggers each initial state, when an AutonomousAgent is
+> involved, and when the *runtime* changes a task's state. This file is the how-to-run; that one is the
+> what-and-why.
+
 ## Build & test (offline, no key)
 
 ```shell
